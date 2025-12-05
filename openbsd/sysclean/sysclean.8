@@ -1,0 +1,142 @@
+.\"	$OpenBSD$
+.\"
+.\" Copyright (c) 2016-2023 Sebastien Marie <semarie@kapouay.eu.org>
+.\"
+.\" Permission to use, copy, modify, and distribute this software for any
+.\" purpose with or without fee is hereby granted, provided that the above
+.\" copyright notice and this permission notice appear in all copies.
+.\"
+.\" THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+.\" WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+.\" MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+.\" ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+.\" WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+.\" ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+.\" OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+.\"
+.Dd March 10, 2024
+.Dt SYSCLEAN 8
+.Os
+.Sh NAME
+.Nm sysclean
+.Nd list obsolete elements between OpenBSD upgrades
+.Sh SYNOPSIS
+.Nm
+.Op Fl a | p
+.Op Fl i
+.Sh DESCRIPTION
+.Nm
+is a
+.Xr perl 1
+script designed to help remove obsolete files, users and groups, between
+.Ox
+upgrades.
+.Pp
+.Nm
+compares a reference installation against the currently installed elements,
+taking files from both the base system and packages into account.
+.Pp
+.Nm
+is a read-only tool.
+It does not remove anything on the system.
+.Pp
+By default,
+.Nm
+lists obsolete filenames, users and groups on the system.
+It excludes any used dynamic libraries.
+It will report base libraries with versions newer than what's expected.
+.Pp
+The options are as follows:
+.Bl -tag -width Ds
+.It Fl a
+All files mode.
+.Nm
+will not exclude filenames used by installed packages from output.
+.It Fl i
+With ignored.
+.Nm
+will include filenames that are ignored by default, using
+.Pa /etc/sysclean.ignore .
+.It Fl p
+Package mode.
+.Nm
+will output package names that are using obsolete files.
+.El
+.Sh ENVIRONMENT
+.Bl -tag -width "PKG_DBDIR"
+.It Ev PKG_DBDIR
+The standard package database directory,
+.Pa /var/db/pkg ,
+can be overridden by specifying an alternative directory in the
+.Ev PKG_DBDIR
+environment variable.
+.El
+.Sh FILES
+.Bl -tag -width "/etc/sysclean.ignore"
+.It Pa /etc/sysclean.ignore
+Files to ignore, one per line, with absolute pathnames.
+.Pp
+A line starting with
+.Sq @user
+or
+.Sq @group
+will be interpreted as user or group to ignore.
+.Pp
+Shell globbing is supported in pathnames; see
+.Xr File::Glob 3p .
+If the pattern matches a directory,
+.Nm
+will not inspect it or any files contained within.
+For compatibility with the
+.Xr changelist 5
+file format, the character
+.Sq +
+is skipped at the beginning of a line.
+.Pp
+.Pa /etc/changelist
+is implictly included.
+.El
+.Sh EXAMPLES
+Obtain a list of outdated files (without libraries used by packages):
+.Bd -literal -offset indent
+# sysclean
+/usr/lib/libc.so.83.0
+.Ed
+.Pp
+Obtain a list of old libraries and the package using them:
+.Bd -literal -offset indent
+# sysclean -p
+/usr/lib/libc.so.84.1   git-2.7.0
+/usr/lib/libc.so.84.1   gmake-4.1p0
+.Ed
+.Pp
+Obtain a list of all outdated files (including used libraries):
+.Bd -literal -offset indent
+# sysclean -a
+/usr/lib/libc.so.83.0
+/usr/lib/libc.so.84.1
+.Ed
+.Pp
+Obtain a list of users and groups that can safely be removed
+(from ports or base):
+.Bd -literal -offset indent
+# sysclean
+@user _mpd:560:_mpd::/var/spool/mpd:/sbin/nologin
+@group _mpd:560
+.Ed
+.Sh SEE ALSO
+.Xr pkg_info 1 ,
+.Xr sysmerge 8
+.Sh HISTORY
+The first version of
+.Nm
+was written as
+.Xr ksh 1
+script in 2015, and rewritten using
+.Xr perl 1
+in 2016.
+.Sh AUTHORS
+.An -nosplit
+.Nm
+was written by
+.An Sebastien Marie Aq Mt semarie@kapouay.eu.org .
