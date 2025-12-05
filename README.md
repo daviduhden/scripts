@@ -96,9 +96,9 @@ Scripts require root privileges for most operations. They will attempt to use `s
 
 ### Platform-specific requirements:
 
-- **Debian scripts**: `curl`, `gpg`, system package manager (`apt-get` or `apt`)
-- **OpenBSD scripts**: Standard OpenBSD tools, `doas`
-- **Secureblue scripts**: `run0`, `rpm-ostree`, optionally `brew`, `flatpak`, `fwupdmgr`
+- **Debian scripts**: `curl`, `gpg`, `git`, system package manager (`apt-get` or `apt`).
+- **OpenBSD scripts**: Standard OpenBSD tools, `sysclean`, `curl` and `git`.
+- **Secureblue scripts**: `run0`, `rpm-ostree`, `brew`, `flatpak`, `fwupdmgr`.
 
 ## Usage
 
