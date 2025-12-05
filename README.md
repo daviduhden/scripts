@@ -18,8 +18,8 @@ Scripts designed for Debian-based distributions (Debian, Ubuntu, Devuan, and der
 
 | Script | Description |
 |--------|-------------|
-| `add-i2pd-repo.bash` | Adds the Purple I2P APT repository, installs i2pd, and enables the service. Supports systemd, SysV-init, OpenRC, runit, and GNU Shepherd. |
-| `add-tor-repo.bash` | Adds the official Tor Project APT repository, installs Tor, and enables the service. Supports multiple init systems. |
+| `add-i2pd-repo.bash` | Adds the official [Purple I2P APT repository](https://repo.i2pd.xyz), installs i2pd, and enables the service. Supports multiple init systems. |
+| `add-tor-repo.bash` | Adds the official [Tor Project APT repository](https://deb.torproject.org), installs Tor, and enables the service. Supports multiple init systems. |
 | `clean-logs.bash` | Removes old compressed log files (`*.gz`) and backup files (`*.old`). Supports dry-run mode. |
 | `sync-website.bash` | Synchronizes a website repository from Git, sets proper permissions, and restarts Apache. |
 | `update-fastfetch.bash` | Automatically updates [fastfetch](https://github.com/fastfetch-cli/fastfetch) to the latest version from GitHub releases. |
@@ -32,8 +32,8 @@ Scripts designed specifically for OpenBSD systems using ksh.
 
 | Script | Description |
 |--------|-------------|
-| `apply-sysclean.ksh` | Automates cleanup based on sysclean(8) output. Removes obsolete files, users, and groups. Installs sysclean if missing. Supports dry-run mode. |
-| `clean-logs.ksh` | Simplified sysclean-based cleanup. Runs sysclean and removes obsolete files, users, and groups. Supports dry-run mode. |
+| `apply-sysclean.ksh` | Automates cleanup based on [sysclean(8)](https://codeberg.org/semarie/sysclean) output. Removes obsolete files, users, and groups. Installs sysclean if missing. Supports dry-run mode. |
+| `clean-logs.ksh` | Removes old compressed log files (`*.gz`) and backup files (`*.old`). Supports dry-run mode. |
 | `sudo-wrapper.ksh` | Compatibility shim that redirects `sudo` calls to `doas`. Can also be symlinked as `visudo` or `sudoedit`. |
 | `sync-website.ksh` | Synchronizes a website repository from Git, sets permissions, and restarts httpd. |
 
@@ -107,7 +107,7 @@ Scripts require root privileges for most operations. They will attempt to use `s
 3. Run with appropriate privileges
 
 Example:
-```bash
+```sh
 # Update Go to the latest version on Debian
 sudo ./debian/update-golang.bash
 
@@ -117,7 +117,7 @@ doas ./openbsd/apply-sysclean.ksh --dry-run
 # Full system maintenance on Secureblue
 ./secureblue/sysupgrade.bash
 
-# Install GnuPG with PQC support
+# Install GnuPG
 ./posix/setup-gpg.sh
 ```
 
