@@ -32,11 +32,12 @@ Scripts designed specifically for OpenBSD systems using ksh.
 
 | Script | Description |
 |--------|-------------|
-| `apply-sysclean.ksh` | Automates cleanup based on sysclean(8) output. Removes obsolete files, users, and groups. Supports dry-run mode. |
-| `clean-logs.ksh` | Removes obsolete files based on sysclean output. |
+| `apply-sysclean.ksh` | Automates cleanup based on sysclean(8) output. Removes obsolete files, users, and groups. Installs sysclean if missing. Supports dry-run mode. |
+| `clean-logs.ksh` | Simplified sysclean-based cleanup. Runs sysclean and removes obsolete files, users, and groups. Supports dry-run mode. |
 | `sudo-wrapper.ksh` | Compatibility shim that redirects `sudo` calls to `doas`. Can also be symlinked as `visudo` or `sudoedit`. |
 | `sync-website.ksh` | Synchronizes a website repository from Git, sets permissions, and restarts httpd. |
-| `sysclean/` | Contains the sysclean utility source for OpenBSD. |
+
+**Note**: The `sysclean/` directory contains the sysclean utility source code and Makefile for manual installation on OpenBSD systems.
 
 ## POSIX Scripts
 
@@ -46,7 +47,8 @@ Portable scripts that work across POSIX-compliant systems.
 |--------|-------------|
 | `global-vi-mode.sh` | Enables vi-style line editing for bash, zsh, and ksh. Intended for `/etc/profile.d/`. |
 | `setup-gpg.sh` | Comprehensive GnuPG installation and key generation script. Supports PQC (post-quantum cryptography) when available. Works on Linux (various distros), macOS, and BSD. |
-| `gpg-conf/` | GnuPG configuration files to be installed in `~/.gnupg/`. |
+
+**Note**: The `gpg-conf/` directory contains GnuPG configuration files (`gpg.conf`, `gpg-agent.conf`, `dirmngr.conf`) that are automatically installed into `~/.gnupg/` when running `setup-gpg.sh`.
 
 ### GnuPG Setup Script Features
 
