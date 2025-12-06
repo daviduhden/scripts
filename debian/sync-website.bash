@@ -17,7 +17,29 @@ set -uo pipefail
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
-# Configuration
+#######################################
+# GitHub CLI user / config resolution #
+#######################################
+
+# GH_USER: system user that owns the GitHub CLI configuration (~/.config/gh/hosts.yml)
+# You can override this via environment (e.g. GH_USER="david")
+GH_USER="${GH_USER:-admin}"
+
+# Try to resolve the home directory of GH_USER in a portable way.
+if command -v getent >/dev/null 2>&1; then
+    GH_HOME="$(getent passwd "$GH_USER" | awk -F: '{print $6}')"
+else
+    # Fallback: assume a standard /home/$USER layout
+    GH_HOME="/home/$GH_USER"
+fi
+
+# GitHub CLI config directory (per-user)
+GH_CONFIG_DIR="${GH_HOME}/.config/gh"
+
+###############################
+# Main synchronization config #
+###############################
+
 REPO_DIR="/var/www/daviduhden-website"
 BRANCH="main"
 SERVICE_NAME="apache2"
@@ -31,7 +53,7 @@ log() {
 }
 
 echo "----------------------------------------"
-log "Sync started"
+log "Sync started (using GitHub CLI config for user: $GH_USER, home: $GH_HOME)"
 
 # Ensure repository directory exists
 if [ ! -d "$REPO_DIR" ]; then
@@ -65,6 +87,12 @@ sync_with_gh_cli() {
         return 1
     fi
 
+    # Ensure GitHub CLI config exists for GH_USER
+    if [ ! -f "${GH_CONFIG_DIR}/hosts.yml" ]; then
+        log "Warning: ${GH_CONFIG_DIR}/hosts.yml not found; GitHub CLI is not authenticated for user '$GH_USER'. Skipping gh sync."
+        return 1
+    fi
+
     cd "$REPO_DIR" || {
         log "Error: cannot cd to $REPO_DIR."
         return 1
@@ -86,8 +114,10 @@ sync_with_gh_cli() {
         fi
     fi
 
-    log "Syncing repository using GitHub CLI (gh repo sync)..."
-    if ! gh repo sync --branch "$BRANCH" >/dev/null 2>&1; then
+    log "Syncing repository using GitHub CLI (gh repo sync) with config of user '$GH_USER'..."
+
+    # Force gh to use GH_USER's config directory
+    if ! GH_CONFIG_DIR="$GH_CONFIG_DIR" gh repo sync --branch "$BRANCH" >/dev/null 2>&1; then
         log "Error: gh repo sync failed."
         return 1
     fi
