@@ -12,8 +12,6 @@ set -euo pipefail  # exit on error, unset variable, or failing pipeline
 # - Create a basic /etc/monerod.conf if it does not exist
 # - Enable and start/restart monerod service
 #
-# Supported Linux architectures (official Monero CLI binaries):
-#
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
 #
@@ -56,7 +54,7 @@ require_cmd install
 # Get the latest release tag from GitHub
 get_latest_release() {
     local json
-    if ! json="$(curl -fsSL "$API_URL" 2>/dev/null)"; then
+    if ! json="$(curl -fLsS --retry 5 "$API_URL" 2>/dev/null)"; then
         return 1
     fi
     awk -F'"' '/"tag_name":/ {print $4; exit}' <<<"$json"
@@ -127,7 +125,7 @@ cleanup() {
 trap cleanup EXIT
 
 echo "Downloading Monero CLI ${LATEST_TAG}..."
-if ! curl -fL -o "${TMPDIR}/${TARBALL}" "${DOWNLOAD_URL}"; then
+if ! curl -fLsS --retry 5 "${DOWNLOAD_URL}" -o "${TMPDIR}/${TARBALL}"; then
     echo "Error: download failed from ${DOWNLOAD_URL}"
     exit 1
 fi
@@ -200,7 +198,7 @@ echo "Updating systemd unit: /etc/systemd/system/monerod.service..."
 install -d /etc/systemd/system
 
 UNIT_TMP="${TMPDIR}/monerod.service"
-if ! curl -fsSL "${SYSTEMD_UNIT_URL}" -o "${UNIT_TMP}"; then
+if ! curl -fLsS --retry 5 "${SYSTEMD_UNIT_URL}" -o "${UNIT_TMP}"; then
     echo "Error: failed to download systemd unit from ${SYSTEMD_UNIT_URL}"
     exit 1
 fi
@@ -229,4 +227,4 @@ if command -v monerod >/dev/null 2>&1; then
     monerod --version | head -n1 || true
 fi
 
-echo "Monero CLI update completed successfully."
+echo "Monero CLI install/update completed successfully."

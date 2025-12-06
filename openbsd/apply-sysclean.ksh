@@ -49,17 +49,17 @@ log() {
 echo "----------------------------------------"
 log "apply-sysclean started"
 
-###############################################################################
-# -1. Ensure we are running as root
-###############################################################################
+#####################################
+# -1. Ensure we are running as root #
+#####################################
 if [ "$(id -u)" -ne 0 ]; then
     log "Error: this script must be run as root (superuser)."
     exit 1
 fi
 
-###############################################################################
-# 0. Check that sysclean is installed (and install if needed)
-###############################################################################
+###############################################################
+# 0. Check that sysclean is installed (and install if needed) #
+###############################################################
 if ! command -v sysclean >/dev/null 2>&1; then
     if [ "$DRY_RUN" -eq 1 ]; then
         log "Error: sysclean is not installed and DRY RUN is enabled; not installing automatically."
@@ -113,9 +113,9 @@ if [ ! -s "$SYSCLEAN_OUT" ]; then
     log "Warning: sysclean output file is empty: $SYSCLEAN_OUT"
 fi
 
-###############################################################################
-# 1. Remove obsolete files/directories
-###############################################################################
+########################################
+# 1. Remove obsolete files/directories #
+########################################
 log "Parsing obsolete paths from: $SYSCLEAN_OUT"
 
 # We only consider lines whose first field begins with '/'
@@ -138,9 +138,9 @@ while IFS= read -r path; do
     fi
 done
 
-###############################################################################
-# 2. Remove obsolete users
-###############################################################################
+############################
+# 2. Remove obsolete users #
+############################
 log "Parsing obsolete users from: $SYSCLEAN_OUT"
 
 awk '$1=="@user" {
@@ -165,9 +165,9 @@ while IFS= read -r user; do
     fi
 done
 
-###############################################################################
-# 3. Remove obsolete groups
-###############################################################################
+#############################
+# 3. Remove obsolete groups #
+#############################
 log "Parsing obsolete groups from: $SYSCLEAN_OUT"
 
 awk '$1=="@group" {

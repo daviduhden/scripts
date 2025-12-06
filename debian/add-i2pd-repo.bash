@@ -103,9 +103,9 @@ DIST="${ID:-}"
 
 get_release() {
     case "$ID" in
-        ###################################################################
-        # Devuan support
-        ###################################################################
+        ##################
+        # Devuan support #
+        ##################
         devuan)
             # Devuan uses its own codenames; map them to Debian codenames.
             #   Devuan 5 "daedalus"   -> Debian 12 "bookworm"
@@ -132,9 +132,9 @@ get_release() {
             # Use Debian repo layout for Devuan (packages are Debian-compatible).
             DIST="debian"
             ;;
-        ###################################################################
-        # Native Debian / Raspbian
-        ###################################################################
+        ############################
+        # Native Debian / Raspbian #
+        ############################
         debian|raspbian)
             if [[ -n "${DEBIAN_CODENAME:-}" ]]; then
                 RELEASE="$DEBIAN_CODENAME"
@@ -146,9 +146,9 @@ get_release() {
             # DIST remains actual ID: debian or raspbian
             DIST="$ID"
             ;;
-        ###################################################################
-        # Native Ubuntu
-        ###################################################################
+        #################
+        # Native Ubuntu #
+        #################
         ubuntu)
             if [[ -n "${UBUNTU_CODENAME:-}" ]]; then
                 RELEASE="$UBUNTU_CODENAME"
@@ -159,9 +159,9 @@ get_release() {
             fi
             DIST="ubuntu"
             ;;
-        ###################################################################
-        # Other Debian-/Ubuntu-like systems (derivatives)
-        ###################################################################
+        ###################################################
+        # Other Debian-/Ubuntu-like systems (derivatives) #
+        ###################################################
         *)
             if [[ -z "${ID_LIKE:-}" ]]; then
                 error "your system is not supported. Only Debian-like and Ubuntu-like systems are supported."

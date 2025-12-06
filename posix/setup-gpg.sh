@@ -1,4 +1,6 @@
 #!/bin/sh
+
+#
 # POSIX shell script to install GnuPG, generate strong keys, upload them
 # to keys.openpgp.org, andinstall config files from ./gpg-conf.
 #
@@ -63,12 +65,11 @@
 # and license details.
 #
 
-
 set -eu
 
-###############################################################################
-# Helpers
-###############################################################################
+###########
+# Helpers #
+###########
 
 error() {
     echo "Error: $*" 1>&2
@@ -193,7 +194,10 @@ SUDO=""
 need_root_pkgmgr=1  # by default package managers need root
 
 if [ "$(id -u)" -ne 0 ]; then
-    if command -v sudo >/dev/null 2>&1; then
+    # Prefer run0 if available (systemd-based systems)
+    if command -v run0 >/dev/null 2>&1; then
+        SUDO="run0"
+    elif command -v sudo >/dev/null 2>&1; then
         SUDO="sudo"
     elif command -v doas >/dev/null 2>&1; then
         SUDO="doas"
@@ -201,16 +205,18 @@ if [ "$(id -u)" -ne 0 ]; then
         SUDO=""
     fi
 else
+    # Already root, no wrapper needed
     SUDO=""
 fi
 
-# Helper to run package manager commands with or without sudo
+# Helper to run package manager commands with or without sudo/run0/doas
 run_pkg() {
     if [ "$need_root_pkgmgr" -eq 1 ]; then
         if [ -n "$SUDO" ]; then
+            # run0/sudo/doas <pkgmgr> ...
             $SUDO "$@"
         else
-            error "Need root/sudo/doas to run: $*"
+            error "Need root/sudo/run0/doas to run: $*"
         fi
     else
         "$@"
@@ -219,9 +225,9 @@ run_pkg() {
 
 os_uname=$(uname -s)
 
-###############################################################################
-# GPG config installation from ./gpg-conf
-###############################################################################
+###########################################
+# GPG config installation from ./gpg-conf #
+###########################################
 
 install_gpg_conf_from_dir() {
     conf_src="./gpg-conf"
@@ -265,9 +271,9 @@ install_gpg_conf_from_dir() {
     echo "GnuPG configuration from $conf_src installed into $GNUPG_DIR."
 }
 
-###############################################################################
-# Debian/Ubuntu/Devuan: Official GnuPG repo (stable / devel)
-###############################################################################
+##############################################################
+# Debian/Ubuntu/Devuan: Official GnuPG repo (stable / devel) #
+##############################################################
 
 install_gnupg_debian_like() {
     if [ ! -r /etc/os-release ]; then
@@ -422,7 +428,7 @@ install_gnupg_debian_like() {
     key_url="https://repos.gnupg.org/deb/gnupg/${suite}/gnupg-signing-key.gpg"
 
     echo "Fetching GnuPG signing key from ${key_url} ..."
-    curl -fsSL "$key_url" | ${SUDO:+$SUDO }gpg --dearmor --yes -o "$keyring"
+    curl -fLsS --retry 5 "$key_url" | ${SUDO:+$SUDO }gpg --dearmor --yes -o "$keyring"
     ${SUDO:+$SUDO }chmod a+r "$keyring"
 
     echo "Writing /etc/apt/sources.list.d/gnupg.sources ..."
@@ -445,9 +451,9 @@ EOF
     fi
 }
 
-###############################################################################
-# rpm-ostree (Secureblue or Fedora Atomic) via Homebrew
-###############################################################################
+#########################################################
+# rpm-ostree (Secureblue or Fedora Atomic) via Homebrew #
+#########################################################
 
 install_gnupg_rpm_ostree_brew() {
     distro_label=$1  # e.g. "Secureblue" or "Fedora Atomic"
@@ -466,9 +472,9 @@ install_gnupg_rpm_ostree_brew() {
     fi
 }
 
-###############################################################################
-# Linux: General installation helper
-###############################################################################
+######################################
+# Linux: General installation helper #
+######################################
 
 install_gnupg_linux() {
     # Termux (Android) support
@@ -592,9 +598,9 @@ install_gnupg_linux() {
     fi
 }
 
-###############################################################################
-# macOS: Install Homebrew (if needed) and then GNUPG via brew
-###############################################################################
+###############################################################
+# macOS: Install Homebrew (if needed) and then GNUPG via brew #
+###############################################################
 
 install_gnupg_macos() {
     echo "Detected macOS."
@@ -611,7 +617,7 @@ install_gnupg_macos() {
         if ! command -v curl >/dev/null 2>&1; then
             error "curl is required to install Homebrew."
         fi
-        /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+        /bin/bash -c "$(curl -fLsS --retry 5 https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 
         if [ -x /opt/homebrew/bin/brew ]; then
             BREW_CMD="/opt/homebrew/bin/brew"
@@ -630,9 +636,9 @@ install_gnupg_macos() {
     "$BREW_CMD" install gnupg
 }
 
-###############################################################################
-# BSD: FreeBSD / GhostBSD / DragonFlyBSD (pkg), OpenBSD and NetBSD
-###############################################################################
+####################################################################
+# BSD: FreeBSD / GhostBSD / DragonFlyBSD (pkg), OpenBSD and NetBSD #
+####################################################################
 
 install_gnupg_freebsd_family() {
     echo "Detected FreeBSD-family system (FreeBSD / GhostBSD / DragonFlyBSD)."
@@ -663,9 +669,9 @@ install_gnupg_netbsd() {
     fi
 }
 
-###############################################################################
-# Install gnupg depending on OS (unless keygen-only)
-###############################################################################
+######################################################
+# Install gnupg depending on OS (unless keygen-only) #
+######################################################
 
 if [ "$keygen_only" -eq 0 ]; then
     case "$os_uname" in
@@ -710,9 +716,9 @@ if [ "$install_only" -eq 1 ]; then
     exit 0
 fi
 
-###############################################################################
-# Generate strong keys: Kyber (PQC) if available, plus RSA 4096 (optional)
-###############################################################################
+#################################################################
+# Generate strong keys: Kyber (PQC) if available, plus RSA 4096 #
+#################################################################
 
 echo
 echo "Checking for Kyber (post-quantum) support in this GnuPG build..."
@@ -905,9 +911,9 @@ else
     error "Key generation did not produce any usable keys."
 fi
 
-###############################################################################
-# Upload generated keys to keys.openpgp.org
-###############################################################################
+#############################################
+# Upload generated keys to keys.openpgp.org #
+#############################################
 
 upload_keys_to_keyserver() {
     keyserver="hkps://keys.openpgp.org"
@@ -964,9 +970,9 @@ if [ "$generate_rsa" -eq 1 ] && [ -n "$rsa_key_id" ]; then
 fi
 echo
 
-###############################################################################
-# Instructions for encrypting plaintext from the terminal
-###############################################################################
+###########################################################
+# Instructions for encrypting plaintext from the terminal #
+###########################################################
 
 cat <<EOF
 How to encrypt plaintext to your key from the terminal:
