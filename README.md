@@ -1,6 +1,6 @@
 # Scripts
 
-A set of shell and Perl scripts, along with configuration files, designed for system administration and maintenance across various Unix-like operating systems.
+A set of shell and perl scripts, along with configuration files, designed for system administration and maintenance across various Unix-like operating systems.
 
 ## Structure
 
