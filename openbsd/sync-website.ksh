@@ -17,6 +17,18 @@ set -u
 PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin
 export PATH
 
+# Optional: GitHub token file for non-interactive gh usage
+GH_TOKEN_FILE="/root/.config/gh_token"
+GH_TOKEN=""
+
+if [ -r "$GH_TOKEN_FILE" ]; then
+    # Populate GH_TOKEN from a protected file
+    GH_TOKEN="$(cat "$GH_TOKEN_FILE" 2>/dev/null || echo "")"
+else
+    # Not fatal: gh can still work if already authenticated in hosts.yml
+    GH_TOKEN=""
+fi
+
 # Configuration
 REPO_DIR="/var/www/htdocs/cyberpunk-handbook"
 BRANCH="main"
@@ -24,7 +36,7 @@ SERVICE_NAME="httpd"
 
 # GitHub ZIP URL for fallback (ADJUST THIS)
 # Example: https://github.com/user/repo/archive/refs/heads/main.zip
-ZIP_URL="https://github.com/user/repo/archive/refs/heads/${BRANCH}.zip"
+ZIP_URL="https://github.com/daviduhden/cyberpunk-handbook/archive/refs/heads/${BRANCH}.zip"
 
 log() {
     printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
@@ -87,9 +99,19 @@ sync_with_gh_cli() {
     fi
 
     log "Syncing repository using GitHub CLI (gh repo sync)..."
-    if ! gh repo sync --branch "$BRANCH" >/dev/null 2>&1; then
-        log "Error: gh repo sync failed."
-        return 1
+
+    # Use GH_TOKEN if we have it; otherwise rely on existing gh authentication
+    if [ -n "$GH_TOKEN" ]; then
+        if ! env GH_TOKEN="$GH_TOKEN" gh repo sync --branch "$BRANCH" >/dev/null 2>&1; then
+            log "Error: gh repo sync failed (with GH_TOKEN)."
+            return 1
+        fi
+    else
+        log "Warning: GH_TOKEN is empty; relying on existing gh authentication."
+        if ! gh repo sync --branch "$BRANCH" >/dev/null 2>&1; then
+            log "Error: gh repo sync failed."
+            return 1
+        fi
     fi
 
     # After gh sync, ensure local matches origin/$BRANCH and clean up
@@ -320,11 +342,11 @@ post_update_steps() {
     return 0
 }
 
-#######################################
-# MAIN FLOW
-#######################################
+#############
+# MAIN FLOW #
+#############
 
-# 1) Prefer GitHub CLI if available, then git, then ZIP
+# 1) Prefer GitHub CLI if available
 if ! sync_with_gh_cli; then
     log "GitHub CLI sync not available or failed. Falling back to plain git..."
     if ! sync_with_git; then
