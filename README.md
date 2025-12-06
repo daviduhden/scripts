@@ -1,6 +1,6 @@
 # Scripts
 
-A collection of shell scripts for system administration and maintenance across multiple operating systems: Debian-based Linux distributions, OpenBSD, POSIX-compliant systems, and Secureblue (Fedora Atomic).
+A collection of shell scripts for system administration and maintenance across multiple operating systems.
 
 ## Structure
 
@@ -8,6 +8,6 @@ A collection of shell scripts for system administration and maintenance across m
 .
 ├── debian/        # Scripts for Debian-based distributions
 ├── openbsd/       # Scripts for OpenBSD systems
-├── posix/         # POSIX-compliant scripts (portable)
+├── perl/          # Perl scripts (portable)
 └── secureblue/    # Scripts for Secureblue (Fedora Atomic/rpm-ostree)
 ```
