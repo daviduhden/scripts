@@ -66,9 +66,9 @@ fi
 # Wrapper for curl with optional torsocks
 net_curl() {
     if [[ -n "$TORSOCKS" ]]; then
-        "$TORSOCKS" curl "$@"
+        "$TORSOCKS" curl -fLsS --retry 5 "$@"
     else
-        curl "$@"
+        curl -fLsS --retry 5 "$@"
     fi
 }
 
@@ -265,7 +265,7 @@ echo "Using native APT architecture: ${ARCH_FILTER}"
 
 echo "Importing Tor Project signing key..."
 install -d -m 0755 /usr/share/keyrings
-net_curl -fsSL "https://deb.torproject.org/torproject.org/A3C4F0F979CAA22CDBA8F512EE8CBC9E886DDD89.asc" \
+net_curl "https://deb.torproject.org/torproject.org/A3C4F0F979CAA22CDBA8F512EE8CBC9E886DDD89.asc" \
     | gpg --dearmor -o /usr/share/keyrings/deb.torproject.org-keyring.gpg
 
 echo "Writing APT sources file for Tor..."

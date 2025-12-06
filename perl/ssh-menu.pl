@@ -1,4 +1,4 @@
-#!/usr/bin/perl
+#!/usr/bin/env perl
 
 #
 # Interactive SSH launcher using entries from ~/.ssh/known_hosts:
@@ -51,6 +51,7 @@ my @hosts;
 my @ports;
 my @displays;
 my %seen;
+my $hashed_count = 0;
 
 open my $fh, '<', $known_hosts
   or die "Error: cannot open $known_hosts: $!\n";
@@ -59,47 +60,75 @@ while (my $line = <$fh>) {
     chomp $line;
     next if $line =~ /^\s*$/;        # skip empty
     next if $line =~ /^\s*#/;        # skip comments
-    next if $line =~ /^\s*\|/;       # skip hashed entries
 
-    # Take first field (host spec)
+    if ( $line =~ /^\s*\|/ ) {       # hashed entries
+        $hashed_count++;
+        next;
+    }
+
+    # Take first field (host spec: host1,host2,ip,...)
     my ($field) = split /\s+/, $line, 2;
     next unless defined $field && length $field;
 
-    # Split by comma: host1,host2,ip...
-    my @parts = split /,/, $field;
+    # Split by comma and clean elements
+    my @parts = grep {
+        defined $_ && length $_ && $_ !~ /^\s*#/ && $_ !~ /^\s*\|/
+    } split /,/, $field;
 
-    for my $part (@parts) {
-        next unless length $part;
-        next if $part =~ /^\s*#/;    # just in case
-        next if $part =~ /^\s*\|/;
+    next unless @parts;
 
-        my $host = $part;
-        my $port = '';
+    # Primary host is the first element
+    my $primary = $parts[0];
+    my $host    = $primary;
+    my $port    = '';
 
-        # Match [host]:port
-        if ( $host =~ /^\[(.+)\]:(\d+)$/ ) {
-            $host = $1;
-            $port = $2;
-        }
+    # Match [host]:port
+    if ( $host =~ /^\[(.+)\]:(\d+)$/ ) {
+        $host = $1;
+        $port = $2;
+    }
 
-        my $key = join ':', $host, ($port || 'default');
+    my $key = join ':', $host, ($port || 'default');
 
-        # Skip duplicates
-        next if $seen{$key}++;
+    # Skip duplicates for the same host:port
+    next if $seen{$key}++;
 
-        push @hosts,   $host;
-        push @ports,   $port;
+    push @hosts, $host;
+    push @ports, $port;
+
+    # Build display string (include aliases if present)
+    my $display;
+    if (@parts > 1) {
+        my @aliases   = @parts[1 .. $#parts];
+        my $alias_str = join ', ', @aliases;
         if ($port) {
-            push @displays, "$host (port $port)";
+            $display = "$host (port $port; aliases: $alias_str)";
         } else {
-            push @displays, $host;
+            $display = "$host (aliases: $alias_str)";
+        }
+    } else {
+        if ($port) {
+            $display = "$host (port $port)";
+        } else {
+            $display = $host;
         }
     }
+
+    push @displays, $display;
 }
 close $fh;
 
 if ( !@hosts ) {
-    die "No valid hosts found in $known_hosts.\n";
+    if ( $hashed_count > 0 ) {
+        die
+          "No valid plain hosts found in $known_hosts.\n"
+        . "It looks like your known_hosts file contains only hashed entries.\n"
+        . "This script cannot recover hostnames from hashed lines.\n"
+        . "Consider keeping a separate non-hashed file (e.g. ~/.ssh/known_hosts.menu)\n"
+        . "for use with this menu script.\n";
+    } else {
+        die "No valid hosts found in $known_hosts.\n";
+    }
 }
 
 ##########################################
@@ -130,7 +159,7 @@ while (1) {
 
     if ( $num >= 1 && $num <= scalar(@displays) ) {
         $selected_idx = $num - 1;
-        break;
+        last;
     }
 
     print "Invalid option. Please try again.\n";
