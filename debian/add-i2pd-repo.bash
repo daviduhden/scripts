@@ -67,9 +67,9 @@ fi
 # Wrapper for curl with optional torsocks
 net_curl() {
     if [[ -n "$TORSOCKS" ]]; then
-        "$TORSOCKS" curl "$@"
+        "$TORSOCKS" curl -fLsS --retry 5 "$@"
     else
-        curl "$@"
+        curl -fLsS --retry 5 "$@"
     fi
 }
 
@@ -332,7 +332,7 @@ echo "Using native APT architecture: ${ARCH_FILTER}"
 
 echo "Importing signing key..."
 install -d -m 0755 /usr/share/keyrings
-net_curl -fsSL https://repo.i2pd.xyz/r4sas.gpg | gpg --dearmor -o /usr/share/keyrings/purplei2p.gpg
+net_curl https://repo.i2pd.xyz/r4sas.gpg | gpg --dearmor -o /usr/share/keyrings/purplei2p.gpg
 
 echo "Adding APT repository..."
 cat > /etc/apt/sources.list.d/purplei2p.list <<EOF

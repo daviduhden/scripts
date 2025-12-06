@@ -43,7 +43,7 @@ fi
 get_latest_release() {
     # Read all JSON into a variable to avoid SIGPIPE / curl error 23
     local json
-    if ! json="$(curl -fsSL "$API_URL" 2>/dev/null)"; then
+    if ! json="$(curl -fLsS --retry 5 "$API_URL" 2>/dev/null)"; then
         return 1
     fi
     awk -F'"' '/"tag_name":/ {print $4; exit}' <<<"$json"
@@ -133,7 +133,7 @@ cleanup() {
 trap cleanup EXIT
 
 echo "Downloading fastfetch ${LATEST_VERSION} (${PKG_ARCH})..."
-if ! curl -fL -o "$DEB_FILE" "$DEB_URL"; then
+if ! curl -fLsS --retry 5 "$DEB_URL" -o "$DEB_FILE"; then
     echo "Error: download failed from ${DEB_URL}"
     exit 1
 fi
