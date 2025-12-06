@@ -14,7 +14,7 @@ set -euo pipefail  # exit on error, unset variable, or failing pipeline
 #
 
 # Basic PATH (important when run from cron)
-PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+PATH=/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
 GO_BASE_URL="https://go.dev/dl"
