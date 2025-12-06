@@ -1,6 +1,15 @@
 #!/bin/bash
 set -euo pipefail  # exit on error, unset variable, or failing pipeline
 
+#
+# Log cleanup script
+# - Removes *.gz files under /var/log and *.old files under / (root filesystem only).
+# - Supports a dry-run mode via DRY_RUN=1 or the --dry-run / -n option to only list files.
+#
+# See the LICENSE file at the top of the project tree for copyright
+# and license details.
+#
+
 # PATH for cron / non-interactive shells
 PATH=/bin:/sbin:/usr/bin:/usr/sbin
 export PATH
@@ -25,9 +34,9 @@ log() {
 echo "----------------------------------------"
 log "Log cleanup started"
 
-###############################################################################
-# Delete all .gz files under /var/log
-###############################################################################
+#######################################
+# Delete all .gz files under /var/log #
+#######################################
 if [ "$DRY_RUN" -eq 1 ]; then
     log "DRY RUN: listing *.gz files under /var/log (no deletion will occur):"
     find /var/log -xdev -type f -name '*.gz' -print || true
@@ -37,9 +46,9 @@ else
     find /var/log -xdev -type f -name '*.gz' -print -delete || true
 fi
 
-###############################################################################
-# Delete all .old files in the root filesystem (USE WITH CARE)
-###############################################################################
+################################################################
+# Delete all .old files in the root filesystem (USE WITH CARE) #
+################################################################
 if [ "$DRY_RUN" -eq 1 ]; then
     log "DRY RUN: listing *.old files under / (no deletion will occur):"
     find / -xdev -type f -name '*.old' -print || true

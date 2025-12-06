@@ -9,11 +9,6 @@ set -euo pipefail  # exit on error, unset variable, or failing pipeline
 # - Install into /usr/local/go
 # - Ensure /usr/local/go/bin is in system-wide PATH via /etc/profile
 #
-# Supported Linux architectures (official Go binaries):
-#   386, amd64, arm64, armv6l, loong64,
-#   mips, mipsle, mips64, mips64le,
-#   ppc64, ppc64le, riscv64, s390x
-#
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
 #
@@ -54,7 +49,7 @@ fi
 # Get the latest stable Go version (e.g. go1.25.5) from go.dev
 get_latest_go_version() {
     local ver
-    if ! ver="$(curl -fsSL "$VERSION_URL" 2>/dev/null)"; then
+    if ! ver="$(curl -fLsS --retry 5 "$VERSION_URL" 2>/dev/null)"; then
         return 1
     fi
     # Strip trailing whitespace/newlines
@@ -166,7 +161,7 @@ cleanup() {
 trap cleanup EXIT
 
 echo "Downloading ${TAR_NAME} (GO_ARCH=${GO_ARCH}, uname -m=${ARCH}) from ${TAR_URL}..."
-if ! curl -fL -o "$TAR_FILE" "$TAR_URL"; then
+if ! curl -fLsS --retry 5 "$TAR_URL" -o "$TAR_FILE"; then
     echo "Error: download failed from ${TAR_URL}"
     exit 1
 fi

@@ -42,9 +42,9 @@ if ! command -v run0 >/dev/null 2>&1; then
     exit 1
 fi
 
-#############################################
-# Special handling when called as visudo
-#############################################
+##########################################
+# Special handling when called as visudo #
+##########################################
 if [[ "$prog_name" == "visudo" ]]; then
     #
     # We want to execute the real visudo binary with elevated privileges
@@ -83,9 +83,9 @@ if [[ "$prog_name" == "visudo" ]]; then
     exit 1
 fi
 
-#############################################
-# Special handling when called as sudoedit
-#############################################
+############################################
+# Special handling when called as sudoedit #
+############################################
 if [[ "$prog_name" == "sudoedit" ]]; then
     #
     # Simplified sudoedit emulation:
@@ -128,9 +128,9 @@ if [[ "$prog_name" == "sudoedit" ]]; then
     exit 1
 fi
 
-#############################################
-# Default path: called as sudo
-#############################################
+################################
+# Default path: called as sudo #
+################################
 
 # Export a variable so scripts can detect that sudo is being redirected to run0.
 # This is purely informational and has no effect on run0 itself.
