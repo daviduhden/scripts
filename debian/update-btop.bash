@@ -136,10 +136,10 @@ fetch_source() {
 
 build_and_install() {
     local tag="$1"
-    local tmpdir src_dir
+    local tmpdir="" src_dir
 
     tmpdir=$(mktemp -d /tmp/btop-src-XXXXXX)
-    trap 'rm -rf "$tmpdir"' EXIT
+    trap '[[ -n "${tmpdir:-}" ]] && rm -rf "$tmpdir"' EXIT
 
     src_dir="$(fetch_source "$tag" "$tmpdir")" || error "could not fetch source via gh/git/curl."
     if [[ -z "$src_dir" ]]; then
