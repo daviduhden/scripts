@@ -181,7 +181,7 @@ main() {
   apt_cleanup
   restart_services
   collect_system_info_and_upload
-  log "Apt maintenance run completed successfully."
+  log "Debian maintenance run completed successfully."
 }
 
 main "$@"
