@@ -335,8 +335,8 @@ EOF
 log "Updating APT index (including Tor repository)..."
 "$APT_CMD" update
 
-log "Installing tor, obfs4proxy and deb.torproject.org-keyring..."
-"$APT_CMD" install -y tor obfs4proxy deb.torproject.org-keyring
+log "Installing tor, torsocks, obfs4proxy and deb.torproject.org-keyring..."
+"$APT_CMD" install -y tor torsocks obfs4proxy deb.torproject.org-keyring
 
 log "Enabling and starting tor service..."
 enable_and_start_tor

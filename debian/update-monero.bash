@@ -22,6 +22,8 @@ REPO="monero-project/monero"
 API_URL="https://api.github.com/repos/${REPO}/releases/latest"
 REPO_URL="https://github.com/${REPO}.git"
 DOWNLOAD_BASE="https://downloads.getmonero.org/cli"
+HASHES_URL="https://www.getmonero.org/downloads/hashes.txt"
+BINARYFATE_KEY_URL="https://raw.githubusercontent.com/monero-project/monero/master/utils/gpg_keys/binaryfate.asc"
 SYSTEMD_UNIT_URL="https://raw.githubusercontent.com/monero-project/monero/master/utils/systemd/monerod.service"
 
 INSTALL_DIR="/usr/bin"
@@ -57,6 +59,8 @@ require_cmd tar
 require_cmd awk
 require_cmd systemctl
 require_cmd install
+require_cmd sha256sum
+require_cmd gpg
 
 net_curl() {
     curl -fLsS --retry 5 "$@"
@@ -154,8 +158,9 @@ log "Download URL: ${DOWNLOAD_URL}"
 
 # Temporary working directory
 TMPDIR="$(mktemp -d /tmp/monero-cli-XXXXXX)"
+GPG_HOME="$(mktemp -d /tmp/monero-gpg-XXXXXX)"
 cleanup() {
-    rm -rf "$TMPDIR" 2>/dev/null || true
+    rm -rf "$TMPDIR" "$GPG_HOME" 2>/dev/null || true
 }
 trap cleanup EXIT
 
@@ -163,6 +168,45 @@ log "Downloading Monero CLI ${LATEST_TAG}..."
 if ! net_curl "${DOWNLOAD_URL}" -o "${TMPDIR}/${TARBALL}"; then
     error "download failed from ${DOWNLOAD_URL}"
 fi
+
+log "Fetching reference hashes for verification..."
+HASHES_ASC="${TMPDIR}/hashes.txt"
+HASHES_PLAIN="${TMPDIR}/hashes-plain.txt"
+BINARYFATE_KEY="${TMPDIR}/binaryfate.asc"
+
+if ! net_curl "${HASHES_URL}" -o "${HASHES_ASC}"; then
+    error "failed to download hash list from ${HASHES_URL}"
+fi
+
+log "Importing binaryFate signing key for hash verification..."
+if ! net_curl "${BINARYFATE_KEY_URL}" -o "${BINARYFATE_KEY}"; then
+    error "failed to download binaryFate GPG key"
+fi
+
+if ! gpg --homedir "$GPG_HOME" --batch --import "${BINARYFATE_KEY}" >/dev/null 2>&1; then
+    error "failed to import binaryFate GPG key"
+fi
+
+log "Verifying hashes file signature..."
+if ! gpg --homedir "$GPG_HOME" --batch --verify "${HASHES_ASC}" >/dev/null 2>&1; then
+    error "hash file signature verification failed"
+fi
+
+if ! gpg --homedir "$GPG_HOME" --batch --output "${HASHES_PLAIN}" --decrypt "${HASHES_ASC}" >/dev/null 2>&1; then
+    error "failed to decrypt (strip signature from) hashes file"
+fi
+
+EXPECTED_HASH="$(awk -v fname="${TARBALL}" '$1 ~ /^[0-9a-f]{64}$/ && $2==fname{print $1; exit}' "${HASHES_PLAIN}")"
+if [[ -z "${EXPECTED_HASH}" ]]; then
+    error "could not find expected hash for ${TARBALL} in downloaded hash list"
+fi
+
+ACTUAL_HASH="$(sha256sum "${TMPDIR}/${TARBALL}" | awk '{print $1}')"
+if [[ "${EXPECTED_HASH}" != "${ACTUAL_HASH}" ]]; then
+    error "hash mismatch for ${TARBALL} (expected ${EXPECTED_HASH}, got ${ACTUAL_HASH})"
+fi
+
+log "Hash verified for ${TARBALL}."
 
 log "Extracting tarball..."
 tar -xjf "${TMPDIR}/${TARBALL}" -C "$TMPDIR"
