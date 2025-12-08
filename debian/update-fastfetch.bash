@@ -62,7 +62,7 @@ get_latest_release() {
     if has_cmd gh; then
         tag="$(gh release view --repo "$REPO" --json tagName -q .tagName 2>/dev/null || true)"
         if [[ -n "$tag" ]]; then
-            echo "$tag"
+            printf '%s\n' "$tag"
             return 0
         fi
     fi
@@ -75,7 +75,7 @@ get_latest_release() {
             | sort -Vr \
             | head -n1)"
         if [[ -n "$tag" ]]; then
-            echo "$tag"
+            printf '%s\n' "$tag"
             return 0
         fi
     fi
@@ -86,7 +86,7 @@ get_latest_release() {
     awk -F'"' '/"tag_name":/ {print $4; exit}' <<<"$json"
 }
 
-echo "Checking latest fastfetch release from GitHub..."
+log "Checking latest fastfetch release from GitHub..."
 LATEST_VERSION="$(get_latest_release || true)"
 
 if [[ -z "${LATEST_VERSION}" ]]; then
@@ -96,7 +96,7 @@ fi
 # Strip leading 'v' if present (tags are often like 'v2.55.1')
 LATEST_VERSION_STRIPPED="${LATEST_VERSION#v}"
 
-echo "Latest release tag: ${LATEST_VERSION}"
+log "Latest release tag: ${LATEST_VERSION}"
 
 # Detect currently installed version (if any)
 CURRENT_VERSION=""
@@ -107,13 +107,13 @@ if command -v fastfetch >/dev/null 2>&1; then
 fi
 
 if [[ -n "$CURRENT_VERSION" ]]; then
-    echo "Currently installed fastfetch version: ${CURRENT_VERSION}"
+    log "Currently installed fastfetch version: ${CURRENT_VERSION}"
     if [[ "$CURRENT_VERSION" == "$LATEST_VERSION" || "$CURRENT_VERSION" == "$LATEST_VERSION_STRIPPED" ]]; then
-        echo "Fastfetch is already up to date. Nothing to do."
+        log "Fastfetch is already up to date. Nothing to do."
         exit 0
     fi
 else
-    echo "Fastfetch is not currently installed."
+    log "Fastfetch is not currently installed."
 fi
 
 # Determine architecture
@@ -169,18 +169,18 @@ download_deb() {
     local version="$1" arch="$2" out_dir="$3" out_file="$4" url
 
     if has_cmd gh; then
-        echo "Attempting download via GitHub CLI..."
+        log "Attempting download via GitHub CLI..."
         if gh release download "$version" --repo "$REPO" --pattern "fastfetch-linux-${arch}.deb" --dir "$out_dir" --clobber >/dev/null 2>&1; then
             return 0
         fi
-        echo "gh release download failed; falling back to curl."
+        warn "gh release download failed; falling back to curl."
     fi
 
     url="https://github.com/${REPO}/releases/download/${version}/fastfetch-linux-${arch}.deb"
     net_curl "$url" -o "$out_file"
 }
 
-echo "Downloading fastfetch ${LATEST_VERSION} (${PKG_ARCH})..."
+log "Downloading fastfetch ${LATEST_VERSION} (${PKG_ARCH})..."
 if ! download_deb "$LATEST_VERSION" "$PKG_ARCH" "$TMPDIR" "$DEB_FILE"; then
     error "download failed for fastfetch ${LATEST_VERSION} (${PKG_ARCH})"
 fi
@@ -194,8 +194,8 @@ if [[ ! -f "$DEB_FILE" ]]; then
     fi
 fi
 
-echo "Download complete: ${DEB_FILE}"
-echo "Installing the package..."
+log "Download complete: ${DEB_FILE}"
+log "Installing the package..."
 
 if command -v apt-get >/dev/null 2>&1; then
     apt-get install -y "$DEB_FILE"
@@ -203,4 +203,4 @@ else
     apt install -y "$DEB_FILE"
 fi
 
-echo "Fastfetch installation finished successfully."
+log "Fastfetch installation finished successfully."

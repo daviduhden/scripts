@@ -28,7 +28,7 @@ GH_HOST="${GH_HOST:-github.com}"
 REPO_SLUG="${REPO_SLUG:-}"
 
 if [ -r "$GH_TOKEN_FILE" ]; then
-    GH_TOKEN="$(cat "$GH_TOKEN_FILE" 2>/dev/null || echo "")"
+    GH_TOKEN="$(cat "$GH_TOKEN_FILE" 2>/dev/null || printf '')"
 else
     GH_TOKEN=""
 fi
@@ -46,7 +46,7 @@ log()   { printf '%s [INFO]  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
 warn()  { printf '%s [WARN]  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 error() { printf '%s [ERROR] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 
-echo "----------------------------------------"
+log "----------------------------------------"
 log "Sync started"
 
 # Ensure repository directory exists
@@ -93,7 +93,7 @@ sync_with_gh_cli() {
         return 1
     fi
 
-    CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+    CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || printf '')
     if [ "$CURRENT_BRANCH" != "$BRANCH" ]; then
         log "Switching to branch $BRANCH (current: $CURRENT_BRANCH)"
         if ! git checkout "$BRANCH"; then
@@ -142,8 +142,8 @@ sync_with_gh_cli() {
         return 1
     fi
 
-    LOCAL=$(git rev-parse @ 2>/dev/null || echo "")
-    REMOTE=$(git rev-parse "origin/$BRANCH" 2>/dev/null || echo "")
+    LOCAL=$(git rev-parse @ 2>/dev/null || printf '')
+    REMOTE=$(git rev-parse "origin/$BRANCH" 2>/dev/null || printf '')
 
     if [ -z "$LOCAL" ] || [ -z "$REMOTE" ]; then
         log "Error: could not determine revisions after gh sync."
@@ -185,7 +185,7 @@ sync_with_git() {
         return 1
     fi
 
-    CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+    CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || printf '')
     if [ "$CURRENT_BRANCH" != "$BRANCH" ]; then
         log "Switching to branch $BRANCH (current: $CURRENT_BRANCH)"
         if ! git checkout "$BRANCH"; then
@@ -200,8 +200,8 @@ sync_with_git() {
         return 1
     fi
 
-    LOCAL=$(git rev-parse @ 2>/dev/null || echo "")
-    REMOTE=$(git rev-parse "origin/$BRANCH" 2>/dev/null || echo "")
+    LOCAL=$(git rev-parse @ 2>/dev/null || printf '')
+    REMOTE=$(git rev-parse "origin/$BRANCH" 2>/dev/null || printf '')
 
     if [ -z "$LOCAL" ] || [ -z "$REMOTE" ]; then
         log "Error: cannot get revisions."
@@ -371,4 +371,4 @@ if ! post_update_steps; then
 fi
 
 log "Sync completed"
-echo "----------------------------------------"
+log "----------------------------------------"

@@ -111,7 +111,7 @@ ensure_root() {
 
 get_primary_user() {
   if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
-    echo "$SUDO_USER"
+    printf '%s\n' "$SUDO_USER"
     return 0
   fi
   # First "normal" user (UID >= 1000 && < 60000, and a real shell)
@@ -160,8 +160,8 @@ update_homebrew() {
     return
   fi
 
-  PREFIX_UID="$(stat -c '%u' "$BREW_PREFIX" 2>/dev/null || echo "")"
-  PREFIX_GID="$(stat -c '%g' "$BREW_PREFIX" 2>/dev/null || echo "")"
+  PREFIX_UID="$(stat -c '%u' "$BREW_PREFIX" 2>/dev/null || printf '')"
+  PREFIX_GID="$(stat -c '%g' "$BREW_PREFIX" 2>/dev/null || printf '')"
 
   if [[ -z "$PREFIX_UID" || -z "$PREFIX_GID" ]]; then
     warn "Could not read UID/GID for '$BREW_PREFIX'; running brew as root (not ideal)."
@@ -342,25 +342,25 @@ collect_secureblue_info() {
 
   sysinfo=$(
     {
-      echo
+      printf '\n'
       fpaste --sysinfo --printonly
     } 2>&1 || true
   )
 
   rpm_ostree_status=$(
     {
-      echo -e "=== Rpm-Ostree Status ===\n"
+      printf '=== Rpm-Ostree Status ===\n\n'
       if require_cmd --check rpm-ostree; then
         rpm-ostree status --verbose
       else
-        echo "rpm-ostree not available."
+        printf 'rpm-ostree not available.\n'
       fi
     } 2>&1 || true
   )
 
   flatpaks=$(
     {
-      echo "=== Flatpaks Installed ==="
+      printf '=== Flatpaks Installed ===\n'
       if require_cmd --check flatpak; then
         if [[ -n "${run_user:-}" ]]; then
           # Run flatpak as the primary non-root user
@@ -369,14 +369,14 @@ collect_secureblue_info() {
           flatpak list --columns=application,version,options
         fi
       else
-        echo "flatpak not available."
+        printf 'flatpak not available.\n'
       fi
     } 2>&1 || true
   )
 
   homebrew_packages=$(
     {
-      echo -e "\n=== Homebrew Packages Installed ===\n"
+      printf '\n=== Homebrew Packages Installed ===\n\n'
       if require_cmd --check brew; then
         if [[ -n "${run_user:-}" ]]; then
           # Run brew as the primary non-root user
@@ -385,14 +385,14 @@ collect_secureblue_info() {
           brew list --versions
         fi
       else
-        echo "brew not available."
+        printf 'brew not available.\n'
       fi
     } 2>&1 || true
   )
 
   audit_results=$(
     {
-      echo -e "\n=== Audit Results ===\n"
+      printf '\n=== Audit Results ===\n\n'
       if [[ -n "${run_user:-}" ]]; then
         # Run ujust as the primary non-root user
         $run_user ujust audit-secureblue
@@ -404,7 +404,7 @@ collect_secureblue_info() {
 
   local_overrides=$(
     {
-      echo -e "\n=== Listing Local Overrides ===\n"
+      printf '\n=== Listing Local Overrides ===\n\n'
       if [[ -n "${run_user:-}" ]]; then
         # Run ujust as the primary non-root user
         $run_user ujust check-local-overrides
@@ -416,21 +416,21 @@ collect_secureblue_info() {
 
   recent_events=$(
     {
-      echo -e "\n=== Recent System Events ===\n"
+      printf '\n=== Recent System Events ===\n\n'
       journalctl -b -p err..alert --since "1 hour ago"
     } 2>&1 || true
   )
 
   failed_services=$(
     {
-      echo -e "\n=== Failed Systemd Services ===\n"
+      printf '\n=== Failed Systemd Services ===\n\n'
       systemctl list-units --state=failed
     } 2>&1 || true
   )
 
   brew_services=$(
     {
-      echo -e "\n=== Homebrew Services Status ===\n"
+      printf '\n=== Homebrew Services Status ===\n\n'
       if require_cmd --check brew; then
         if [[ -n "${run_user:-}" ]]; then
           # Run brew services as the primary non-root user
@@ -439,7 +439,7 @@ collect_secureblue_info() {
           brew services info --all
         fi
       else
-        echo "brew not available."
+        printf 'brew not available.\n'
       fi
     } 2>&1 || true
   )

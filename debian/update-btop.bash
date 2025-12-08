@@ -53,7 +53,7 @@ get_latest_tag() {
 
     if has_cmd gh; then
         if tag="$(gh api "repos/${REPO}/releases/latest" --jq .tag_name 2>/dev/null || true)" && [[ -n "$tag" ]]; then
-            echo "$tag"
+            printf '%s\n' "$tag"
             return 0
         fi
     fi
@@ -66,7 +66,7 @@ get_latest_tag() {
             | sort -Vr \
             | head -n1)"
         if [[ -n "$tag" ]]; then
-            echo "$tag"
+            printf '%s\n' "$tag"
             return 0
         fi
     fi
@@ -74,14 +74,12 @@ get_latest_tag() {
     if ! json="$(net_curl "$API_URL" 2>/dev/null)"; then
         return 1
     fi
-    awk -F '"' '/"tag_name":/ {print $4; exit}' <<<"$json"
+    awk -F '"' '"tag_name":/ {print $4; exit}' <<<"$json"
 }
 
 get_current_version() {
     if command -v btop >/dev/null 2>&1; then
         btop --version 2>/dev/null | awk 'match($0,/v[0-9]+\.[0-9]+\.[0-9]+/){print substr($0,RSTART+1,RLENGTH-1); exit}'
-    else
-        echo ""
     fi
 }
 
@@ -106,7 +104,7 @@ fetch_source() {
     if has_cmd gh; then
         log "Cloning btop tag ${tag} with GitHub CLI..."
         if gh repo clone "$REPO" "$dest/btop" -- --branch "$tag" --depth 1 >/dev/null 2>&1; then
-            echo "$dest/btop"
+            printf '%s\n' "$dest/btop"
             return 0
         fi
         warn "gh repo clone failed; falling back to git/curl."
@@ -115,7 +113,7 @@ fetch_source() {
     if has_cmd git; then
         log "Cloning btop tag ${tag} with git..."
         if git clone --depth 1 --branch "$tag" "$REPO_URL" "$dest/btop"; then
-            echo "$dest/btop"
+            printf '%s\n' "$dest/btop"
             return 0
         fi
         warn "git clone failed; falling back to tarball download."
@@ -128,7 +126,7 @@ fetch_source() {
     if net_curl "$tarball_url" -o "$tarball" && tar -xzf "$tarball" -C "$dest"; then
         src_dir="$(find "$dest" -maxdepth 1 -type d -name 'btop*' | head -n1)"
         if [[ -n "$src_dir" ]]; then
-            echo "$src_dir"
+            printf '%s\n' "$src_dir"
             return 0
         fi
     fi

@@ -49,8 +49,7 @@ require_cmd() {
 
 # Ensure we run as root
 if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
-    echo "This script must be run as root. Try: sudo $0"
-    exit 1
+    error "This script must be run as root. Try: sudo $0"
 fi
 
 require_cmd curl
@@ -137,32 +136,32 @@ detect_architecture() {
 }
 
 ensure_base_dependencies() {
-    echo "Updating APT index for base repositories..."
+    log "Updating APT index for base repositories..."
     "$APT_CMD" update
 
     # Ensure gnupg (for gpg) is installed
     if ! command -v gpg >/dev/null 2>&1; then
-        echo "Installing gnupg (for gpg)..."
+        log "Installing gnupg (for gpg)..."
         "$APT_CMD" install -y gnupg
     fi
 
     # Ensure apt-transport-https is installed (some systems still require it)
     if ! dpkg -s apt-transport-https >/dev/null 2>&1; then
-        echo "Installing apt-transport-https..."
+        log "Installing apt-transport-https..."
         "$APT_CMD" install -y apt-transport-https
     fi
 
     # Ensure apt-transport-tor is installed for onion transport
     if ! dpkg -s apt-transport-tor >/dev/null 2>&1; then
-        echo "Installing apt-transport-tor..."
+        log "Installing apt-transport-tor..."
         "$APT_CMD" install -y apt-transport-tor
     fi
 }
 
 choose_repo_transport() {
-    echo "Select Tor repository transport:"
-    echo "  1) Onion (tor+http, via apt-transport-tor)"
-    echo "  2) HTTPS (clearnet)"
+    log "Select Tor repository transport:"
+    log "  1) Onion (tor+http, via apt-transport-tor)"
+    log "  2) HTTPS (clearnet)"
     local choice=""
 
     while :; do
@@ -171,35 +170,35 @@ choose_repo_transport() {
         case "$choice" in
             1)
                 REPO_URL="tor+http://apow7mjfryruh65chtdydfmqfpj5btws7nbocgtaovhvezgccyjazpqd.onion/torproject.org"
-                echo "Using onion transport: $REPO_URL"
+                log "Using onion transport: $REPO_URL"
                 return 0
                 ;;
             2)
                 REPO_URL="https://deb.torproject.org/torproject.org"
-                echo "Using HTTPS transport: $REPO_URL"
+                log "Using HTTPS transport: $REPO_URL"
                 return 0
                 ;;
             *)
-                echo "Invalid choice. Enter 1 or 2."
+                warn "Invalid choice. Enter 1 or 2."
                 ;;
         esac
     done
 }
 
 enable_tor_shepherd() {
-    echo "Detected GNU Shepherd. Enabling and starting tor via shepherd..."
+    log "Detected GNU Shepherd. Enabling and starting tor via shepherd..."
     herd enable tor || true
     herd start tor || true
 }
 
 enable_tor_openrc() {
-    echo "Detected OpenRC. Enabling and starting tor via OpenRC..."
+    log "Detected OpenRC. Enabling and starting tor via OpenRC..."
     rc-update add tor default || true
     rc-service tor restart || rc-service tor start || true
 }
 
 enable_tor_runit() {
-    echo "Detected runit. Enabling and starting tor via runit..."
+    log "Detected runit. Enabling and starting tor via runit..."
     if [[ -d /etc/sv/tor && ! -e /etc/service/tor ]]; then
         mkdir -p /etc/service
         ln -s /etc/sv/tor /etc/service/tor || true
@@ -208,7 +207,7 @@ enable_tor_runit() {
 }
 
 enable_tor_systemd() {
-    echo "Detected systemd. Enabling and starting tor.service..."
+    log "Detected systemd. Enabling and starting tor.service..."
     systemctl daemon-reload || true
 
     if systemctl list-unit-files | grep -q '^tor\.service[[:space:]]'; then
@@ -218,17 +217,17 @@ enable_tor_systemd() {
         systemctl enable tor@default.service
         systemctl restart tor@default.service
     else
-        echo "Warning: tor systemd service not found; you may need to enable/start it manually."
+        warn "tor systemd service not found; you may need to enable/start it manually."
     fi
 }
 
 enable_tor_s6() {
-    echo "Detected s6-based init. tor is installed, but this script does not manage s6 services automatically."
-    echo "Please enable and start the 'tor' service using your s6/s6-rc configuration."
+    log "Detected s6-based init. tor is installed, but this script does not manage s6 services automatically."
+    log "Please enable and start the 'tor' service using your s6/s6-rc configuration."
 }
 
 enable_tor_sysv() {
-    echo "Detected SysV-style init. Enabling and starting tor via init scripts..."
+    log "Detected SysV-style init. Enabling and starting tor via init scripts..."
     if command -v update-rc.d >/dev/null 2>&1; then
         update-rc.d tor defaults || true
     elif command -v chkconfig >/dev/null 2>&1; then
@@ -291,8 +290,8 @@ enable_and_start_tor() {
         enable_tor_sysv; return
     fi
 
-    echo "Warning: could not detect a known service manager (systemd, SysV, OpenRC, runit, s6, shepherd)."
-    echo "tor is installed, but you must start and enable it manually."
+    warn "could not detect a known service manager (systemd, SysV, OpenRC, runit, s6, shepherd)."
+    warn "tor is installed, but you must start and enable it manually."
 }
 
 get_suite_codename
@@ -300,17 +299,17 @@ detect_architecture
 ensure_base_dependencies
 choose_repo_transport
 
-echo "Detected OS ID: ${OS_ID}"
-echo "Detected OS codename: ${OS_CODENAME}"
-echo "Using Tor repo suite codename: ${SUITE_CODENAME}"
-echo "Using native APT architecture: ${ARCH_FILTER}"
+log "Detected OS ID: ${OS_ID}"
+log "Detected OS codename: ${OS_CODENAME}"
+log "Using Tor repo suite codename: ${SUITE_CODENAME}"
+log "Using native APT architecture: ${ARCH_FILTER}"
 
-echo "Importing Tor Project signing key..."
+log "Importing Tor Project signing key..."
 install -d -m 0755 /usr/share/keyrings
 net_curl "https://deb.torproject.org/torproject.org/A3C4F0F979CAA22CDBA8F512EE8CBC9E886DDD89.asc" \
     | gpg --dearmor -o /usr/share/keyrings/deb.torproject.org-keyring.gpg
 
-echo "Writing APT deb822 sources file for Tor..."
+log "Writing APT deb822 sources file for Tor..."
 rm -f /etc/apt/sources.list.d/tor.list
 cat > /etc/apt/sources.list.d/tor.sources <<EOF
 Types: deb deb-src
@@ -332,13 +331,13 @@ cat >> /etc/apt/sources.list.d/tor.sources <<'EOF'
 # Signed-By: /usr/share/keyrings/deb.torproject.org-keyring.gpg
 EOF
 
-echo "Updating APT index (including Tor repository)..."
+log "Updating APT index (including Tor repository)..."
 "$APT_CMD" update
 
-echo "Installing tor and deb.torproject.org-keyring..."
+log "Installing tor and deb.torproject.org-keyring..."
 "$APT_CMD" install -y tor deb.torproject.org-keyring
 
-echo "Enabling and starting tor service..."
+log "Enabling and starting tor service..."
 enable_and_start_tor
 
-echo "Done. Tor should now be installed and (where supported) enabled and running."
+log "Done. Tor should now be installed and (where supported) enabled and running."

@@ -59,8 +59,8 @@ parse_args() {
         exit 0
         ;;
       *)
-        echo "Unknown option: $1" >&2
-        echo "Try: $0 --help" >&2
+        error "Unknown option: $1"
+        error "Try: $0 --help"
         exit 1
         ;;
     esac
@@ -136,7 +136,7 @@ ask_reboot() {
   fi
 
   # Interactive: ask the user
-  echo
+  printf '\n'
   read -r -p "Reboot now to apply all changes? [y/N] " answer
   case "$answer" in
     [yY][eE][sS]|[yY])

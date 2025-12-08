@@ -58,7 +58,7 @@ SERVICE_NAME="apache2"
 # Example: https://github.com/user/repo/archive/refs/heads/main.zip
 ZIP_URL="https://github.com/daviduhden/daviduhden-website/archive/refs/heads/${BRANCH}.zip"
 
-echo "----------------------------------------"
+log "----------------------------------------"
 log "Sync started (using GitHub CLI config for user: $GH_USER, home: $GH_HOME)"
 
 # Ensure repository directory exists
@@ -118,7 +118,7 @@ sync_with_gh_cli() {
     fi
 
     # Ensure we are on the correct branch
-    CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+    CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || printf '')
     if [ "$CURRENT_BRANCH" != "$BRANCH" ]; then
         log "Switching to branch $BRANCH (current: $CURRENT_BRANCH)"
         if ! git checkout "$BRANCH"; then
@@ -204,7 +204,7 @@ sync_with_git() {
     fi
 
     # Ensure we are on the correct branch
-    CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+    CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || printf '')
     if [ "$CURRENT_BRANCH" != "$BRANCH" ]; then
         log "Switching to branch $BRANCH (current: $CURRENT_BRANCH)"
         if ! git checkout "$BRANCH"; then
@@ -394,4 +394,4 @@ if ! post_update_steps; then
 fi
 
 log "Sync completed"
-echo "----------------------------------------"
+log "----------------------------------------"
