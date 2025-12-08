@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-# Automated script to install or update Rust-based Tor clients (arti and oniux)
+# Automated script to install or update Rust-based Tor software (arti and oniux)
 # - Ensures Rust and cargo are installed (via rustup or Homebrew)
 # - Clones the arti and oniux repositories from the Tor Project GitLab
 # - Determines the latest release tags for each project
