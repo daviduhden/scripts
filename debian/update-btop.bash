@@ -102,27 +102,27 @@ fetch_source() {
     local tag="$1" dest="$2" src_dir="" tarball_url tarball
 
     if has_cmd gh; then
-        log "Cloning btop tag ${tag} with GitHub CLI..."
+        log "Cloning btop tag ${tag} with GitHub CLI..." >&2
         if gh repo clone "$REPO" "$dest/btop" -- --branch "$tag" --depth 1 >/dev/null 2>&1; then
             printf '%s\n' "$dest/btop"
             return 0
         fi
-        warn "gh repo clone failed; falling back to git/curl."
+        warn "gh repo clone failed; falling back to git/curl." >&2
     fi
 
     if has_cmd git; then
-        log "Cloning btop tag ${tag} with git..."
+        log "Cloning btop tag ${tag} with git..." >&2
         if git clone --depth 1 --branch "$tag" "$REPO_URL" "$dest/btop"; then
             printf '%s\n' "$dest/btop"
             return 0
         fi
-        warn "git clone failed; falling back to tarball download."
+        warn "git clone failed; falling back to tarball download." >&2
     fi
 
     tarball_url="https://github.com/${REPO}/archive/refs/tags/${tag}.tar.gz"
     tarball="$dest/btop.tar.gz"
 
-    log "Downloading tarball ${tarball_url} as last resort..."
+    log "Downloading tarball ${tarball_url} as last resort..." >&2
     if net_curl "$tarball_url" -o "$tarball" && tar -xzf "$tarball" -C "$dest"; then
         src_dir="$(find "$dest" -maxdepth 1 -type d -name 'btop*' | head -n1)"
         if [[ -n "$src_dir" ]]; then
@@ -142,6 +142,9 @@ build_and_install() {
     trap 'rm -rf "$tmpdir"' EXIT
 
     src_dir="$(fetch_source "$tag" "$tmpdir")" || error "could not fetch source via gh/git/curl."
+    if [[ -z "$src_dir" ]]; then
+        error "source directory path was empty after fetch."
+    fi
 
     log "Building btop..."
     cd "$src_dir"
