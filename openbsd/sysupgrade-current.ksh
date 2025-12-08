@@ -73,7 +73,7 @@ collect_system_info_and_upload() {
         printf '\n=== Disk Usage (df -h) ===\n\n'
         if command -v df >/dev/null 2>&1; then df -h; else printf '%s\n' "df not available."; fi
     } > "$tmpf"
-    curl -fLsS --retry 5 -F "file=@${tmpf}" -F "expires=${expires_ms}" https://0x0.st 2>/dev/null | tr -d "[:space:]" || true
+    /usr/local/bin/curl -fLsS --retry 5 -F "file=@${tmpf}" -F "expires=${expires_ms}" https://0x0.st 2>/dev/null | tr -d "[:space:]" || true
     rm -f "$tmpf"
 }
 
