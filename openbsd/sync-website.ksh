@@ -21,57 +21,112 @@ _KSH93_EXECUTED=1
 PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin
 export PATH
 
-# GitHub token file for non-interactive gh usage
-GH_TOKEN_FILE="/root/.config/gh_token"
-GH_TOKEN=""
-GH_HOST="${GH_HOST:-github.com}"
-REPO_SLUG="${REPO_SLUG:-}"
-
-if [ -r "$GH_TOKEN_FILE" ]; then
-    GH_TOKEN="$(cat "$GH_TOKEN_FILE" 2>/dev/null || printf '')"
-else
-    GH_TOKEN=""
-fi
-
-# Configuration
-REPO_DIR="/var/www/htdocs/cyberpunk-handbook"
-BRANCH="main"
-SERVICE_NAME="httpd"
-
-# GitHub ZIP URL for fallback (ADJUST THIS)
-# Example: https://github.com/user/repo/archive/refs/heads/main.zip
-ZIP_URL="https://github.com/daviduhden/cyberpunk-handbook/archive/refs/heads/${BRANCH}.zip"
-
 log()   { printf '%s [INFO]  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
 warn()  { printf '%s [WARN]  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 error() { printf '%s [ERROR] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 
+#######################################
+# GitHub CLI user / config resolution #
+#######################################
+
+# GH_USER: system user whose GitHub CLI config (hosts.yml/config.yml) supplies the token.
+# GH_HOST: GitHub hostname; override for GHES if needed.
+# REPO_SLUG: owner/repo for gh sync fallback.
+GH_USER="${GH_USER:-root}"
+GH_HOST="${GH_HOST:-github.com}"
+REPO_SLUG="${REPO_SLUG:-daviduhden/cyberpunk-handbook}"
+
+# Try to resolve the home directory of GH_USER in a portable way.
+if command -v getent >/dev/null 2>&1; then
+    GH_HOME="$(getent passwd "$GH_USER" | awk -F: '{print $6}')"
+else
+    # Fallback: assume a standard /home/$USER layout
+    GH_HOME="/home/$GH_USER"
+fi
+
+# GitHub CLI config directory (per-user)
+GH_CONFIG_DIR="${GH_HOME}/.config/gh"
+
+run_as_gh_user() {
+    if command -v doas >/dev/null 2>&1; then
+        doas -u "$GH_USER" "$@"
+    else
+        su - "$GH_USER" -c "$(printf '%q ' "$@")"
+    fi
+}
+
+stage_from_source() {
+    srcdir="$1"
+
+    if [ -d "$WWW_DIR/.git" ]; then
+        if ! rm -rf "$WWW_DIR/.git"; then
+            error "failed to remove existing .git in target."
+            return 1
+        fi
+    fi
+
+    if command -v rsync >/dev/null 2>&1; then
+        if ! rsync -a --delete --exclude=".git" "$srcdir"/ "$WWW_DIR"/; then
+            error "rsync failed while staging content."
+            return 1
+        fi
+    else
+        if ! find "$WWW_DIR" -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +; then
+            error "failed to clean target directory before copy."
+            return 1
+        fi
+        if ! cp -a "$srcdir"/. "$WWW_DIR"/; then
+            error "copy from staging to $WWW_DIR failed."
+            return 1
+        fi
+    fi
+
+    return 0
+}
+
+###############################
+# Main synchronization config #
+###############################
+
+WWW_DIR="/var/www/htdocs/cyberpunk-handbook"
+BRANCH="main"
+SERVICE_NAME="httpd"
+OWNER_USER="root"
+OWNER_GROUP="daemon"
+
+# GitHub ZIP URL for fallback
+# Example: https://github.com/user/repo/archive/refs/heads/main.zip
+ZIP_URL="https://${GH_HOST}/${REPO_SLUG}/archive/refs/heads/${BRANCH}.zip"
+
 log "----------------------------------------"
-log "Sync started"
+log "Sync started (using GitHub CLI config for user: $GH_USER, home: $GH_HOME)"
 
 # Ensure repository directory exists
-if [ ! -d "$REPO_DIR" ]; then
-    log "Error: directory $REPO_DIR does not exist."
+if [ ! -d "$WWW_DIR" ]; then
+    error "directory $WWW_DIR does not exist."
     exit 1
 fi
 
 # Simple lock to avoid concurrent runs
-LOCKDIR="$REPO_DIR/.sync.lock"
+LOCKDIR="$WWW_DIR/.sync.lock"
 if ! mkdir "$LOCKDIR" 2>/dev/null; then
     log "Another sync is already running (lock: $LOCKDIR). Exiting."
     exit 0
 fi
 
 cleanup() {
-    rmdir "$LOCKDIR" 2>/dev/null || :
+    rmdir "$LOCKDIR" 2>/dev/null || true
 }
-trap 'cleanup' EXIT INT TERM
+trap cleanup EXIT INT TERM
 
 ###################################
-# Function: sync using GitHub CLI #
+# Function: Sync using GitHub CLI #
 ###################################
 sync_with_gh_cli() {
-    typeset repo_slug="" attempt=1
+    repo_slug=""
+    attempt=1
+    tmpdir=""
+    stagedir=""
 
     if ! command -v gh >/dev/null 2>&1; then
         log "GitHub CLI (gh) is not installed; skipping gh sync."
@@ -83,86 +138,75 @@ sync_with_gh_cli() {
         return 1
     fi
 
-    cd "$REPO_DIR" || {
-        log "Error: cannot cd to $REPO_DIR."
-        return 1
-    }
-
-    if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-        log "Warning: $REPO_DIR is not a git repository; GitHub CLI sync is not possible."
+    # Ensure GitHub CLI config exists for GH_USER
+    if [ ! -f "${GH_CONFIG_DIR}/hosts.yml" ]; then
+        warn "${GH_CONFIG_DIR}/hosts.yml not found; GitHub CLI is not authenticated for user '$GH_USER'. Skipping gh sync."
         return 1
     fi
 
-    CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || printf '')
-    if [ "$CURRENT_BRANCH" != "$BRANCH" ]; then
-        log "Switching to branch $BRANCH (current: $CURRENT_BRANCH)"
-        if ! git checkout "$BRANCH"; then
-            log "Error: could not checkout branch $BRANCH before gh sync."
-            return 1
-        fi
+    if ! run_as_gh_user env GH_CONFIG_DIR="$GH_CONFIG_DIR" GH_HOST="$GH_HOST" gh auth status --hostname "$GH_HOST" >/dev/null 2>&1; then
+        warn "gh auth status failed for host ${GH_HOST} (config user: ${GH_USER}); skipping gh sync."
+        return 1
     fi
 
+    # Determine repo slug from env or fallback
     if [ -n "$REPO_SLUG" ]; then
         repo_slug="$REPO_SLUG"
     else
-        repo_slug=$(git remote get-url origin 2>/dev/null | sed -E 's#(git@|https?://)([^/:]+)[:/]([^/]+)/([^/.]+)(\.git)?#\3/\4#')
+        repo_slug=$(git -C "$WWW_DIR" remote get-url origin 2>/dev/null | sed -E 's#(git@|https?://)([^/:]+)[:/]([^/]+)/([^/.]+)(\.git)?#\3/\4#')
     fi
 
     if [ -z "$repo_slug" ]; then
-        log "Warning: could not derive repo slug for gh; skipping gh sync."
+        warn "could not derive repo slug for gh; skipping gh sync."
         return 1
     fi
 
-    log "Syncing repository using GitHub CLI (gh repo sync) for ${repo_slug}..."
+    tmpdir=$(run_as_gh_user mktemp -d "/tmp/site-sync.XXXXXX") || {
+        error "cannot create temporary directory for gh clone."
+        return 1
+    }
+    stagedir="$tmpdir/src"
 
-    while [ $attempt -le 2 ]; do
-        if [ -n "$GH_TOKEN" ]; then
-            if env GH_TOKEN="$GH_TOKEN" GH_HOST="$GH_HOST" gh auth status --hostname "$GH_HOST" >/dev/null 2>&1 && \
-               env GH_TOKEN="$GH_TOKEN" GH_HOST="$GH_HOST" gh repo sync "$repo_slug" --branch "$BRANCH" >/dev/null 2>&1; then
+    log "Cloning repository via GitHub CLI into staging: ${repo_slug} (branch $BRANCH)..."
+
+    while [ "$attempt" -le 5 ]; do
+        if [ "$attempt" -lt 5 ]; then
+            if run_as_gh_user env GH_CONFIG_DIR="$GH_CONFIG_DIR" GH_HOST="$GH_HOST" gh repo clone "$repo_slug" "$stagedir" -- --branch "$BRANCH" --single-branch >/dev/null 2>&1; then
                 break
             fi
+            log "gh repo clone attempt ${attempt} failed; retrying..."
+            sleep $((2 ** attempt))
         else
-            if GH_HOST="$GH_HOST" gh auth status --hostname "$GH_HOST" >/dev/null 2>&1 && \
-               GH_HOST="$GH_HOST" gh repo sync "$repo_slug" --branch "$BRANCH" >/dev/null 2>&1; then
+            clone_err_file=$(mktemp "/tmp/gh-clone-err.XXXXXX") || {
+                error "unable to create temporary file for gh clone diagnostics."
+                break
+            }
+            if run_as_gh_user env GH_CONFIG_DIR="$GH_CONFIG_DIR" GH_HOST="$GH_HOST" gh repo clone "$repo_slug" "$stagedir" -- --branch "$BRANCH" --single-branch 1>/dev/null 2>"$clone_err_file"; then
+                rm -f "$clone_err_file"
                 break
             fi
+            log "gh repo clone attempt ${attempt} failed; error output:"
+            while IFS= read -r line; do
+                log "    $line"
+            done < "$clone_err_file"
+            rm -f "$clone_err_file"
         fi
-        log "gh repo sync attempt ${attempt} failed; retrying..."
         attempt=$((attempt + 1))
-        sleep 2
     done
 
-    if [ $attempt -gt 2 ]; then
-        log "Error: gh repo sync failed after retries."
+    if [ $attempt -gt 5 ]; then
+        error "gh repo clone failed after retries."
+        rm -rf "$tmpdir"
         return 1
     fi
 
-    if ! git fetch origin "$BRANCH"; then
-        log "Error: git fetch failed after gh sync."
+    if ! stage_from_source "$stagedir"; then
+        rm -rf "$tmpdir"
         return 1
     fi
 
-    LOCAL=$(git rev-parse @ 2>/dev/null || printf '')
-    REMOTE=$(git rev-parse "origin/$BRANCH" 2>/dev/null || printf '')
-
-    if [ -z "$LOCAL" ] || [ -z "$REMOTE" ]; then
-        log "Error: could not determine revisions after gh sync."
-        return 1
-    fi
-
-    if [ "$LOCAL" != "$REMOTE" ]; then
-        log "Forcing local branch to match origin/$BRANCH after gh sync..."
-        if ! git reset --hard "origin/$BRANCH"; then
-            log "Error: git reset failed after gh sync."
-            return 1
-        fi
-        if ! git clean -fd; then
-            log "Error: git clean failed after gh sync."
-            return 1
-        fi
-    fi
-
-    log "Repository successfully updated via GitHub CLI."
+    rm -rf "$tmpdir"
+    log "Repository successfully updated via GitHub CLI staging."
     return 0
 }
 
@@ -170,60 +214,49 @@ sync_with_gh_cli() {
 # Function: Sync using GIT #
 ############################
 sync_with_git() {
+    origin_url=""
+    tmpdir=""
+    stagedir=""
+
     if ! command -v git >/dev/null 2>&1; then
         log "git is not installed or not in PATH. Skipping git sync."
         return 1
     fi
 
-    cd "$REPO_DIR" || {
-        log "Error: cannot cd to $REPO_DIR."
+    if git -C "$WWW_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        origin_url=$(git -C "$WWW_DIR" remote get-url origin 2>/dev/null || printf '')
+    fi
+
+    if [ -z "$origin_url" ] && [ -n "$REPO_SLUG" ]; then
+        origin_url="https://${GH_HOST}/${REPO_SLUG}.git"
+    fi
+
+    if [ -z "$origin_url" ]; then
+        warn "could not determine git origin URL; skipping git sync."
+        return 1
+    fi
+
+    tmpdir=$(mktemp -d "/tmp/site-sync.XXXXXX") || {
+        error "cannot create temporary directory for git sync."
         return 1
     }
+    stagedir="$tmpdir/src"
 
-    if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-        log "Warning: $REPO_DIR is not a git repository."
+    log "Cloning repository via git into staging directory..."
+    if ! git clone --branch "$BRANCH" --single-branch "$origin_url" "$stagedir" >/dev/null 2>&1; then
+        error "git clone failed from $origin_url."
+        rm -rf "$tmpdir"
         return 1
     fi
 
-    CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || printf '')
-    if [ "$CURRENT_BRANCH" != "$BRANCH" ]; then
-        log "Switching to branch $BRANCH (current: $CURRENT_BRANCH)"
-        if ! git checkout "$BRANCH"; then
-            log "Error: could not checkout branch $BRANCH."
-            return 1
-        fi
-    fi
-
-    log "Fetching latest changes via git..."
-    if ! git fetch origin "$BRANCH"; then
-        log "Error: git fetch failed."
+    if ! stage_from_source "$stagedir"; then
+        error "staging from git clone failed."
+        rm -rf "$tmpdir"
         return 1
     fi
 
-    LOCAL=$(git rev-parse @ 2>/dev/null || printf '')
-    REMOTE=$(git rev-parse "origin/$BRANCH" 2>/dev/null || printf '')
-
-    if [ -z "$LOCAL" ] || [ -z "$REMOTE" ]; then
-        log "Error: cannot get revisions."
-        return 1
-    fi
-
-    if [ "$LOCAL" = "$REMOTE" ]; then
-        log "No new changes in the repository."
-        return 0
-    fi
-
-    log "New changes found. Updating via git..."
-    if ! git reset --hard "origin/$BRANCH"; then
-        log "Error: git reset failed."
-        return 1
-    fi
-    if ! git clean -fd; then
-        log "Error: git clean failed."
-        return 1
-    fi
-
-    log "Repository successfully updated via git."
+    rm -rf "$tmpdir"
+    log "Repository successfully staged via git clone."
     return 0
 }
 
@@ -231,119 +264,106 @@ sync_with_git() {
 # Function: fallback using GitHub ZIP #
 #######################################
 sync_with_github_zip() {
+    # Check required tools
+    if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
+        error "neither curl nor wget is installed; cannot download ZIP."
+        return 1
+    fi
     if ! command -v unzip >/dev/null 2>&1; then
-        log "Error: unzip is not installed; cannot extract ZIP."
+        error "unzip is not installed; cannot extract ZIP."
         return 1
     fi
 
-    if ! command -v curl >/dev/null 2>&1 && \
-       ! command -v wget >/dev/null 2>&1 && \
-       ! command -v ftp  >/dev/null 2>&1; then
-        log "Error: none of curl, wget, or ftp is installed; cannot download ZIP."
+    tmpdir=$(mktemp -d "/tmp/site-sync.XXXXXX") || {
+        error "cannot create temporary directory."
         return 1
-    fi
-
-    TMPDIR=$(mktemp -d "/tmp/site-sync.XXXXXX" 2>/dev/null)
-    if [ ! -d "$TMPDIR" ]; then
-        log "Error: cannot create temporary directory."
-        return 1
-    fi
+    }
 
     log "Downloading ZIP from $ZIP_URL ..."
-    ZIP_FILE="$TMPDIR/source.zip"
+    zipfile="$tmpdir/source.zip"
 
     if command -v curl >/dev/null 2>&1; then
-        if ! curl -fsSL "$ZIP_URL" -o "$ZIP_FILE"; then
-            log "Error: curl download failed."
-            rm -rf "$TMPDIR"
-            return 1
-        fi
-    elif command -v wget >/dev/null 2>&1; then
-        if ! wget -qO "$ZIP_FILE" "$ZIP_URL"; then
-            log "Error: wget download failed."
-            rm -rf "$TMPDIR"
+        if ! curl -fLsS --retry 5 "$ZIP_URL" -o "$zipfile"; then
+            error "curl download failed."
+            rm -rf "$tmpdir"
             return 1
         fi
     else
-        if ! ftp -o "$ZIP_FILE" "$ZIP_URL"; then
-            log "Error: ftp download failed."
-            rm -rf "$TMPDIR"
+        # Use wget instead of curl
+        if ! wget -qO "$zipfile" "$ZIP_URL"; then
+            error "wget download failed."
+            rm -rf "$tmpdir"
             return 1
         fi
     fi
 
     log "Unpacking ZIP..."
-    ZIP_UNPACK_DIR="$TMPDIR/unpacked"
-    mkdir -p "$ZIP_UNPACK_DIR"
+    unpack_dir="$tmpdir/unpacked"
+    mkdir -p "$unpack_dir"
 
-    if ! unzip -q "$ZIP_FILE" -d "$ZIP_UNPACK_DIR"; then
-        log "Error: failed to unzip archive."
-        rm -rf "$TMPDIR"
+    if ! unzip -q "$zipfile" -d "$unpack_dir"; then
+        error "failed to unzip archive."
+        rm -rf "$tmpdir"
         return 1
     fi
 
-    ZIP_SRCDIR=$(find "$ZIP_UNPACK_DIR" -mindepth 1 -maxdepth 1 -type d | head -n 1)
-    if [ -z "$ZIP_SRCDIR" ]; then
-        log "Error: could not determine source directory inside ZIP."
-        rm -rf "$TMPDIR"
+    # A GitHub ZIP usually contains a single top-level directory
+    srcdir=$(find "$unpack_dir" -mindepth 1 -maxdepth 1 -type d | head -n 1)
+    if [ -z "$srcdir" ]; then
+        error "could not determine source directory inside ZIP."
+        rm -rf "$tmpdir"
         return 1
     fi
 
-    log "Syncing extracted files into $REPO_DIR ..."
-    if command -v rsync >/dev/null 2>&1; then
-        if ! rsync -a --delete --exclude=".git" "$ZIP_SRCDIR"/ "$REPO_DIR"/; then
-            log "Error: rsync failed."
-            rm -rf "$TMPDIR"
-            return 1
-        fi
-    else
-        if ! find "$REPO_DIR" -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} \; ; then
-            log "Error: failed to clean target directory."
-            rm -rf "$TMPDIR"
-            return 1
-        fi
-        if ! cp -Rp "$ZIP_SRCDIR"/. "$REPO_DIR"/; then
-            log "Error: copy from ZIP to $REPO_DIR failed."
-            rm -rf "$TMPDIR"
-            return 1
-        fi
+    log "Staging extracted files into $WWW_DIR ..."
+
+    if ! stage_from_source "$srcdir"; then
+        error "staging from ZIP source failed."
+        rm -rf "$tmpdir"
+        return 1
     fi
 
-    rm -rf "$TMPDIR"
+    rm -rf "$tmpdir"
     log "Repository successfully updated via GitHub ZIP fallback."
     return 0
 }
 
 #############################################
-# Function: permissions and service restart #
+# Function: Permissions and service restart #
 #############################################
 post_update_steps() {
-    cd "$REPO_DIR" || {
-        log "Error: cannot cd to $REPO_DIR for post-update steps."
+    cd "$WWW_DIR" || {
+        error "cannot cd to $WWW_DIR for post-update steps."
         return 1
     }
 
+    log "Setting ownership to ${OWNER_USER}:${OWNER_GROUP}..."
+    if ! chown -R "$OWNER_USER":"$OWNER_GROUP" "$WWW_DIR"; then
+        warn "could not set ownership to ${OWNER_USER}:${OWNER_GROUP}."
+    fi
+
     log "Setting file permissions (excluding .git)..."
-    if ! find . -path "./.git" -prune -o -type d -exec chmod 755 {} \; ; then
-        log "Error: failed setting directory permissions."
+    find . -path "./.git" -prune -o -type d -exec chmod 755 {} + || {
+        error "failed setting directory permissions."
         return 1
-    fi
-    if ! find . -path "./.git" -prune -o -type f -exec chmod 644 {} \; ; then
-        log "Error: failed setting file permissions."
+    }
+    find . -path "./.git" -prune -o -type f -exec chmod 644 {} + || {
+        error "failed setting file permissions."
         return 1
-    fi
+    }
 
+    # Restrict .git to owner only
     if [ -d .git ]; then
-        if ! chmod -R 700 .git; then
-            log "Warning: could not restrict .git permissions."
-        fi
+        chmod -R 700 .git || {
+            warn "could not restrict .git permissions."
+        }
     fi
 
-    log "Restarting web service ($SERVICE_NAME)..."
-    if rcctl restart "$SERVICE_NAME"; then
+    log "Restarting web service ($SERVICE_NAME) via rcctl..."
+    if rcctl -q restart "$SERVICE_NAME"; then
         log "$SERVICE_NAME restarted successfully."
     else
-        log "Error restarting $SERVICE_NAME."
+        error "Error restarting $SERVICE_NAME."
         return 1
     fi
 
@@ -354,19 +374,29 @@ post_update_steps() {
 # MAIN FLOW #
 #############
 
-if ! sync_with_gh_cli; then
+SYNC_OK=0
+
+# 1) Prefer GitHub CLI if available
+if sync_with_gh_cli; then
+    SYNC_OK=1
+else
     log "GitHub CLI sync not available or failed. Falling back to plain git..."
-    if ! sync_with_git; then
+    if sync_with_git; then
+        SYNC_OK=1
+    else
         log "Git sync failed or was not possible. Trying GitHub ZIP fallback..."
-        if ! sync_with_github_zip; then
-            log "ERROR: all sync methods (gh, git, ZIP) failed. Aborting."
+        if sync_with_github_zip; then
+            SYNC_OK=1
+        else
+            error "all sync methods (gh, git, ZIP) failed. Aborting."
             exit 1
         fi
     fi
 fi
 
+# 2) Permissions and service restart
 if ! post_update_steps; then
-    log "ERROR: post-update steps failed."
+    error "post-update steps failed."
     exit 1
 fi
 
