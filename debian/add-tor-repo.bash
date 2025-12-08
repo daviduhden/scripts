@@ -211,10 +211,10 @@ enable_tor_systemd() {
     echo "Detected systemd. Enabling and starting tor.service..."
     systemctl daemon-reload || true
 
-    if systemctl list-unit-files | grep -q '^tor\.service'; then
+    if systemctl list-unit-files | grep -q '^tor\.service[[:space:]]'; then
         systemctl enable tor.service
         systemctl restart tor.service
-    elif systemctl list-unit-files | grep -q '^tor@default\.service'; then
+    elif systemctl list-unit-files | grep -q '^tor@default\.service[[:space:]]'; then
         systemctl enable tor@default.service
         systemctl restart tor@default.service
     else

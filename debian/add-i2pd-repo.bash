@@ -264,7 +264,7 @@ enable_i2pd_systemd() {
     echo "Detected systemd. Enabling and starting i2pd.service..."
     systemctl daemon-reload || true
 
-    if systemctl list-unit-files | grep -q '^i2pd\.service'; then
+    if systemctl list-unit-files | grep -q '^i2pd\.service[[:space:]]'; then
         systemctl enable i2pd.service
         systemctl restart i2pd.service
     else
