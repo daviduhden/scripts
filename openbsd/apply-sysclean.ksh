@@ -87,7 +87,7 @@ if [ -z "$sysclean_path" ]; then
     # 0.1 Try to install via pkg_add if available
     if command -v pkg_add >/dev/null 2>&1; then
         log "Trying to install sysclean with pkg_add..."
-        if ! net_run pkg_add -v sysclean; then
+        if ! pkg_add -v sysclean; then
             warn "pkg_add sysclean failed."
         else
             log "sysclean installed via pkg_add."
