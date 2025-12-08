@@ -85,7 +85,7 @@ EOF
 
 chmod +x /upgrade.site
 
-log "Starting sysupgrade -s..."
-/usr/sbin/sysupgrade -s
+log "Starting sysupgrade..."
+/usr/sbin/sysupgrade -sf
 
 log "sysupgrade completed; system info upload will run on first boot via /etc/rc.firsttime."
