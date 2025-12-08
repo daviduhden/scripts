@@ -66,14 +66,14 @@ get_latest_go_version() {
     printf '%s\n' "$ver"
 }
 
-echo "Checking latest Go version from go.dev..."
+log "Checking latest Go version from go.dev..."
 LATEST_VERSION="$(get_latest_go_version || true)"
 
 if [[ -z "${LATEST_VERSION}" ]]; then
     error "could not fetch latest Go version from ${VERSION_URL}."
 fi
 
-echo "Latest available Go version: ${LATEST_VERSION}"
+log "Latest available Go version: ${LATEST_VERSION}"
 
 # Detect currently installed version (if any)
 CURRENT_VERSION=""
@@ -83,13 +83,13 @@ if command -v go >/dev/null 2>&1; then
 fi
 
 if [[ -n "$CURRENT_VERSION" ]]; then
-    echo "Currently installed Go version: ${CURRENT_VERSION}"
+    log "Currently installed Go version: ${CURRENT_VERSION}"
     if [[ "$CURRENT_VERSION" == "$LATEST_VERSION" ]]; then
-        echo "Go is already up to date. Nothing to do."
+        log "Go is already up to date. Nothing to do."
         exit 0
     fi
 else
-    echo "Go is not currently installed."
+    log "Go is not currently installed."
 fi
 
 # Determine architecture
@@ -152,9 +152,7 @@ case "$ARCH" in
         GO_ARCH="s390x"
         ;;
     *)
-        echo "Unsupported architecture: ${ARCH}."
-        echo "No matching official Go Linux tarball known for this arch."
-        exit 1
+        error "Unsupported architecture: ${ARCH}. No matching official Go Linux tarball known for this arch."
         ;;
 esac
 
@@ -168,28 +166,28 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "Downloading ${TAR_NAME} (GO_ARCH=${GO_ARCH}, uname -m=${ARCH}) from ${TAR_URL}..."
+log "Downloading ${TAR_NAME} (GO_ARCH=${GO_ARCH}, uname -m=${ARCH}) from ${TAR_URL}..."
 if ! net_curl "$TAR_URL" -o "$TAR_FILE"; then
     error "download failed from ${TAR_URL}"
 fi
 
-echo "Download complete: ${TAR_FILE}"
-echo "Installing Go into ${GO_ROOT}..."
+log "Download complete: ${TAR_FILE}"
+log "Installing Go into ${GO_ROOT}..."
 
 # Ensure the installation directory exists (using install)
 install -d -m 0755 "${INSTALL_DIR}"
 
 # Remove previous Go tree if present
 if [[ -d "$GO_ROOT" ]]; then
-    echo "Removing previous Go installation at ${GO_ROOT}..."
+    log "Removing previous Go installation at ${GO_ROOT}..."
     rm -rf "$GO_ROOT"
 fi
 
 # Extract the new Go tree under /usr/local
 tar -C "$INSTALL_DIR" -xzf "$TAR_FILE"
 
-echo "Go installation finished successfully."
-echo "Installed version:"
+log "Go installation finished successfully."
+log "Installed version:"
 "${GO_ROOT}/bin/go" version || true
 
 # Ensure /usr/local/go/bin is in system-wide PATH via /etc/profile
@@ -206,20 +204,19 @@ ensure_go_path_in_etc_profile() {
     fi
 
     if grep -q '/usr/local/go/bin' "$profile_file"; then
-        echo "${profile_file} already contains /usr/local/go/bin in PATH. No changes made."
+        log "${profile_file} already contains /usr/local/go/bin in PATH. No changes made."
         return 0
     fi
 
     backup_suffix="$(date +%Y%m%d%H%M%S)"
     cp "$profile_file" "${profile_file}.bak.${backup_suffix}"
-    echo "Backup of ${profile_file} created at ${profile_file}.bak.${backup_suffix}"
+    log "Backup of ${profile_file} created at ${profile_file}.bak.${backup_suffix}"
 
     printf '\n%s' "$go_path_snippet" >> "$profile_file"
-    echo "${profile_file} updated to include /usr/local/go/bin in PATH."
+    log "${profile_file} updated to include /usr/local/go/bin in PATH."
 }
 
 ensure_go_path_in_etc_profile
 
-echo
-echo "Done."
-echo "Log out and log back in (or source /etc/profile) to ensure the new PATH is applied."
+log "Done."
+log "Log out and log back in (or source /etc/profile) to ensure the new PATH is applied."

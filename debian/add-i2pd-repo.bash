@@ -49,8 +49,7 @@ require_cmd() {
 
 # Ensure we run as root
 if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
-    echo "This script must be run as root. Try: sudo $0"
-    exit 1
+    error "This script must be run as root. Try: sudo $0"
 fi
 
 require_cmd curl
@@ -225,34 +224,34 @@ detect_arch_filter() {
 }
 
 ensure_base_dependencies() {
-    echo "Updating APT index for base repositories..."
+    log "Updating APT index for base repositories..."
     "$APT_CMD" update
 
     if ! command -v gpg >/dev/null 2>&1; then
-        echo "Installing gnupg (for gpg)..."
+        log "Installing gnupg (for gpg)..."
         "$APT_CMD" install -y gnupg
     fi
 
     if ! dpkg -s apt-transport-https >/dev/null 2>&1; then
-        echo "Installing apt-transport-https..."
+        log "Installing apt-transport-https..."
         "$APT_CMD" install -y apt-transport-https
     fi
 }
 
 enable_i2pd_shepherd() {
-    echo "Detected GNU Shepherd. Enabling and starting i2pd via shepherd..."
+    log "Detected GNU Shepherd. Enabling and starting i2pd via shepherd..."
     herd enable i2pd || true
     herd start i2pd || true
 }
 
 enable_i2pd_openrc() {
-    echo "Detected OpenRC. Enabling and starting i2pd via OpenRC..."
+    log "Detected OpenRC. Enabling and starting i2pd via OpenRC..."
     rc-update add i2pd default || true
     rc-service i2pd restart || rc-service i2pd start || true
 }
 
 enable_i2pd_runit() {
-    echo "Detected runit. Enabling and starting i2pd via runit..."
+    log "Detected runit. Enabling and starting i2pd via runit..."
     if [[ -d /etc/sv/i2pd && ! -e /etc/service/i2pd ]]; then
         mkdir -p /etc/service
         ln -s /etc/sv/i2pd /etc/service/i2pd || true
@@ -261,24 +260,24 @@ enable_i2pd_runit() {
 }
 
 enable_i2pd_systemd() {
-    echo "Detected systemd. Enabling and starting i2pd.service..."
+    log "Detected systemd. Enabling and starting i2pd.service..."
     systemctl daemon-reload || true
 
     if systemctl list-unit-files | grep -q '^i2pd\.service[[:space:]]'; then
         systemctl enable i2pd.service
         systemctl restart i2pd.service
     else
-        echo "Warning: i2pd systemd service not found; you may need to enable/start it manually."
+        warn "i2pd systemd service not found; you may need to enable/start it manually."
     fi
 }
 
 enable_i2pd_s6() {
-    echo "Detected s6-based init. i2pd is installed, but this script does not manage s6 services automatically."
-    echo "Please enable and start the 'i2pd' service using your s6/s6-rc configuration."
+    log "Detected s6-based init. i2pd is installed, but this script does not manage s6 services automatically."
+    log "Please enable and start the 'i2pd' service using your s6/s6-rc configuration."
 }
 
 enable_i2pd_sysv() {
-    echo "Detected SysV-style init. Enabling and starting i2pd via init scripts..."
+    log "Detected SysV-style init. Enabling and starting i2pd via init scripts..."
     if command -v update-rc.d >/dev/null 2>&1; then
         update-rc.d i2pd defaults || true
     elif command -v chkconfig >/dev/null 2>&1; then
@@ -341,8 +340,8 @@ enable_and_start_i2pd() {
         enable_i2pd_sysv; return
     fi
 
-    echo "Warning: could not detect a known service manager (systemd, SysV, OpenRC, runit, s6, shepherd)."
-    echo "i2pd is installed, but you must start and enable it manually."
+    warn "could not detect a known service manager (systemd, SysV, OpenRC, runit, s6, shepherd)."
+    warn "i2pd is installed, but you must start and enable it manually."
 }
 
 get_release
@@ -355,16 +354,16 @@ if [[ "$DIST" == "raspbian" ]]; then
     REPO_RELEASE="${RELEASE}-rpi"
 fi
 
-echo "Detected distribution: ${DIST}"
-echo "Detected release codename: ${RELEASE}"
-echo "Using repo release codename: ${REPO_RELEASE}"
-echo "Using native APT architecture: ${ARCH_FILTER}"
+log "Detected distribution: ${DIST}"
+log "Detected release codename: ${RELEASE}"
+log "Using repo release codename: ${REPO_RELEASE}"
+log "Using native APT architecture: ${ARCH_FILTER}"
 
-echo "Importing signing key..."
+log "Importing signing key..."
 install -d -m 0755 /usr/share/keyrings
 net_curl https://repo.i2pd.xyz/r4sas.gpg | gpg --dearmor -o /usr/share/keyrings/purplei2p.gpg
 
-echo "Writing APT deb822 sources file for Purple I2P..."
+log "Writing APT deb822 sources file for Purple I2P..."
 rm -f /etc/apt/sources.list.d/purplei2p.list
 cat > /etc/apt/sources.list.d/purplei2p.sources <<EOF
 Types: deb
@@ -386,13 +385,13 @@ cat >> /etc/apt/sources.list.d/purplei2p.sources <<'EOF'
 # Signed-By: /usr/share/keyrings/purplei2p.gpg
 EOF
 
-echo "Updating APT index..."
+log "Updating APT index..."
 "$APT_CMD" update
 
-echo "Installing i2pd..."
+log "Installing i2pd..."
 "$APT_CMD" install -y i2pd
 
-echo "Enabling and starting i2pd service..."
+log "Enabling and starting i2pd service..."
 enable_and_start_i2pd
 
-echo "Done. i2pd should now be installed and (where supported) enabled and running."
+log "Done. i2pd should now be installed and (where supported) enabled and running."

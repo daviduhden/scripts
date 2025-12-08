@@ -46,7 +46,7 @@ ask_yes_no() {
         case "${answer,,}" in
             y|yes) return 0 ;;
             n|no|"") return 1 ;;
-            *) echo "Please answer y or n." ;;
+            *) warn "Please answer y or n." ;;
         esac
     done
 }
@@ -60,15 +60,15 @@ require_cmd() {
 }
 
 print_header() {
-    echo "=================================================="
-    echo "$1"
-    echo "=================================================="
+    printf '%s\n' "=================================================="
+    printf '%s\n' "$1"
+    printf '%s\n' "=================================================="
 }
 
 select_device() {
     print_header "Available block devices"
     lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT
-    echo
+    printf '\n'
     read -r -p "Enter the LUKS *partition* device (e.g. /dev/sdb1): " LUKS_DEV
     if [[ ! -b "$LUKS_DEV" ]]; then
         error "'$LUKS_DEV' is not a block device."
@@ -79,8 +79,8 @@ ensure_luks() {
     local type
     type=$(blkid -s TYPE -o value "$LUKS_DEV" || true)
     if [[ "$type" != "crypto_LUKS" ]]; then
-        echo "WARNING: '$LUKS_DEV' is not detected as crypto_LUKS (TYPE='$type')."
-        echo "This script assumes you are using a LUKS-encrypted partition."
+        warn "'$LUKS_DEV' is not detected as crypto_LUKS (TYPE='$type')."
+        warn "This script assumes you are using a LUKS-encrypted partition."
         if ! ask_yes_no "Continue anyway?"; then
             exit 1
         fi
@@ -88,17 +88,17 @@ ensure_luks() {
 }
 
 open_luks() {
-    echo
+    printf '\n'
     read -r -p "Enter a name for the opened LUKS mapper (e.g. ext_btrfs): " LUKS_NAME
     LUKS_NAME=${LUKS_NAME:-ext_btrfs}
 
     MAPPER_DEV="/dev/mapper/$LUKS_NAME"
 
     if [[ -b "$MAPPER_DEV" ]]; then
-        echo "LUKS mapper '$MAPPER_DEV' already exists, assuming it's already opened."
+        log "LUKS mapper '$MAPPER_DEV' already exists, assuming it's already opened."
     else
         print_header "Opening LUKS volume"
-        echo "You will be prompted for the LUKS passphrase for $LUKS_DEV"
+        log "You will be prompted for the LUKS passphrase for $LUKS_DEV"
         cryptsetup open "$LUKS_DEV" "$LUKS_NAME"
     fi
 
@@ -112,10 +112,10 @@ check_mapper_fs() {
     lsblk -f "$MAPPER_DEV"
     local fstype
     fstype=$(blkid -s TYPE -o value "$MAPPER_DEV" || true)
-    echo "Detected filesystem type inside $MAPPER_DEV: ${fstype:-unknown}"
+    log "Detected filesystem type inside $MAPPER_DEV: ${fstype:-unknown}"
 
     if [[ "$fstype" != "ext4" ]]; then
-        echo "WARNING: Filesystem is not ext4. btrfs-convert is intended for ext2/3/4."
+        warn "Filesystem is not ext4. btrfs-convert is intended for ext2/3/4."
         if ! ask_yes_no "Continue anyway?"; then
             exit 1
         fi
@@ -127,47 +127,47 @@ umount_if_mounted() {
     local mounts
     mounts=$(lsblk -no MOUNTPOINT "$MAPPER_DEV" | grep -v '^$' || true)
     if [[ -n "$mounts" ]]; then
-        echo "Device is currently mounted at:"
-        echo "$mounts"
+        log "Device is currently mounted at:"
+        printf '%s\n' "$mounts"
         if ask_yes_no "Unmount all these mountpoints now?"; then
             while read -r mp; do
                 [[ -z "$mp" ]] && continue
-                echo "Unmounting $mp ..."
+                log "Unmounting $mp ..."
                 umount "$mp"
             done <<< "$mounts"
         else
-            echo "Cannot continue while the device is mounted."
+            warn "Cannot continue while the device is mounted."
             exit 1
         fi
     else
-        echo "Device is not mounted. OK."
+        log "Device is not mounted. OK."
     fi
 }
 
 run_fsck_ext4() {
     print_header "Optional: fsck.ext4 check"
-    echo "It is recommended to run fsck.ext4 -f before converting."
+    log "It is recommended to run fsck.ext4 -f before converting."
     if ask_yes_no "Run fsck.ext4 -f on $MAPPER_DEV now?"; then
         fsck.ext4 -f "$MAPPER_DEV"
     else
-        echo "Skipping fsck.ext4 at your request."
+        log "Skipping fsck.ext4 at your request."
     fi
 }
 
 run_btrfs_convert() {
     print_header "Converting ext4 → Btrfs with btrfs-convert"
-    echo "This will modify the filesystem *inside* $MAPPER_DEV."
-    echo "The LUKS layer on $LUKS_DEV is NOT changed."
-    echo
-    echo "A backup subvolume (ext2_saved) will be created so you can revert"
-    echo "if needed, as long as you don't delete it later."
-    echo
-    echo "!!! RISK WARNING !!!"
-    echo "Power loss, hardware issues, or bugs may still cause DATA LOSS."
-    echo
+    log "This will modify the filesystem *inside* $MAPPER_DEV."
+    log "The LUKS layer on $LUKS_DEV is NOT changed."
+    printf '\n'
+    log "A backup subvolume (ext2_saved) will be created so you can revert"
+    log "if needed, as long as you don't delete it later."
+    printf '\n'
+    warn "!!! RISK WARNING !!!"
+    warn "Power loss, hardware issues, or bugs may still cause DATA LOSS."
+    printf '\n'
 
     if ! ask_yes_no "Do you REALLY want to run btrfs-convert on $MAPPER_DEV?"; then
-        echo "Aborting conversion."
+        warn "Aborting conversion."
         exit 1
     fi
 
@@ -181,18 +181,18 @@ mount_btrfs() {
     MOUNT_POINT=${MOUNT_POINT:-/mnt/$LUKS_NAME}
 
     if [[ ! -d "$MOUNT_POINT" ]]; then
-        echo "Creating mount point directory: $MOUNT_POINT"
+        log "Creating mount point directory: $MOUNT_POINT"
         mkdir -p "$MOUNT_POINT"
     fi
 
     mount -t btrfs "$MAPPER_DEV" "$MOUNT_POINT"
-    echo
-    echo "Mounted $MAPPER_DEV on $MOUNT_POINT"
-    echo
-    echo "Listing top-level files:"
+    printf '\n'
+    log "Mounted $MAPPER_DEV on $MOUNT_POINT"
+    printf '\n'
+    log "Listing top-level files:"
     ls "$MOUNT_POINT" || true
-    echo
-    echo "Listing Btrfs subvolumes:"
+    printf '\n'
+    log "Listing Btrfs subvolumes:"
     btrfs subvolume list "$MOUNT_POINT" || true
 }
 
@@ -200,7 +200,7 @@ update_fstab() {
     print_header "Optional: Add /etc/fstab entry"
 
     if ! ask_yes_no "Add an /etc/fstab entry for this Btrfs filesystem?"; then
-        echo "Skipping /etc/fstab modification."
+        log "Skipping /etc/fstab modification."
         return
     fi
 
@@ -211,41 +211,41 @@ update_fstab() {
         return
     fi
 
-    echo "Current mount point: $MOUNT_POINT"
+    log "Current mount point: $MOUNT_POINT"
     read -r -p "Filesystem options (default: defaults,compress=zstd): " FSTAB_OPTS
     FSTAB_OPTS=${FSTAB_OPTS:-defaults,compress=zstd}
 
     local fstab_line
     fstab_line="UUID=$uuid  $MOUNT_POINT  btrfs  $FSTAB_OPTS  0  0"
 
-    echo
-    echo "About to append this line to /etc/fstab:"
-    echo "$fstab_line"
-    echo
+    printf '\n'
+    log "About to append this line to /etc/fstab:"
+    printf '%s\n' "$fstab_line"
+    printf '\n'
 
     if ask_yes_no "Proceed and append to /etc/fstab?"; then
-        echo "Creating backup of /etc/fstab at /etc/fstab.bak-$(date +%Y%m%d-%H%M%S)"
+        log "Creating backup of /etc/fstab at /etc/fstab.bak-$(date +%Y%m%d-%H%M%S)"
         cp /etc/fstab "/etc/fstab.bak-$(date +%Y%m%d-%H%M%S)"
-        echo "$fstab_line" >> /etc/fstab
-        echo "Entry added to /etc/fstab."
+        printf '%s\n' "$fstab_line" >> /etc/fstab
+        log "Entry added to /etc/fstab."
     else
-        echo "Not modifying /etc/fstab."
+        log "Not modifying /etc/fstab."
     fi
 }
 
 delete_ext2_saved() {
     print_header "Optional: Remove ext2_saved backup"
 
-    echo "Inside the Btrfs filesystem, a subvolume ext2_saved should exist."
-    echo "As long as ext2_saved exists, you (in theory) can revert to ext4."
-    echo "If you delete ext2_saved, you CANNOT revert using btrfs-convert."
-    echo
-    echo "It's recommended to keep ext2_saved for some time until you are confident"
-    echo "everything works fine with Btrfs."
-    echo
+    log "Inside the Btrfs filesystem, a subvolume ext2_saved should exist."
+    log "As long as ext2_saved exists, you (in theory) can revert to ext4."
+    warn "If you delete ext2_saved, you CANNOT revert using btrfs-convert."
+    printf '\n'
+    log "It's recommended to keep ext2_saved for some time until you are confident"
+    log "everything works fine with Btrfs."
+    printf '\n'
 
     if ! ask_yes_no "Do you want to delete ext2_saved NOW (NOT recommended early)?"; then
-        echo "Keeping ext2_saved."
+        log "Keeping ext2_saved."
         return
     fi
 
@@ -259,24 +259,24 @@ delete_ext2_saved() {
     fi
 
     if [[ ! -d "$MOUNT_POINT/ext2_saved" ]]; then
-        echo "WARNING: '$MOUNT_POINT/ext2_saved' does not exist; nothing to delete."
+        warn "'$MOUNT_POINT/ext2_saved' does not exist; nothing to delete."
         return
     fi
 
     if ! ask_yes_no "Final confirmation: delete '$MOUNT_POINT/ext2_saved'?"; then
-        echo "Aborted deletion of ext2_saved."
+        warn "Aborted deletion of ext2_saved."
         return
     fi
 
     btrfs subvolume delete "$MOUNT_POINT/ext2_saved"
-    echo "ext2_saved deleted."
+    log "ext2_saved deleted."
 
-    echo "Running optional defragment and balance on $MOUNT_POINT."
+    log "Running optional defragment and balance on $MOUNT_POINT."
     if ask_yes_no "Run 'btrfs filesystem defragment -r' and 'btrfs balance start'?"; then
         btrfs filesystem defragment -r "$MOUNT_POINT" || true
         btrfs balance start "$MOUNT_POINT" || true
     else
-        echo "Skipping defragment and balance."
+        log "Skipping defragment and balance."
     fi
 }
 
@@ -296,19 +296,19 @@ main() {
     mount_btrfs
     update_fstab
 
-    echo
-    echo "Conversion to Btrfs is done and the filesystem is mounted."
-    echo "You can start using it now."
-    echo
+    printf '\n'
+    log "Conversion to Btrfs is done and the filesystem is mounted."
+    log "You can start using it now."
+    printf '\n'
 
     delete_ext2_saved
 
-    echo
-    echo "All done. Remember:"
-    echo "- LUKS encryption is unchanged."
-    echo "- You are now using Btrfs inside the LUKS volume."
-    echo "- If you kept ext2_saved, you still have a way back to ext (in theory)."
-    echo
+    printf '\n'
+    log "All done. Remember:"
+    log "- LUKS encryption is unchanged."
+    log "- You are now using Btrfs inside the LUKS volume."
+    log "- If you kept ext2_saved, you still have a way back to ext (in theory)."
+    printf '\n'
 }
 
 main "$@"

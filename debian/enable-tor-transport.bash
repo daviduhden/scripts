@@ -11,16 +11,24 @@ set -euo pipefail
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
+# Simple colors for messages
+GREEN="\e[32m"
+YELLOW="\e[33m"
+RED="\e[31m"
+RESET="\e[0m"
+
+log()    { printf '%s %b[INFO]%b %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$GREEN" "$RESET" "$*"; }
+warn()   { printf '%s %b[WARN]%b %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$YELLOW" "$RESET" "$*"; }
+error()  { printf '%s %b[ERROR]%b %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$RED" "$RESET" "$*" >&2; exit 1; }
+
 require_cmd() {
     if ! command -v "$1" >/dev/null 2>&1; then
-        echo "Missing required command: $1" >&2
-        exit 1
+        error "Missing required command: $1"
     fi
 }
 
 if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
-    echo "This script must be run as root. Try: sudo $0" >&2
-    exit 1
+    error "This script must be run as root. Try: sudo $0"
 fi
 
 require_cmd awk
@@ -35,11 +43,10 @@ if command -v apt-get >/dev/null 2>&1; then
 elif command -v apt >/dev/null 2>&1; then
     APT_CMD="apt"
 else
-    echo "Neither apt-get nor apt found. This script targets Debian-based systems." >&2
-    exit 1
+    error "Neither apt-get nor apt found. This script targets Debian-based systems."
 fi
 
-echo "Updating APT index and installing tor transport packages..."
+log "Updating APT index and installing tor transport packages..."
 "$APT_CMD" update
 "$APT_CMD" install -y apt-transport-tor tor
 
@@ -55,7 +62,7 @@ if [[ -d /etc/apt/sources.list.d ]]; then
     cp -a /etc/apt/sources.list.d "$backup_dir/"
 fi
 
-echo "Backups stored in ${backup_dir}"
+log "Backups stored in ${backup_dir}"
 
 convert_list_file() {
     local file="$1" tmp
@@ -92,19 +99,19 @@ convert_sources_file() {
 }
 
 enable_tor_shepherd() {
-    echo "Detected GNU Shepherd. Enabling and starting tor via shepherd..."
+    log "Detected GNU Shepherd. Enabling and starting tor via shepherd..."
     herd enable tor || true
     herd start tor || true
 }
 
 enable_tor_openrc() {
-    echo "Detected OpenRC. Enabling and starting tor via OpenRC..."
+    log "Detected OpenRC. Enabling and starting tor via OpenRC..."
     rc-update add tor default || true
     rc-service tor restart || rc-service tor start || true
 }
 
 enable_tor_runit() {
-    echo "Detected runit. Enabling and starting tor via runit..."
+    log "Detected runit. Enabling and starting tor via runit..."
     if [[ -d /etc/sv/tor && ! -e /etc/service/tor ]]; then
         mkdir -p /etc/service
         ln -s /etc/sv/tor /etc/service/tor || true
@@ -113,7 +120,7 @@ enable_tor_runit() {
 }
 
 enable_tor_systemd() {
-    echo "Detected systemd. Enabling and starting tor.service..."
+    log "Detected systemd. Enabling and starting tor.service..."
     systemctl daemon-reload || true
 
     if systemctl list-unit-files | grep -q '^tor\.service'; then
@@ -123,17 +130,17 @@ enable_tor_systemd() {
         systemctl enable tor@default.service
         systemctl restart tor@default.service
     else
-        echo "Warning: tor systemd service not found; you may need to enable/start it manually."
+        warn "tor systemd service not found; you may need to enable/start it manually."
     fi
 }
 
 enable_tor_s6() {
-    echo "Detected s6-based init. tor is installed, but this script does not manage s6 services automatically."
-    echo "Please enable and start the 'tor' service using your s6/s6-rc configuration."
+    log "Detected s6-based init. tor is installed, but this script does not manage s6 services automatically."
+    log "Please enable and start the 'tor' service using your s6/s6-rc configuration."
 }
 
 enable_tor_sysv() {
-    echo "Detected SysV-style init. Enabling and starting tor via init scripts..."
+    log "Detected SysV-style init. Enabling and starting tor via init scripts..."
     if command -v update-rc.d >/dev/null 2>&1; then
         update-rc.d tor defaults || true
     elif command -v chkconfig >/dev/null 2>&1; then
@@ -196,29 +203,29 @@ enable_and_start_tor() {
         enable_tor_sysv; return
     fi
 
-    echo "Warning: could not detect a known service manager (systemd, SysV, OpenRC, runit, s6, shepherd)."
-    echo "tor is installed, but you must start and enable it manually."
+    warn "could not detect a known service manager (systemd, SysV, OpenRC, runit, s6, shepherd)."
+    warn "tor is installed, but you must start and enable it manually."
 }
 
 if [[ -f /etc/apt/sources.list ]]; then
-    echo "Converting /etc/apt/sources.list..."
+    log "Converting /etc/apt/sources.list..."
     convert_list_file /etc/apt/sources.list
 fi
 
 if [[ -d /etc/apt/sources.list.d ]]; then
     shopt -s nullglob
     for f in /etc/apt/sources.list.d/*.list; do
-        echo "Converting ${f}..."
+        log "Converting ${f}..."
         convert_list_file "$f"
     done
     for f in /etc/apt/sources.list.d/*.sources; do
-        echo "Converting ${f}..."
+        log "Converting ${f}..."
         convert_sources_file "$f"
     done
     shopt -u nullglob
 fi
 
-echo "Enabling and starting tor service (if available)..."
+log "Enabling and starting tor service (if available)..."
 enable_and_start_tor
 
-echo "Conversion complete. Run 'apt update' to refresh indexes over Tor."
+log "Conversion complete. Run 'apt update' to refresh indexes over Tor."
