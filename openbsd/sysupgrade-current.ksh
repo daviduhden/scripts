@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/ksh
 
 set -e
 
@@ -8,13 +8,19 @@ set -e
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
 
-log()   { printf '%s [INFO]  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
-warn()  { printf '%s [WARN]  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
-error() { printf '%s [ERROR] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
+# Prefer ksh93 when available; fallback to base ksh
+if [ -z "${_KSH93_EXECUTED:-}" ] && command -v ksh93 >/dev/null 2>&1; then
+    _KSH93_EXECUTED=1 exec ksh93 "$0" "$@"
+fi
+_KSH93_EXECUTED=1
 
 # Basic PATH (important when run from cron)
 PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin
 export PATH
+
+log()   { printf '%s [INFO]  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
+warn()  { printf '%s [WARN]  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
+error() { printf '%s [ERROR] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 
 log "Preparing /upgrade.site for post-upgrade tasks..."
 
