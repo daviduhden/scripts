@@ -1,0 +1,25 @@
+[Unit]
+Description=User Tor Service (Arti)
+After=network.target
+Before=nss-lookup.target
+Wants=nss-lookup.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/arti --config %h/.config/arti/arti.toml proxy
+ExecReload=/bin/kill -HUP $MAINPID
+KillSignal=SIGINT
+LimitNOFILE=16384
+
+# Hardening
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=full
+ReadOnlyPaths=/
+ReadWritePaths=%h/.config/arti
+ReadWritePaths=%h/.local/share/arti
+ReadWritePaths=%h/.local/state/arti
+
+[Install]
+WantedBy=default.target

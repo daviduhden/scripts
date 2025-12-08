@@ -31,7 +31,8 @@ OPENBSD_SCRIPTS=\
 SECUREBLUE_SCRIPTS=\
 	secureblue/luks-ext4-to-btrfs.bash \
 	secureblue/sudo-wrapper.bash \
-	secureblue/sysupgrade.bash
+	secureblue/sysupgrade.bash \
+	secureblue/update-arti-oniux.bash
 
 SHELL_SCRIPTS=\
 	shell/global-vi-mode.sh
