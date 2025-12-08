@@ -1,6 +1,5 @@
 #!/usr/bin/env perl
 
-#
 # Perl script to install GnuPG, generate strong keys, upload them
 # to keys.openpgp.org, and install config files from ./gpg-conf.
 #
@@ -11,7 +10,6 @@
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
-#
 
 use strict;
 use warnings;
@@ -567,8 +565,21 @@ sub install_gnupg_macos {
 
     unless ($brew) {
         log_info("Homebrew not found. Installing Homebrew...");
-        my $curl = find_in_path('curl') or error("curl is required to install Homebrew.");
-        my $cmd  = "$curl -fLsS --retry 5 https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh | /bin/bash";
+        my $gh   = find_in_path('gh');
+        my $git  = find_in_path('git');
+        my $curl = find_in_path('curl');
+
+        my $cmd;
+        if ($gh) {
+            $cmd = "$gh api -H 'Accept: application/vnd.github.raw' repos/Homebrew/install/contents/install.sh --output - | /bin/bash";
+        } elsif ($git) {
+            $cmd = "tmpdir=$(mktemp -d 2>/dev/null || mktemp -d -t brewinst) && git clone --depth 1 https://github.com/Homebrew/install.git \"\$tmpdir/install\" && /bin/bash \"\$tmpdir/install/install.sh\" && rm -rf \"\$tmpdir\"";
+        } elsif ($curl) {
+            $cmd  = "$curl -fLsS --retry 5 https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh | /bin/bash";
+        } else {
+            error("Neither gh, git, nor curl is available to install Homebrew.");
+        }
+
         system($cmd);
         if ($? != 0) {
             error("Homebrew installation seems to have failed.");

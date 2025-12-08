@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
 # Automated apt maintenance script
 # - Updates package lists
@@ -10,28 +11,12 @@
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
 
-set -euo pipefail
-
 # Basic PATH (important when run from cron)
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
 APT_BIN="/bin/apt"
 
-# Optional torsocks wrapper for networked apt operations
-if command -v torsocks >/dev/null 2>&1; then
-  TORSOCKS="torsocks"
-else
-  TORSOCKS=""
-fi
-
-apt_net() {
-  if [[ -n "$TORSOCKS" ]]; then
-    "$TORSOCKS" "$@"
-  else
-    "$@"
-  fi
-}
 BACKUP_ROOT="/var/backups/apt-config-backups"
 
 # Non-interactive apt
@@ -71,12 +56,12 @@ backup_etc() {
 
 apt_update() {
   log "Updating package lists..."
-  apt_net "$APT_BIN" update
+  "$APT_BIN" update
 }
 
 apt_full_upgrade() {
   log "Running full-upgrade (auto-replace old config files)..."
-  apt_net "$APT_BIN" -y \
+  "$APT_BIN" -y \
     -o Dpkg::Options::="--force-confdef" \
     -o Dpkg::Options::="--force-confnew" \
     full-upgrade
@@ -84,10 +69,10 @@ apt_full_upgrade() {
 
 apt_cleanup() {
   log "Removing unused packages (autoremove)..."
-  apt_net "$APT_BIN" -y autoremove
+  "$APT_BIN" -y autoremove
 
   log "Cleaning package cache (autoclean)..."
-  apt_net "$APT_BIN" -y autoclean
+  "$APT_BIN" -y autoclean
 }
 
 restart_services() {

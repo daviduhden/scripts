@@ -1,6 +1,5 @@
 #!/usr/bin/env perl
 
-#
 # Interactive SSH launcher using entries from ~/.ssh/known_hosts:
 #  - Exports SSH_ASKPASS/SSH_ASKPASS_REQUIRE for ksshaskpass GUI password prompts
 #  - Parses known_hosts and builds a de-duplicated list of hosts (and custom ports)
@@ -19,7 +18,6 @@ my $YELLOW = "\e[33m";
 my $RED = "\e[31m";
 my $RESET = "\e[0m";
 
-my $TORSOCKS = find_in_path('torsocks') // '';
 
 sub info {
     my ($msg) = @_;
@@ -66,14 +64,6 @@ if ($ksshaskpass) {
     $ENV{SSH_ASKPASS_REQUIRE} = 'prefer';  # or 'force' if you want always GUI
 } else {
     warn_msg('ksshaskpass not found in PATH; continuing without SSH_ASKPASS');
-}
-
-#######################################
-# 1b. Optional torsocks for ssh       #
-#######################################
-
-if ($TORSOCKS) {
-    info("torsocks detected: $TORSOCKS");
 }
 
 #######################################
@@ -235,17 +225,12 @@ if ( $ssh_user =~ /^\s+$/ ) {
 ######################
 
 my @cmd;
-if ( $selected_port ) {
+if ($selected_port) {
     info("Connecting to $ssh_user\@$selected_host (port $selected_port)...");
     @cmd = ('ssh', '-p', $selected_port, "$ssh_user\@$selected_host");
 } else {
     info("Connecting to $ssh_user\@$selected_host ...");
     @cmd = ('ssh', "$ssh_user\@$selected_host");
-}
-
-if ($TORSOCKS) {
-    unshift @cmd, $TORSOCKS;
-    info("Wrapping ssh with torsocks");
 }
 
 exec @cmd or error("Failed to exec ssh: $!");

@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 
 # Secureblue maintenance script
 #
@@ -16,8 +17,6 @@
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
-
-set -euo pipefail
 
 # Resolve the real path to this script (follow symlinks)
 if command -v readlink >/dev/null 2>&1; then
@@ -39,29 +38,14 @@ fi
 
 export PATH
 
-# Optional torsocks for network operations
-if command -v torsocks >/dev/null 2>&1; then
-  TORSOCKS="torsocks"
-else
-  TORSOCKS=""
-fi
-
 net_run() {
-  if [[ -n "$TORSOCKS" ]]; then
-    "$TORSOCKS" "$@"
-  else
-    "$@"
-  fi
+  "$@"
 }
 
 net_run_as_user() {
   local user="$1"
   shift
-  if [[ -n "$TORSOCKS" ]]; then
-    runuser -u "$user" -- "$TORSOCKS" "$@"
-  else
-    runuser -u "$user" -- "$@"
-  fi
+  runuser -u "$user" -- "$@"
 }
 
 # Simple colors for messages

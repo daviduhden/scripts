@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail  # exit on error, unset variable, or failing pipeline
 
 # Automatically install/update Monero CLI to the latest stable version
 # on Linux systems using official tarballs.
@@ -13,21 +14,13 @@
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
 
-set -euo pipefail  # exit on error, unset variable, or failing pipeline
-
 # Basic PATH (important when run from cron)
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
-# Optional torsocks for network operations
-if command -v torsocks >/dev/null 2>&1; then
-    TORSOCKS="torsocks"
-else
-    TORSOCKS=""
-fi
-
 REPO="monero-project/monero"
 API_URL="https://api.github.com/repos/${REPO}/releases/latest"
+REPO_URL="https://github.com/${REPO}.git"
 DOWNLOAD_BASE="https://downloads.getmonero.org/cli"
 SYSTEMD_UNIT_URL="https://raw.githubusercontent.com/monero-project/monero/master/utils/systemd/monerod.service"
 
@@ -66,16 +59,38 @@ require_cmd systemctl
 require_cmd install
 
 net_curl() {
-    if [[ -n "$TORSOCKS" ]]; then
-        "$TORSOCKS" curl -fLsS --retry 5 "$@"
-    else
-        curl -fLsS --retry 5 "$@"
-    fi
+    curl -fLsS --retry 5 "$@"
+}
+
+has_cmd() {
+    command -v "$1" >/dev/null 2>&1
 }
 
 # Get the latest release tag from GitHub
 get_latest_release() {
-    local json
+    local tag json
+
+    if has_cmd gh; then
+        tag="$(gh api "repos/${REPO}/releases/latest" --jq .tag_name 2>/dev/null || true)"
+        if [[ -n "$tag" ]]; then
+            echo "$tag"
+            return 0
+        fi
+    fi
+
+    if has_cmd git; then
+        tag="$(git ls-remote --tags --refs "$REPO_URL" 2>/dev/null \
+            | awk '{print $2}' \
+            | sed 's#refs/tags/##' \
+            | sed 's/\^{}//' \
+            | sort -Vr \
+            | head -n1)"
+        if [[ -n "$tag" ]]; then
+            echo "$tag"
+            return 0
+        fi
+    fi
+
     if ! json="$(net_curl "$API_URL" 2>/dev/null)"; then
         return 1
     fi
@@ -216,8 +231,21 @@ echo "Updating systemd unit: /etc/systemd/system/monerod.service..."
 install -d /etc/systemd/system
 
 UNIT_TMP="${TMPDIR}/monerod.service"
-if ! net_curl "${SYSTEMD_UNIT_URL}" -o "${UNIT_TMP}"; then
-    error "failed to download systemd unit from ${SYSTEMD_UNIT_URL}"
+download_systemd_unit() {
+    local out_file="$1"
+
+    if has_cmd gh; then
+        if gh api --method GET -H "Accept: application/vnd.github.raw" "repos/${REPO}/contents/utils/systemd/monerod.service?ref=master" --output "$out_file" >/dev/null 2>&1; then
+            return 0
+        fi
+        warn "gh api for systemd unit failed; falling back to curl."
+    fi
+
+    net_curl "${SYSTEMD_UNIT_URL}" -o "$out_file"
+}
+
+if ! download_systemd_unit "${UNIT_TMP}"; then
+    error "failed to download systemd unit (gh/git/curl chain)"
 fi
 
 # This always overwrites the target file, whether it exists or not

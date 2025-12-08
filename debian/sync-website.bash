@@ -1,7 +1,6 @@
 #!/bin/bash
 set -uo pipefail
 
-#
 # Synchronizes a deployed website directory with a GitHub repository:
 #  - Prefers GitHub CLI (gh repo sync) if available
 #  - Falls back to plain git fetch/reset if needed
@@ -11,26 +10,10 @@ set -uo pipefail
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
-#
 
 # Basic PATH (important when run from cron)
 PATH=/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
-
-# Optional torsocks for network operations
-if command -v torsocks >/dev/null 2>&1; then
-    TORSOCKS="torsocks"
-else
-    TORSOCKS=""
-fi
-
-net_run() {
-    if [[ -n "$TORSOCKS" ]]; then
-        "$TORSOCKS" "$@"
-    else
-        "$@"
-    fi
-}
 
 # Simple colors for messages
 GREEN="\e[32m"
@@ -49,6 +32,8 @@ error()  { printf '%s %b[ERROR]%b %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$RED" "$
 # GH_USER: system user that owns the GitHub CLI configuration (~/.config/gh/hosts.yml)
 # You can override this via environment (e.g. GH_USER="david")
 GH_USER="${GH_USER:-admin}"
+GH_HOST="${GH_HOST:-github.com}"
+REPO_SLUG="${REPO_SLUG:-}"
 
 # Try to resolve the home directory of GH_USER in a portable way.
 if command -v getent >/dev/null 2>&1; then
@@ -98,6 +83,8 @@ trap cleanup EXIT INT TERM
 # Function: Sync using GitHub CLI #
 ###################################
 sync_with_gh_cli() {
+    local repo_slug="" attempt=1
+
     if ! command -v gh >/dev/null 2>&1; then
         log "GitHub CLI (gh) is not installed; skipping gh sync."
         return 1
@@ -111,6 +98,11 @@ sync_with_gh_cli() {
     # Ensure GitHub CLI config exists for GH_USER
     if [ ! -f "${GH_CONFIG_DIR}/hosts.yml" ]; then
         log "Warning: ${GH_CONFIG_DIR}/hosts.yml not found; GitHub CLI is not authenticated for user '$GH_USER'. Skipping gh sync."
+        return 1
+    fi
+
+    if ! GH_CONFIG_DIR="$GH_CONFIG_DIR" GH_HOST="$GH_HOST" gh auth status --hostname "$GH_HOST" >/dev/null 2>&1; then
+        log "Warning: gh auth status failed for host ${GH_HOST} (config user: ${GH_USER}); skipping gh sync."
         return 1
     fi
 
@@ -135,11 +127,31 @@ sync_with_gh_cli() {
         fi
     fi
 
-    log "Syncing repository using GitHub CLI (gh repo sync) with config of user '$GH_USER'..."
+    # Determine repo slug from origin URL or env override
+    if [ -n "$REPO_SLUG" ]; then
+        repo_slug="$REPO_SLUG"
+    else
+        repo_slug=$(git remote get-url origin 2>/dev/null | sed -E 's#(git@|https?://)([^/:]+)[:/]([^/]+)/([^/.]+)(\.git)?#\3/\4#')
+    fi
 
-    # Force gh to use GH_USER's config directory
-    if ! net_run GH_CONFIG_DIR="$GH_CONFIG_DIR" gh repo sync --branch "$BRANCH" >/dev/null 2>&1; then
-        log "Error: gh repo sync failed."
+    if [ -z "$repo_slug" ]; then
+        log "Warning: could not derive repo slug for gh; skipping gh sync."
+        return 1
+    fi
+
+    log "Syncing repository using GitHub CLI (gh repo sync) for ${repo_slug} with config of user '$GH_USER'..."
+
+    while [ $attempt -le 2 ]; do
+        if GH_CONFIG_DIR="$GH_CONFIG_DIR" GH_HOST="$GH_HOST" gh repo sync "$repo_slug" --branch "$BRANCH" >/dev/null 2>&1; then
+            break
+        fi
+        log "gh repo sync attempt ${attempt} failed; retrying..."
+        attempt=$((attempt + 1))
+        sleep 2
+    done
+
+    if [ $attempt -gt 2 ]; then
+        log "Error: gh repo sync failed after retries."
         return 1
     fi
 
@@ -202,7 +214,7 @@ sync_with_git() {
     fi
 
     log "Fetching latest changes via git..."
-    if ! net_run git fetch origin "$BRANCH"; then
+    if ! git fetch origin "$BRANCH"; then
         log "Error: git fetch failed."
         return 1
     fi
@@ -253,14 +265,14 @@ sync_with_github_zip() {
     local zipfile="$tmpdir/source.zip"
 
     if command -v curl >/dev/null 2>&1; then
-        if ! net_run curl -fsSL "$ZIP_URL" -o "$zipfile"; then
+        if ! curl -fsSL "$ZIP_URL" -o "$zipfile"; then
             log "Error: curl download failed."
             rm -rf "$tmpdir"
             return 1
         fi
     else
         # Use wget instead of curl
-        if ! net_run wget -qO "$zipfile" "$ZIP_URL"; then
+        if ! wget -qO "$zipfile" "$ZIP_URL"; then
             log "Error: wget download failed."
             rm -rf "$tmpdir"
             return 1

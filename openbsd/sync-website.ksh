@@ -1,4 +1,5 @@
 #!/bin/ksh
+set -u
 
 # Synchronizes a deployed website directory with a GitHub repository:
 #  - Prefers GitHub CLI (gh repo sync) if available
@@ -16,36 +17,19 @@ if [ -z "${_KSH93_EXECUTED:-}" ] && command -v ksh93 >/dev/null 2>&1; then
 fi
 _KSH93_EXECUTED=1
 
-set -u
-
-# Optional torsocks for network operations
-if command -v torsocks >/dev/null 2>&1; then
-    TORSOCKS="torsocks"
-else
-    TORSOCKS=""
-fi
-
-net_run() {
-    if [ -n "$TORSOCKS" ]; then
-        "$TORSOCKS" "$@"
-    else
-        "$@"
-    fi
-}
-
 # Basic PATH (important when run from cron)
 PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin
 export PATH
 
-# Optional: GitHub token file for non-interactive gh usage
+# GitHub token file for non-interactive gh usage
 GH_TOKEN_FILE="/root/.config/gh_token"
 GH_TOKEN=""
+GH_HOST="${GH_HOST:-github.com}"
+REPO_SLUG="${REPO_SLUG:-}"
 
 if [ -r "$GH_TOKEN_FILE" ]; then
-    # Populate GH_TOKEN from a protected file
     GH_TOKEN="$(cat "$GH_TOKEN_FILE" 2>/dev/null || echo "")"
 else
-    # Not fatal: gh can still work if already authenticated in hosts.yml
     GH_TOKEN=""
 fi
 
@@ -57,6 +41,7 @@ SERVICE_NAME="httpd"
 # GitHub ZIP URL for fallback (ADJUST THIS)
 # Example: https://github.com/user/repo/archive/refs/heads/main.zip
 ZIP_URL="https://github.com/daviduhden/cyberpunk-handbook/archive/refs/heads/${BRANCH}.zip"
+
 log()   { printf '%s [INFO]  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
 warn()  { printf '%s [WARN]  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 error() { printf '%s [ERROR] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
@@ -86,6 +71,8 @@ trap 'cleanup' EXIT INT TERM
 # Function: sync using GitHub CLI #
 ###################################
 sync_with_gh_cli() {
+    typeset repo_slug="" attempt=1
+
     if ! command -v gh >/dev/null 2>&1; then
         log "GitHub CLI (gh) is not installed; skipping gh sync."
         return 1
@@ -101,55 +88,70 @@ sync_with_gh_cli() {
         return 1
     }
 
-    # Ensure this is a git repository
     if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
         log "Warning: $REPO_DIR is not a git repository; GitHub CLI sync is not possible."
         return 1
     fi
 
-    # Ensure we are on the correct branch
     CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
     if [ "$CURRENT_BRANCH" != "$BRANCH" ]; then
-        if ! net_run env GH_TOKEN="$GH_TOKEN" gh repo sync --branch "$BRANCH" >/dev/null 2>&1; then
+        log "Switching to branch $BRANCH (current: $CURRENT_BRANCH)"
         if ! git checkout "$BRANCH"; then
             log "Error: could not checkout branch $BRANCH before gh sync."
             return 1
         fi
     fi
-        if ! net_run gh repo sync --branch "$BRANCH" >/dev/null 2>&1; then
-    log "Syncing repository using GitHub CLI (gh repo sync)..."
 
-    # Use GH_TOKEN if we have it; otherwise rely on existing gh authentication
-    if [ -n "$GH_TOKEN" ]; then
-        if ! env GH_TOKEN="$GH_TOKEN" gh repo sync --branch "$BRANCH" >/dev/null 2>&1; then
-            log "Error: gh repo sync failed (with GH_TOKEN)."
-            return 1
-        fi
+    if [ -n "$REPO_SLUG" ]; then
+        repo_slug="$REPO_SLUG"
     else
-        log "Warning: GH_TOKEN is empty; relying on existing gh authentication."
-        if ! gh repo sync --branch "$BRANCH" >/dev/null 2>&1; then
-            log "Error: gh repo sync failed."
-            return 1
-        fi
+        repo_slug=$(git remote get-url origin 2>/dev/null | sed -E 's#(git@|https?://)([^/:]+)[:/]([^/]+)/([^/.]+)(\.git)?#\3/\4#')
     fi
 
-    # After gh sync, ensure local matches origin/$BRANCH and clean up
-    GH_LOCAL_REV=$(git rev-parse @ 2>/dev/null)
-    if [ -z "$GH_LOCAL_REV" ]; then
-        log "Error: cannot get local revision after gh sync."
+    if [ -z "$repo_slug" ]; then
+        log "Warning: could not derive repo slug for gh; skipping gh sync."
         return 1
     fi
 
-    GH_REMOTE_REV=$(git rev-parse "origin/$BRANCH" 2>/dev/null)
-    if [ -z "$GH_REMOTE_REV" ]; then
-        log "Error: cannot get remote revision after gh sync."
+    log "Syncing repository using GitHub CLI (gh repo sync) for ${repo_slug}..."
+
+    while [ $attempt -le 2 ]; do
+        if [ -n "$GH_TOKEN" ]; then
+            if env GH_TOKEN="$GH_TOKEN" GH_HOST="$GH_HOST" gh auth status --hostname "$GH_HOST" >/dev/null 2>&1 && \
+               env GH_TOKEN="$GH_TOKEN" GH_HOST="$GH_HOST" gh repo sync "$repo_slug" --branch "$BRANCH" >/dev/null 2>&1; then
+                break
+            fi
+        else
+            if GH_HOST="$GH_HOST" gh auth status --hostname "$GH_HOST" >/dev/null 2>&1 && \
+               GH_HOST="$GH_HOST" gh repo sync "$repo_slug" --branch "$BRANCH" >/dev/null 2>&1; then
+                break
+            fi
+        fi
+        log "gh repo sync attempt ${attempt} failed; retrying..."
+        attempt=$((attempt + 1))
+        sleep 2
+    done
+
+    if [ $attempt -gt 2 ]; then
+        log "Error: gh repo sync failed after retries."
         return 1
     fi
 
-    if [ "$GH_LOCAL_REV" = "$GH_REMOTE_REV" ]; then
-        log "Repository is up to date after GitHub CLI sync."
-    else
-        log "Forcing local branch to match origin/$BRANCH after GitHub CLI sync..."
+    if ! git fetch origin "$BRANCH"; then
+        log "Error: git fetch failed after gh sync."
+        return 1
+    fi
+
+    LOCAL=$(git rev-parse @ 2>/dev/null || echo "")
+    REMOTE=$(git rev-parse "origin/$BRANCH" 2>/dev/null || echo "")
+
+    if [ -z "$LOCAL" ] || [ -z "$REMOTE" ]; then
+        log "Error: could not determine revisions after gh sync."
+        return 1
+    fi
+
+    if [ "$LOCAL" != "$REMOTE" ]; then
+        log "Forcing local branch to match origin/$BRANCH after gh sync..."
         if ! git reset --hard "origin/$BRANCH"; then
             log "Error: git reset failed after gh sync."
             return 1
@@ -157,10 +159,10 @@ sync_with_gh_cli() {
         if ! git clean -fd; then
             log "Error: git clean failed after gh sync."
             return 1
-    if ! net_run git fetch origin "$BRANCH"; then
-        log "Repository successfully updated via GitHub CLI."
+        fi
     fi
 
+    log "Repository successfully updated via GitHub CLI."
     return 0
 }
 
@@ -169,22 +171,20 @@ sync_with_gh_cli() {
 ############################
 sync_with_git() {
     if ! command -v git >/dev/null 2>&1; then
-        if ! net_run curl -fsSL "$ZIP_URL" -o "$ZIP_FILE"; then
+        log "git is not installed or not in PATH. Skipping git sync."
         return 1
     fi
 
     cd "$REPO_DIR" || {
         log "Error: cannot cd to $REPO_DIR."
-        if ! net_run wget -qO "$ZIP_FILE" "$ZIP_URL"; then
+        return 1
     }
 
-    # Check that this is a git repository
     if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
         log "Warning: $REPO_DIR is not a git repository."
         return 1
     fi
 
-    # Ensure we are on the correct branch
     CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
     if [ "$CURRENT_BRANCH" != "$BRANCH" ]; then
         log "Switching to branch $BRANCH (current: $CURRENT_BRANCH)"
@@ -200,19 +200,15 @@ sync_with_git() {
         return 1
     fi
 
-    GIT_LOCAL_REV=$(git rev-parse @ 2>/dev/null)
-    if [ -z "$GIT_LOCAL_REV" ]; then
-        log "Error: cannot get local revision."
+    LOCAL=$(git rev-parse @ 2>/dev/null || echo "")
+    REMOTE=$(git rev-parse "origin/$BRANCH" 2>/dev/null || echo "")
+
+    if [ -z "$LOCAL" ] || [ -z "$REMOTE" ]; then
+        log "Error: cannot get revisions."
         return 1
     fi
 
-    GIT_REMOTE_REV=$(git rev-parse "origin/$BRANCH" 2>/dev/null)
-    if [ -z "$GIT_REMOTE_REV" ]; then
-        log "Error: cannot get remote revision."
-        return 1
-    fi
-
-    if [ "$GIT_LOCAL_REV" = "$GIT_REMOTE_REV" ]; then
+    if [ "$LOCAL" = "$REMOTE" ]; then
         log "No new changes in the repository."
         return 0
     fi
@@ -235,13 +231,11 @@ sync_with_git() {
 # Function: fallback using GitHub ZIP #
 #######################################
 sync_with_github_zip() {
-    # Check for unzip (required)
     if ! command -v unzip >/dev/null 2>&1; then
         log "Error: unzip is not installed; cannot extract ZIP."
         return 1
     fi
 
-    # Check download tools (curl / wget / ftp on OpenBSD)
     if ! command -v curl >/dev/null 2>&1 && \
        ! command -v wget >/dev/null 2>&1 && \
        ! command -v ftp  >/dev/null 2>&1; then
@@ -249,77 +243,73 @@ sync_with_github_zip() {
         return 1
     fi
 
-    ZIP_TMPDIR=$(mktemp -d "/tmp/site-sync.XXXXXX" 2>/dev/null)
-    if [ ! -d "$ZIP_TMPDIR" ]; then
+    TMPDIR=$(mktemp -d "/tmp/site-sync.XXXXXX" 2>/dev/null)
+    if [ ! -d "$TMPDIR" ]; then
         log "Error: cannot create temporary directory."
         return 1
     fi
 
     log "Downloading ZIP from $ZIP_URL ..."
-    ZIP_FILE="$ZIP_TMPDIR/source.zip"
+    ZIP_FILE="$TMPDIR/source.zip"
 
     if command -v curl >/dev/null 2>&1; then
         if ! curl -fsSL "$ZIP_URL" -o "$ZIP_FILE"; then
             log "Error: curl download failed."
-            rm -rf "$ZIP_TMPDIR"
+            rm -rf "$TMPDIR"
             return 1
         fi
     elif command -v wget >/dev/null 2>&1; then
         if ! wget -qO "$ZIP_FILE" "$ZIP_URL"; then
             log "Error: wget download failed."
-            rm -rf "$ZIP_TMPDIR"
+            rm -rf "$TMPDIR"
             return 1
         fi
     else
-        # OpenBSD base: ftp
-        if ! net_run ftp -o "$ZIP_FILE" "$ZIP_URL"; then
+        if ! ftp -o "$ZIP_FILE" "$ZIP_URL"; then
             log "Error: ftp download failed."
-            rm -rf "$ZIP_TMPDIR"
+            rm -rf "$TMPDIR"
             return 1
         fi
     fi
 
     log "Unpacking ZIP..."
-    ZIP_UNPACK_DIR="$ZIP_TMPDIR/unpacked"
+    ZIP_UNPACK_DIR="$TMPDIR/unpacked"
     mkdir -p "$ZIP_UNPACK_DIR"
 
     if ! unzip -q "$ZIP_FILE" -d "$ZIP_UNPACK_DIR"; then
         log "Error: failed to unzip archive."
-        rm -rf "$ZIP_TMPDIR"
+        rm -rf "$TMPDIR"
         return 1
     fi
 
-    # A GitHub ZIP usually contains a single top-level directory
     ZIP_SRCDIR=$(find "$ZIP_UNPACK_DIR" -mindepth 1 -maxdepth 1 -type d | head -n 1)
     if [ -z "$ZIP_SRCDIR" ]; then
         log "Error: could not determine source directory inside ZIP."
-        rm -rf "$ZIP_TMPDIR"
+        rm -rf "$TMPDIR"
         return 1
     fi
 
     log "Syncing extracted files into $REPO_DIR ..."
     if command -v rsync >/dev/null 2>&1; then
-        # Keep .git if it exists; only sync content from ZIP
         if ! rsync -a --delete --exclude=".git" "$ZIP_SRCDIR"/ "$REPO_DIR"/; then
             log "Error: rsync failed."
-            rm -rf "$ZIP_TMPDIR"
+            rm -rf "$TMPDIR"
             return 1
         fi
     else
-        # Without rsync: delete everything except .git and copy manually
         if ! find "$REPO_DIR" -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} \; ; then
             log "Error: failed to clean target directory."
-            rm -rf "$ZIP_TMPDIR"
+            rm -rf "$TMPDIR"
             return 1
         fi
         if ! cp -Rp "$ZIP_SRCDIR"/. "$REPO_DIR"/; then
             log "Error: copy from ZIP to $REPO_DIR failed."
-            rm -rf "$ZIP_TMPDIR"
+            rm -rf "$TMPDIR"
             return 1
         fi
     fi
 
-    rm -rf "$ZIP_TMPDIR"
+    rm -rf "$TMPDIR"
     log "Repository successfully updated via GitHub ZIP fallback."
     return 0
 }
@@ -343,7 +333,6 @@ post_update_steps() {
         return 1
     fi
 
-    # Restrict .git to owner only
     if [ -d .git ]; then
         if ! chmod -R 700 .git; then
             log "Warning: could not restrict .git permissions."
@@ -365,7 +354,6 @@ post_update_steps() {
 # MAIN FLOW #
 #############
 
-# 1) Prefer GitHub CLI if available
 if ! sync_with_gh_cli; then
     log "GitHub CLI sync not available or failed. Falling back to plain git..."
     if ! sync_with_git; then
@@ -377,7 +365,6 @@ if ! sync_with_gh_cli; then
     fi
 fi
 
-# 2) Permissions and service restart
 if ! post_update_steps; then
     log "ERROR: post-update steps failed."
     exit 1

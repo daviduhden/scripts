@@ -1,14 +1,12 @@
 #!/bin/bash
 set -euo pipefail  # exit on error, unset variable, or failing pipeline
 
-#
 # Log cleanup script
 # - Removes *.gz files under /var/log and *.old files under / (root filesystem only).
 # - Supports a dry-run mode via DRY_RUN=1 or the --dry-run / -n option to only list files.
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
-#
 
 # PATH for cron / non-interactive shells
 PATH=/bin:/sbin:/usr/bin:/usr/sbin

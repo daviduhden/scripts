@@ -1,4 +1,5 @@
 #!/bin/ksh
+set -eu  # exit on error and on use of unset variables
 
 # apply-sysclean – automate OpenBSD sysclean(8) findings
 #
@@ -28,28 +29,13 @@ if [ -z "${_KSH93_EXECUTED:-}" ] && command -v ksh93 >/dev/null 2>&1; then
 fi
 _KSH93_EXECUTED=1
 
-set -eu  # exit on error and on use of unset variables
-
-# Optional torsocks for network operations
-if command -v torsocks >/dev/null 2>&1; then
-    TORSOCKS="torsocks"
-else
-    TORSOCKS=""
-fi
-
-net_run() {
-    if [ -n "$TORSOCKS" ]; then
-        "$TORSOCKS" "$@"
-    else
-        "$@"
-    fi
-}
-# PATH for cron / non-interactive shells
+# Basic PATH (important when run from cron)
 PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin
 export PATH
 
 # Default sysclean output file (can be overridden with SYSCLEAN_OUT env var)
 SYSCLEAN_OUT="${SYSCLEAN_OUT:-/tmp/sysclean.out}"
+SYSCLEAN_BUNDLED_DIR="/usr/local/bin/sysclean"
 
 # Dry-run flag: environment or first argument
 DRY_RUN=0
@@ -78,7 +64,16 @@ fi
 ###############################################################
 # 0. Check that sysclean is installed (and install if needed) #
 ###############################################################
-if ! command -v sysclean >/dev/null 2>&1; then
+sysclean_path="$(command -v sysclean 2>/dev/null || true)"
+
+if [ -n "$sysclean_path" ] && [ -d "$SYSCLEAN_BUNDLED_DIR" ] && [ "$DRY_RUN" -ne 1 ]; then
+    if [ "${sysclean_path%/*}" != "$SYSCLEAN_BUNDLED_DIR" ]; then
+        log "Removing unused bundled sysclean at $SYSCLEAN_BUNDLED_DIR"
+        rm -rf "$SYSCLEAN_BUNDLED_DIR" || warn "failed to remove $SYSCLEAN_BUNDLED_DIR"
+    fi
+fi
+
+if [ -z "$sysclean_path" ]; then
     if [ "$DRY_RUN" -eq 1 ]; then
         error "sysclean is not installed and DRY RUN is enabled; not installing automatically."
         exit 1
@@ -98,17 +93,18 @@ if ! command -v sysclean >/dev/null 2>&1; then
         log "pkg_add not found in PATH, skipping pkg_add installation."
     fi
 
-    # 0.2 If still not installed, try local build: ./sysclean && make install
+    # 0.2 If still not installed, try bundled build: $SYSCLEAN_BUNDLED_DIR && make install
     if ! command -v sysclean >/dev/null 2>&1; then
-        if [ -d ./sysclean ]; then
-            log "Trying to install sysclean from ./sysclean via make install..."
-            if ! (cd ./sysclean && make install); then
-                warn "local sysclean make install failed."
+        if [ -d "$SYSCLEAN_BUNDLED_DIR" ]; then
+            log "Trying to install sysclean from $SYSCLEAN_BUNDLED_DIR via make realinstall (BINDIR=/usr/local/bin)..."
+            if ! (cd "$SYSCLEAN_BUNDLED_DIR" && make BINDIR=/usr/local/bin realinstall); then
+                warn "bundled sysclean make install failed."
             else
-                log "sysclean installed from ./sysclean."
+                log "sysclean installed from bundled directory."
+                sysclean_path="$(command -v sysclean 2>/dev/null || true)"
             fi
         else
-            log "No ./sysclean directory found for local installation."
+            log "No bundled sysclean directory found for local installation."
         fi
     fi
 
@@ -116,6 +112,14 @@ if ! command -v sysclean >/dev/null 2>&1; then
     if ! command -v sysclean >/dev/null 2>&1; then
         error "sysclean is still not available after installation attempts; aborting."
         exit 1
+    fi
+fi
+
+sysclean_path="$(command -v sysclean 2>/dev/null || true)"
+if [ -n "$sysclean_path" ] && [ -d "$SYSCLEAN_BUNDLED_DIR" ] && [ "$DRY_RUN" -ne 1 ]; then
+    if [ "${sysclean_path%/*}" != "$SYSCLEAN_BUNDLED_DIR" ]; then
+        log "Removing unused bundled sysclean at $SYSCLEAN_BUNDLED_DIR"
+        rm -rf "$SYSCLEAN_BUNDLED_DIR" || warn "failed to remove $SYSCLEAN_BUNDLED_DIR"
     fi
 fi
 
