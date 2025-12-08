@@ -374,15 +374,16 @@ Architectures: ${ARCH_FILTER}
 Signed-By: /usr/share/keyrings/purplei2p.gpg
 EOF
 
-# Optional deb-src entry (commented out). Uncomment to enable source packages.
-cat >> /etc/apt/sources.list.d/purplei2p.sources <<'EOF'
-#
-# Types: deb-src
-# URIs: https://repo.i2pd.xyz/${DIST}
-# Suites: ${REPO_RELEASE}
-# Components: main
-# Architectures: ${ARCH_FILTER}
-# Signed-By: /usr/share/keyrings/purplei2p.gpg
+# Optional deb-src stanza, disabled by default. Set Enabled: yes to use.
+cat >> /etc/apt/sources.list.d/purplei2p.sources <<EOF
+
+Enabled: no
+Types: deb-src
+URIs: https://repo.i2pd.xyz/${DIST}
+Suites: ${REPO_RELEASE}
+Components: main
+Architectures: ${ARCH_FILTER}
+Signed-By: /usr/share/keyrings/purplei2p.gpg
 EOF
 
 log "Updating APT index..."
