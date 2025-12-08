@@ -70,8 +70,6 @@ collect_system_info_and_upload() {
         if [ -f /var/run/dmesg.boot ]; then cat /var/run/dmesg.boot; else dmesg; fi
         printf '\n=== Installed Packages (pkg_info -mz) ===\n\n'
         pkg_info -mz 2>/dev/null || printf '%s\n' "pkg_info not available."
-        printf '\n=== Applied Syspatches (syspatch -l) ===\n\n'
-        if command -v syspatch >/dev/null 2>&1; then syspatch -l; else printf '%s\n' "syspatch not available."; fi
         printf '\n=== /var/log/messages (last 200 lines) ===\n\n'
         if [ -f /var/log/messages ]; then tail -n 200 /var/log/messages; else printf '%s\n' "/var/log/messages not available."; fi
         printf '\n=== Disk Usage (df -h) ===\n\n'
