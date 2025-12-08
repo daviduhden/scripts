@@ -20,6 +20,11 @@ use File::Basename qw(basename);
 use File::Path qw(make_path);
 use File::Copy qw(copy);
 
+my $GREEN = "\e[32m";
+my $YELLOW = "\e[33m";
+my $RED = "\e[31m";
+my $RESET = "\e[0m";
+
 ###############
 # Error / log #
 ###############
@@ -27,13 +32,18 @@ use File::Copy qw(copy);
 sub error {
     my ($msg, $code) = @_;
     $code //= 1;
-    print STDERR "Error: $msg\n";
+    print STDERR "${RED}[ERROR]${RESET} $msg\n";
     exit $code;
+}
+
+sub warn_msg {
+    my ($msg) = @_;
+    print STDERR "${YELLOW}[WARN]${RESET} $msg\n";
 }
 
 sub log_info {
     my ($msg) = @_;
-    print "$msg\n";
+    print "${GREEN}[INFO]${RESET} $msg\n";
 }
 
 ########################
@@ -166,11 +176,11 @@ sub run_cmd {
     my (@cmd) = @_;
     system(@cmd);
     if ($? == -1) {
-        warn "Failed to execute '@cmd': $!\n";
+        warn_msg("Failed to execute '@cmd': $!");
         return 0;
     } elsif ($? != 0) {
         my $code = $? >> 8;
-        warn "Command '@cmd' exited with code $code\n";
+        warn_msg("Command '@cmd' exited with code $code");
         return 0;
     }
     return 1;
@@ -406,10 +416,10 @@ sub install_gnupg_debian_like {
 
     # chmod a+r keyring
     if ($> == 0) {
-        chmod 0644, $keyring or warn "Warning: chmod a+r $keyring failed: $!";
+        chmod 0644, $keyring or warn_msg("Warning: chmod a+r $keyring failed: $!");
     } else {
         run_cmd($SUDO, 'chmod', 'a+r', $keyring)
-          or warn "Warning: chmod a+r $keyring via $SUDO failed.";
+          or warn_msg("Warning: chmod a+r $keyring via $SUDO failed.");
     }
 
     print "Writing /etc/apt/sources.list.d/gnupg.sources ...\n";

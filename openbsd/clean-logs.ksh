@@ -1,14 +1,19 @@
 #!/bin/ksh
-set -eu  # exit on error and on use of unset variables
 
-#
 # Log cleanup script
 # - Removes *.gz files under /var/log and *.old files under / (root filesystem only).
 # - Supports a dry-run mode via DRY_RUN=1 or the --dry-run / -n option to only list files.
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
-#
+
+# Prefer ksh93 when available for better POSIX compliance; fallback to base ksh
+if [ -z "${_KSH93_EXECUTED:-}" ] && command -v ksh93 >/dev/null 2>&1; then
+    _KSH93_EXECUTED=1 exec ksh93 "$0" "$@"
+fi
+_KSH93_EXECUTED=1
+
+set -eu  # exit on error and on use of unset variables
 
 # PATH for cron / non-interactive shells
 PATH=/bin:/sbin:/usr/bin:/usr/sbin
@@ -26,10 +31,9 @@ case "${1:-}" in
         ;;
 esac
 
-log() {
-    # Simple timestamped logger
-    printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
-}
+log()   { printf '%s [INFO]  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
+warn()  { printf '%s [WARN]  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
+error() { printf '%s [ERROR] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 
 echo "----------------------------------------"
 log "Log cleanup started"

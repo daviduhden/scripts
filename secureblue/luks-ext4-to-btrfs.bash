@@ -13,19 +13,27 @@ set -euo pipefail
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
+# Simple colors for messages
+GREEN="\e[32m"
+YELLOW="\e[33m"
+RED="\e[31m"
+RESET="\e[0m"
+
+log()    { printf '%s %b[INFO]%b %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$GREEN" "$RESET" "$*"; }
+warn()   { printf '%s %b[WARN]%b %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$YELLOW" "$RESET" "$*"; }
+error()  { printf '%s %b[ERROR]%b %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$RED" "$RESET" "$*" >&2; exit 1; }
+
 # --- Elevate with run0 if needed -------------------------------------------
 
 # 1. Ensure run0 exists
 if ! command -v run0 >/dev/null 2>&1; then
-    echo "ERROR: 'run0' not found in PATH."
-    echo "Install it (on Fedora it comes from systemd) and try again."
-    exit 1
+    error "'run0' not found in PATH. Install it (on Fedora it comes from systemd) and try again."
 fi
 
 # 2. If not running as root, re-exec via run0
 if [ "${EUID:-$(id -u)}" -ne 0 ]; then
-    echo "This script requires elevated privileges."
-    echo "Re-running with: run0 \"$0\" $*"
+    warn "This script requires elevated privileges."
+    log "Re-running with: run0 \"$0\" $*"
     exec run0 -- "$0" "$@"
 fi
 
@@ -48,8 +56,7 @@ ask_yes_no() {
 require_cmd() {
     for cmd in "$@"; do
         if ! command -v "$cmd" &>/dev/null; then
-            echo "ERROR: Required command '$cmd' not found in PATH." >&2
-            exit 1
+            error "Required command '$cmd' not found in PATH."
         fi
     done
 }
@@ -66,8 +73,7 @@ select_device() {
     echo
     read -r -p "Enter the LUKS *partition* device (e.g. /dev/sdb1): " LUKS_DEV
     if [[ ! -b "$LUKS_DEV" ]]; then
-        echo "ERROR: '$LUKS_DEV' is not a block device." >&2
-        exit 1
+        error "'$LUKS_DEV' is not a block device."
     fi
 }
 
@@ -99,8 +105,7 @@ open_luks() {
     fi
 
     if [[ ! -b "$MAPPER_DEV" ]]; then
-        echo "ERROR: Mapper device '$MAPPER_DEV' not found after cryptsetup open." >&2
-        exit 1
+        error "Mapper device '$MAPPER_DEV' not found after cryptsetup open."
     fi
 }
 
@@ -204,7 +209,7 @@ update_fstab() {
     local uuid
     uuid=$(blkid -s UUID -o value "$MAPPER_DEV" || true)
     if [[ -z "$uuid" ]]; then
-        echo "ERROR: Could not get UUID for $MAPPER_DEV; not touching /etc/fstab." >&2
+        warn "Could not get UUID for $MAPPER_DEV; not touching /etc/fstab."
         return
     fi
 
@@ -251,7 +256,7 @@ delete_ext2_saved() {
     fi
 
     if [[ ! -d "$MOUNT_POINT" ]]; then
-        echo "ERROR: Mount point '$MOUNT_POINT' does not exist. Aborting." >&2
+        warn "Mount point '$MOUNT_POINT' does not exist. Aborting."
         return
     fi
 

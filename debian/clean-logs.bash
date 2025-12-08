@@ -14,6 +14,16 @@ set -euo pipefail  # exit on error, unset variable, or failing pipeline
 PATH=/bin:/sbin:/usr/bin:/usr/sbin
 export PATH
 
+# Simple colors for messages
+GREEN="\e[32m"
+YELLOW="\e[33m"
+RED="\e[31m"
+RESET="\e[0m"
+
+log()    { printf '%s %b[INFO]%b %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$GREEN" "$RESET" "$*"; }
+warn()   { printf '%s %b[WARN]%b %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$YELLOW" "$RESET" "$*"; }
+error()  { printf '%s %b[ERROR]%b %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$RED" "$RESET" "$*" >&2; }
+
 # If DRY_RUN=1 is set in the environment, the script will only show
 # what would be deleted, without actually removing files.
 DRY_RUN="${DRY_RUN:-0}"
@@ -25,12 +35,6 @@ case "${1:-}" in
         shift
         ;;
 esac
-
-log() {
-    # Simple timestamped logger
-    printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
-}
-
 echo "----------------------------------------"
 log "Log cleanup started"
 

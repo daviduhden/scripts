@@ -1,7 +1,5 @@
 #!/bin/bash
-set -euo pipefail  # exit on error, unset variable, or failing pipeline
 
-#
 # Automatically install/update Monero CLI to the latest stable version
 # on Linux systems using official tarballs.
 # - Fetch latest tag from GitHub
@@ -14,11 +12,19 @@ set -euo pipefail  # exit on error, unset variable, or failing pipeline
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
-#
+
+set -euo pipefail  # exit on error, unset variable, or failing pipeline
 
 # Basic PATH (important when run from cron)
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
+
+# Optional torsocks for network operations
+if command -v torsocks >/dev/null 2>&1; then
+    TORSOCKS="torsocks"
+else
+    TORSOCKS=""
+fi
 
 REPO="monero-project/monero"
 API_URL="https://api.github.com/repos/${REPO}/releases/latest"
@@ -31,17 +37,25 @@ MONERO_DATA_DIR="/var/lib/monero"
 MONERO_LOG_DIR="/var/log/monero"
 MONEROD_CONF="/etc/monerod.conf"
 
+# Simple colors for messages
+GREEN="\e[32m"
+YELLOW="\e[33m"
+RED="\e[31m"
+RESET="\e[0m"
+
+log()    { printf '%s %b[INFO]%b %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$GREEN" "$RESET" "$*"; }
+warn()   { printf '%s %b[WARN]%b %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$YELLOW" "$RESET" "$*"; }
+error()  { printf '%s %b[ERROR]%b %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$RED" "$RESET" "$*" >&2; exit 1; }
+
 # Ensure we run as root
 if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
-    echo "This script must be run as root. Try: sudo $0"
-    exit 1
+    error "This script must be run as root. Try: sudo $0"
 fi
 
 # Helper to ensure required commands exist
 require_cmd() {
     if ! command -v "$1" >/dev/null 2>&1; then
-        echo "Error: required command '$1' is not installed or not in PATH."
-        exit 1
+        error "required command '$1' is not installed or not in PATH."
     fi
 }
 
@@ -51,10 +65,18 @@ require_cmd awk
 require_cmd systemctl
 require_cmd install
 
+net_curl() {
+    if [[ -n "$TORSOCKS" ]]; then
+        "$TORSOCKS" curl -fLsS --retry 5 "$@"
+    else
+        curl -fLsS --retry 5 "$@"
+    fi
+}
+
 # Get the latest release tag from GitHub
 get_latest_release() {
     local json
-    if ! json="$(curl -fLsS --retry 5 "$API_URL" 2>/dev/null)"; then
+    if ! json="$(net_curl "$API_URL" 2>/dev/null)"; then
         return 1
     fi
     awk -F'"' '/"tag_name":/ {print $4; exit}' <<<"$json"
@@ -64,8 +86,7 @@ echo "Checking latest Monero CLI release from GitHub..."
 LATEST_TAG="$(get_latest_release || true)"
 
 if [[ -z "${LATEST_TAG}" ]]; then
-    echo "Error: could not fetch latest release tag from GitHub."
-    exit 1
+    error "could not fetch latest release tag from GitHub."
 fi
 
 echo "Latest available tag: ${LATEST_TAG}"
@@ -105,8 +126,7 @@ case "$ARCH" in
         PLATFORM="linux-riscv64"
         ;;
     *)
-        echo "Unsupported architecture: ${ARCH}"
-        exit 1
+        error "Unsupported architecture: ${ARCH}"
         ;;
 esac
 
@@ -125,9 +145,8 @@ cleanup() {
 trap cleanup EXIT
 
 echo "Downloading Monero CLI ${LATEST_TAG}..."
-if ! curl -fLsS --retry 5 "${DOWNLOAD_URL}" -o "${TMPDIR}/${TARBALL}"; then
-    echo "Error: download failed from ${DOWNLOAD_URL}"
-    exit 1
+if ! net_curl "${DOWNLOAD_URL}" -o "${TMPDIR}/${TARBALL}"; then
+    error "download failed from ${DOWNLOAD_URL}"
 fi
 
 echo "Extracting tarball..."
@@ -135,8 +154,7 @@ tar -xjf "${TMPDIR}/${TARBALL}" -C "$TMPDIR"
 
 EXTRACTED_DIR="$(find "$TMPDIR" -maxdepth 1 -type d -name 'monero-*' | head -n1)"
 if [[ -z "${EXTRACTED_DIR}" ]]; then
-    echo "Error: could not find extracted Monero directory."
-    exit 1
+    error "could not find extracted Monero directory."
 fi
 
 echo "Extracted directory: ${EXTRACTED_DIR}"
@@ -198,9 +216,8 @@ echo "Updating systemd unit: /etc/systemd/system/monerod.service..."
 install -d /etc/systemd/system
 
 UNIT_TMP="${TMPDIR}/monerod.service"
-if ! curl -fLsS --retry 5 "${SYSTEMD_UNIT_URL}" -o "${UNIT_TMP}"; then
-    echo "Error: failed to download systemd unit from ${SYSTEMD_UNIT_URL}"
-    exit 1
+if ! net_curl "${SYSTEMD_UNIT_URL}" -o "${UNIT_TMP}"; then
+    error "failed to download systemd unit from ${SYSTEMD_UNIT_URL}"
 fi
 
 # This always overwrites the target file, whether it exists or not

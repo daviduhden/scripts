@@ -1,7 +1,5 @@
 #!/bin/bash
-set -euo pipefail  # exit on error, unset variable, or failing pipeline
 
-#
 # Automatically install/update Go (golang) to the latest stable version
 # on Linux systems using official tarballs.
 # - Fetch latest stable version from go.dev
@@ -11,28 +9,44 @@ set -euo pipefail  # exit on error, unset variable, or failing pipeline
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
-#
+
+set -euo pipefail  # exit on error, unset variable, or failing pipeline
 
 # Basic PATH (important when run from cron)
 PATH=/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
+
+# Optional torsocks for network operations
+if command -v torsocks >/dev/null 2>&1; then
+    TORSOCKS="torsocks"
+else
+    TORSOCKS=""
+fi
 
 GO_BASE_URL="https://go.dev/dl"
 VERSION_URL="https://go.dev/VERSION?m=text"
 INSTALL_DIR="/usr/local"
 GO_ROOT="${INSTALL_DIR}/go"
 
+# Simple colors for messages
+GREEN="\e[32m"
+YELLOW="\e[33m"
+RED="\e[31m"
+RESET="\e[0m"
+
+log()    { printf '%s %b[INFO]%b %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$GREEN" "$RESET" "$*"; }
+warn()   { printf '%s %b[WARN]%b %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$YELLOW" "$RESET" "$*"; }
+error()  { printf '%s %b[ERROR]%b %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$RED" "$RESET" "$*" >&2; exit 1; }
+
 # Ensure we run as root
 if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
-    echo "This script must be run as root. Try: sudo $0"
-    exit 1
+    error "This script must be run as root. Try: sudo $0"
 fi
 
 # Helper to ensure required commands exist
 require_cmd() {
     if ! command -v "$1" >/dev/null 2>&1; then
-        echo "Error: required command '$1' is not installed or not in PATH."
-        exit 1
+        error "required command '$1' is not installed or not in PATH."
     fi
 }
 
@@ -40,16 +54,23 @@ require_cmd curl
 require_cmd tar
 require_cmd install
 
+net_curl() {
+    if [[ -n "$TORSOCKS" ]]; then
+        "$TORSOCKS" curl -fLsS --retry 5 "$@"
+    else
+        curl -fLsS --retry 5 "$@"
+    fi
+}
+
 OS="$(uname -s)"
 if [[ "$OS" != "Linux" ]]; then
-    echo "Error: this script currently supports only Linux."
-    exit 1
+    error "this script currently supports only Linux."
 fi
 
 # Get the latest stable Go version (e.g. go1.25.5) from go.dev
 get_latest_go_version() {
     local ver
-    if ! ver="$(curl -fLsS --retry 5 "$VERSION_URL" 2>/dev/null)"; then
+    if ! ver="$(net_curl "$VERSION_URL" 2>/dev/null)"; then
         return 1
     fi
     # Strip trailing whitespace/newlines
@@ -61,8 +82,7 @@ echo "Checking latest Go version from go.dev..."
 LATEST_VERSION="$(get_latest_go_version || true)"
 
 if [[ -z "${LATEST_VERSION}" ]]; then
-    echo "Error: could not fetch latest Go version from ${VERSION_URL}."
-    exit 1
+    error "could not fetch latest Go version from ${VERSION_URL}."
 fi
 
 echo "Latest available Go version: ${LATEST_VERSION}"
@@ -161,9 +181,8 @@ cleanup() {
 trap cleanup EXIT
 
 echo "Downloading ${TAR_NAME} (GO_ARCH=${GO_ARCH}, uname -m=${ARCH}) from ${TAR_URL}..."
-if ! curl -fLsS --retry 5 "$TAR_URL" -o "$TAR_FILE"; then
-    echo "Error: download failed from ${TAR_URL}"
-    exit 1
+if ! net_curl "$TAR_URL" -o "$TAR_FILE"; then
+    error "download failed from ${TAR_URL}"
 fi
 
 echo "Download complete: ${TAR_FILE}"
@@ -194,7 +213,7 @@ ensure_go_path_in_etc_profile() {
     go_path_snippet=$'# Go binary path\nexport PATH="$PATH:/usr/local/go/bin"\n'
 
     if [[ ! -f "$profile_file" ]]; then
-        echo "Warning: ${profile_file} not found; cannot automatically update system PATH."
+        warn "${profile_file} not found; cannot automatically update system PATH."
         return 0
     fi
 

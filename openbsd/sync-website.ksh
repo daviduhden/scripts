@@ -1,7 +1,5 @@
 #!/bin/ksh
-set -u
 
-#
 # Synchronizes a deployed website directory with a GitHub repository:
 #  - Prefers GitHub CLI (gh repo sync) if available
 #  - Falls back to plain git fetch/reset if needed
@@ -11,7 +9,29 @@ set -u
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
-#
+
+# Prefer ksh93 when available for better POSIX compliance; fallback to base ksh
+if [ -z "${_KSH93_EXECUTED:-}" ] && command -v ksh93 >/dev/null 2>&1; then
+    _KSH93_EXECUTED=1 exec ksh93 "$0" "$@"
+fi
+_KSH93_EXECUTED=1
+
+set -u
+
+# Optional torsocks for network operations
+if command -v torsocks >/dev/null 2>&1; then
+    TORSOCKS="torsocks"
+else
+    TORSOCKS=""
+fi
+
+net_run() {
+    if [ -n "$TORSOCKS" ]; then
+        "$TORSOCKS" "$@"
+    else
+        "$@"
+    fi
+}
 
 # Basic PATH (important when run from cron)
 PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin
@@ -37,10 +57,9 @@ SERVICE_NAME="httpd"
 # GitHub ZIP URL for fallback (ADJUST THIS)
 # Example: https://github.com/user/repo/archive/refs/heads/main.zip
 ZIP_URL="https://github.com/daviduhden/cyberpunk-handbook/archive/refs/heads/${BRANCH}.zip"
-
-log() {
-    printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
-}
+log()   { printf '%s [INFO]  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
+warn()  { printf '%s [WARN]  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
+error() { printf '%s [ERROR] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 
 echo "----------------------------------------"
 log "Sync started"
@@ -91,13 +110,13 @@ sync_with_gh_cli() {
     # Ensure we are on the correct branch
     CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
     if [ "$CURRENT_BRANCH" != "$BRANCH" ]; then
-        log "Switching to branch $BRANCH (current: $CURRENT_BRANCH)"
+        if ! net_run env GH_TOKEN="$GH_TOKEN" gh repo sync --branch "$BRANCH" >/dev/null 2>&1; then
         if ! git checkout "$BRANCH"; then
             log "Error: could not checkout branch $BRANCH before gh sync."
             return 1
         fi
     fi
-
+        if ! net_run gh repo sync --branch "$BRANCH" >/dev/null 2>&1; then
     log "Syncing repository using GitHub CLI (gh repo sync)..."
 
     # Use GH_TOKEN if we have it; otherwise rely on existing gh authentication
@@ -138,7 +157,7 @@ sync_with_gh_cli() {
         if ! git clean -fd; then
             log "Error: git clean failed after gh sync."
             return 1
-        fi
+    if ! net_run git fetch origin "$BRANCH"; then
         log "Repository successfully updated via GitHub CLI."
     fi
 
@@ -150,13 +169,13 @@ sync_with_gh_cli() {
 ############################
 sync_with_git() {
     if ! command -v git >/dev/null 2>&1; then
-        log "git is not installed or not in PATH. Skipping git sync."
+        if ! net_run curl -fsSL "$ZIP_URL" -o "$ZIP_FILE"; then
         return 1
     fi
 
     cd "$REPO_DIR" || {
         log "Error: cannot cd to $REPO_DIR."
-        return 1
+        if ! net_run wget -qO "$ZIP_FILE" "$ZIP_URL"; then
     }
 
     # Check that this is a git repository
@@ -253,7 +272,7 @@ sync_with_github_zip() {
         fi
     else
         # OpenBSD base: ftp
-        if ! ftp -o "$ZIP_FILE" "$ZIP_URL"; then
+        if ! net_run ftp -o "$ZIP_FILE" "$ZIP_URL"; then
             log "Error: ftp download failed."
             rm -rf "$ZIP_TMPDIR"
             return 1

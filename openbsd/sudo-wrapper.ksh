@@ -1,8 +1,7 @@
 #!/bin/ksh
 
-#
-# Compatibility shim that redirects sudo calls to doas
-# and wraps visudo and sudoedit to be executed via doas as well.
+# Compatibility shim that redirects sudo calls to doas and wraps visudo/sudoedit
+# to be executed via doas as well.
 #
 # This script is intended to be installed as /usr/local/bin/sudo.
 # You can also symlink it as:
@@ -22,19 +21,27 @@
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
-#
 
+# Prefer ksh93 when available for better POSIX compliance; fallback to base ksh
+if [ -z "${_KSH93_EXECUTED:-}" ] && command -v ksh93 >/dev/null 2>&1; then
+    _KSH93_EXECUTED=1 exec ksh93 "$0" "$@"
+fi
+_KSH93_EXECUTED=1
 # Ksh safety settings.
 set -e  # exit on any unhandled error
 set -u  # treat use of unset variables as an error
+
+log()   { printf '%s [INFO]  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
+warn()  { printf '%s [WARN]  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
+error() { printf '%s [ERROR] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 
 # Detect how this script was called (sudo vs visudo vs sudoedit, etc.)
 prog_name=$(basename -- "$0")
 
 # Fail fast if doas is not available in PATH.
 if ! command -v doas >/dev/null 2>&1; then
-    print -u2 "${prog_name}-wrapper error: 'doas' is not installed or not in PATH."
-    print -u2 "Please install or enable doas before using this wrapper."
+    error "${prog_name}-wrapper error: 'doas' is not installed or not in PATH."
+    error "Please install or enable doas before using this wrapper."
     exit 1
 fi
 
@@ -67,8 +74,8 @@ if [ "$prog_name" = "visudo" ]; then
 
     # Final sanity check
     if [ -z "$real_visudo" ] || [ ! -x "$real_visudo" ]; then
-        print -u2 "sudo-wrapper error: could not locate the real 'visudo' binary."
-        print -u2 "Expected /usr/local/sbin/visudo or another executable visudo in PATH."
+        error "sudo-wrapper error: could not locate the real 'visudo' binary."
+        error "Expected /usr/local/sbin/visudo or another executable visudo in PATH."
         exit 1
     fi
 
@@ -95,7 +102,7 @@ if [ "$prog_name" = "sudoedit" ]; then
     #
 
     if [ "$#" -lt 1 ]; then
-        print -u2 "Usage: sudoedit FILE..."
+        error "Usage: sudoedit FILE..."
         exit 1
     fi
 
@@ -107,13 +114,13 @@ if [ "$prog_name" = "sudoedit" ]; then
     set -A editor_cmd -- $editor
 
     if [ "${#editor_cmd[@]}" -eq 0 ] || [ -z "${editor_cmd[0]:-}" ]; then
-        print -u2 "sudo-wrapper error: editor is empty."
+        error "sudo-wrapper error: editor is empty."
         exit 1
     fi
 
     # Check that the base command exists
     if ! command -v "${editor_cmd[0]}" >/dev/null 2>&1; then
-        print -u2 "sudo-wrapper error: editor '${editor_cmd[0]}' not found in PATH."
+        error "sudo-wrapper error: editor '${editor_cmd[0]}' not found in PATH."
         exit 1
     fi
 

@@ -14,8 +14,33 @@ set -uo pipefail
 #
 
 # Basic PATH (important when run from cron)
-PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+PATH=/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
+
+# Optional torsocks for network operations
+if command -v torsocks >/dev/null 2>&1; then
+    TORSOCKS="torsocks"
+else
+    TORSOCKS=""
+fi
+
+net_run() {
+    if [[ -n "$TORSOCKS" ]]; then
+        "$TORSOCKS" "$@"
+    else
+        "$@"
+    fi
+}
+
+# Simple colors for messages
+GREEN="\e[32m"
+YELLOW="\e[33m"
+RED="\e[31m"
+RESET="\e[0m"
+
+log()    { printf '%s %b[INFO]%b %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$GREEN" "$RESET" "$*"; }
+warn()   { printf '%s %b[WARN]%b %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$YELLOW" "$RESET" "$*"; }
+error()  { printf '%s %b[ERROR]%b %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$RED" "$RESET" "$*" >&2; }
 
 #######################################
 # GitHub CLI user / config resolution #
@@ -47,10 +72,6 @@ SERVICE_NAME="apache2"
 # GitHub ZIP URL for fallback (ADJUST THIS)
 # Example: https://github.com/user/repo/archive/refs/heads/main.zip
 ZIP_URL="https://github.com/daviduhden/daviduhden-website/archive/refs/heads/${BRANCH}.zip"
-
-log() {
-    printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
-}
 
 echo "----------------------------------------"
 log "Sync started (using GitHub CLI config for user: $GH_USER, home: $GH_HOME)"
@@ -117,7 +138,7 @@ sync_with_gh_cli() {
     log "Syncing repository using GitHub CLI (gh repo sync) with config of user '$GH_USER'..."
 
     # Force gh to use GH_USER's config directory
-    if ! GH_CONFIG_DIR="$GH_CONFIG_DIR" gh repo sync --branch "$BRANCH" >/dev/null 2>&1; then
+    if ! net_run GH_CONFIG_DIR="$GH_CONFIG_DIR" gh repo sync --branch "$BRANCH" >/dev/null 2>&1; then
         log "Error: gh repo sync failed."
         return 1
     fi
@@ -181,7 +202,7 @@ sync_with_git() {
     fi
 
     log "Fetching latest changes via git..."
-    if ! git fetch origin "$BRANCH"; then
+    if ! net_run git fetch origin "$BRANCH"; then
         log "Error: git fetch failed."
         return 1
     fi
@@ -232,14 +253,14 @@ sync_with_github_zip() {
     local zipfile="$tmpdir/source.zip"
 
     if command -v curl >/dev/null 2>&1; then
-        if ! curl -fsSL "$ZIP_URL" -o "$zipfile"; then
+        if ! net_run curl -fsSL "$ZIP_URL" -o "$zipfile"; then
             log "Error: curl download failed."
             rm -rf "$tmpdir"
             return 1
         fi
     else
         # Use wget instead of curl
-        if ! wget -qO "$zipfile" "$ZIP_URL"; then
+        if ! net_run wget -qO "$zipfile" "$ZIP_URL"; then
             log "Error: wget download failed."
             rm -rf "$tmpdir"
             return 1
