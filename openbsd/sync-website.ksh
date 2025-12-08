@@ -409,6 +409,9 @@ if command -v acme-client >/dev/null 2>&1; then
     log "Running acme-client for ${WWW_HOST}..."
     if acme-client "${WWW_HOST}"; then
         log "acme-client completed for ${WWW_HOST}."
+        if ! rcctl -q restart "$SERVICE_NAME" >/dev/null 2>&1; then
+            warn "service ${SERVICE_NAME} restart failed after acme-client."
+        fi
     else
         warn "acme-client failed for ${WWW_HOST}."
     fi
