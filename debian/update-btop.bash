@@ -16,6 +16,8 @@ export PATH
 REPO="aristocratos/btop"
 API_URL="https://api.github.com/repos/${REPO}/releases/latest"
 REPO_URL="https://github.com/${REPO}.git"
+GH_USER="${GH_USER:-admin}"
+GH_HOST="${GH_HOST:-github.com}"
 
 # Simple colors for messages
 GREEN="\e[32m"
@@ -26,6 +28,22 @@ RESET="\e[0m"
 log()    { printf '%s %b[INFO]%b %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$GREEN" "$RESET" "$*"; }
 warn()   { printf '%s %b[WARN]%b %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$YELLOW" "$RESET" "$*"; }
 error()  { printf '%s %b[ERROR]%b %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$RED" "$RESET" "$*" >&2; exit 1; }
+
+# Resolve GH user's home and config dir
+if command -v getent >/dev/null 2>&1; then
+    GH_HOME="$(getent passwd "$GH_USER" | awk -F: '{print $6}')"
+else
+    GH_HOME="/home/$GH_USER"
+fi
+GH_CONFIG_DIR="${GH_HOME}/.config/gh"
+
+run_as_gh_user() {
+    if command -v runuser >/dev/null 2>&1; then
+        runuser -u "$GH_USER" -- "$@"
+    else
+        su - "$GH_USER" -c "$*"
+    fi
+}
 
 # Helpers
 net_curl() {
@@ -52,7 +70,7 @@ get_latest_tag() {
     local tag json
 
     if has_cmd gh; then
-        if tag="$(gh api "repos/${REPO}/releases/latest" --jq .tag_name 2>/dev/null || true)" && [[ -n "$tag" ]]; then
+        if tag="$(run_as_gh_user env GH_CONFIG_DIR="$GH_CONFIG_DIR" GH_HOST="$GH_HOST" gh api "repos/${REPO}/releases/latest" --jq .tag_name 2>/dev/null || true)" && [[ -n "$tag" ]]; then
             printf '%s\n' "$tag"
             return 0
         fi
@@ -79,7 +97,8 @@ get_latest_tag() {
 
 get_current_version() {
     if command -v btop >/dev/null 2>&1; then
-        btop --version 2>/dev/null | awk 'match($0,/v[0-9]+\.[0-9]+\.[0-9]+/){print substr($0,RSTART+1,RLENGTH-1); exit}'
+        # Extract versions like 1.4.5 or v1.4.5 from the first matching line
+        btop --version 2>/dev/null | awk 'match($0,/v?[0-9]+\.[0-9]+\.[0-9]+/){ver=substr($0,RSTART,RLENGTH); sub(/^v/,"",ver); print ver; exit}'
     fi
 }
 
@@ -93,9 +112,9 @@ install_build_deps() {
         error "neither 'apt-get' nor 'apt' is available."
     fi
 
-    log "Installing build dependencies (git build-essential cmake libncursesw5-dev)..."
+    log "Installing build dependencies (gh git build-essential cmake libncurses-dev)..."
     "$apt_cmd" update
-    "$apt_cmd" install -y git build-essential cmake libncursesw5-dev
+    "$apt_cmd" install -y gh git build-essential cmake libncurses-dev
 }
 
 fetch_source() {
@@ -103,7 +122,7 @@ fetch_source() {
 
     if has_cmd gh; then
         log "Cloning btop tag ${tag} with GitHub CLI..." >&2
-        if gh repo clone "$REPO" "$dest/btop" -- --branch "$tag" --depth 1 >/dev/null 2>&1; then
+        if run_as_gh_user env GH_CONFIG_DIR="$GH_CONFIG_DIR" GH_HOST="$GH_HOST" gh repo clone "$REPO" "$dest/btop" -- --branch "$tag" --depth 1 >/dev/null 2>&1; then
             printf '%s\n' "$dest/btop"
             return 0
         fi
@@ -138,7 +157,7 @@ build_and_install() {
     local tag="$1"
     local tmpdir="" src_dir
 
-    tmpdir=$(mktemp -d /tmp/btop-src-XXXXXX)
+    tmpdir=$(mktemp -d /tmp/btop-src-XXXXXX) || error "cannot create temporary directory for source."
     trap '[[ -n "${tmpdir:-}" ]] && rm -rf "$tmpdir"' EXIT
 
     src_dir="$(fetch_source "$tag" "$tmpdir")" || error "could not fetch source via gh/git/curl."
@@ -172,12 +191,13 @@ main() {
     fi
 
     log "Latest release tag: ${latest_tag}"
+    local latest_stripped="${latest_tag#v}"
 
     local current
     current="$(get_current_version)"
     if [[ -n "$current" ]]; then
         log "Currently installed btop version: ${current}"
-        if [[ "$current" == "${latest_tag#v}" || "$current" == "$latest_tag" ]]; then
+        if [[ "$current" == "$latest_stripped" || "$current" == "$latest_tag" ]]; then
             log "btop is already up to date. Nothing to do."
             exit 0
         fi

@@ -20,7 +20,7 @@ CONTROL_URL="https://download.argon40.com/argon1.sh"
 #   "prompt" -> ask (default in interactive mode)
 #   "yes"    -> automatically reboot
 #   "no"     -> never reboot automatically
-AUTO_REBOOT="prompt"
+AUTO_REBOOT="no"
 
 usage() {
   cat <<EOF
@@ -75,7 +75,7 @@ YELLOW="\e[33m"
 RED="\e[31m"
 RESET="\e[0m"
 
-info()  { printf '%s %b[INFO]%b  %s\n'  "$(date '+%Y-%m-%d %H:%M:%S')" "$GREEN" "$RESET" "$*"; }
+log()    { printf '%s %b[INFO]%b %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$GREEN" "$RESET" "$*"; }
 warn()  { printf '%s %b[WARN]%b  %s\n'  "$(date '+%Y-%m-%d %H:%M:%S')" "$YELLOW" "$RESET" "$*"; }
 error() { printf '%s %b[ERROR]%b %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$RED" "$RESET" "$*" >&2; }
 
@@ -95,43 +95,43 @@ net_curl() {
 }
 
 check_network() {
-  info "Checking network connectivity to download.argon40.com..."
+  log "Checking network connectivity to download.argon40.com..."
   if ! net_curl --head "$EEPROM_URL" >/dev/null 2>&1; then
     error "Cannot reach download.argon40.com. Check your Internet connection."
     exit 1
   fi
-  info "Network looks OK."
+  log "Network looks OK."
 }
 
 run_eeprom_update() {
-  info "Running EEPROM update script from Argon40..."
+  log "Running EEPROM update script from Argon40..."
   net_curl "$EEPROM_URL" | bash
-  info "EEPROM update script finished."
+  log "EEPROM update script finished."
 }
 
 run_control_update() {
-  info "Running Argon One V3 control script installer..."
+  log "Running Argon One V3 control script installer..."
   net_curl "$CONTROL_URL" | bash
-  info "Argon One V3 control script finished."
+  log "Argon One V3 control script finished."
 }
 
 ask_reboot() {
   # Flags take precedence
   case "$AUTO_REBOOT" in
     yes)
-      info "Auto reboot enabled by flag; rebooting now..."
+      log "Auto reboot enabled by flag; rebooting now..."
       sleep 1
       reboot
       ;;
     no)
-      info "Auto reboot disabled by flag. Please reboot manually."
+      log "Auto reboot disabled by flag. Please reboot manually."
       return 0
       ;;
   esac
 
   # Non-interactive (cron): never prompt
   if [[ ! -t 0 ]]; then
-    info "Non-interactive session detected; skipping reboot. Please reboot manually."
+    log "Non-interactive session detected; skipping reboot. Please reboot manually."
     return 0
   fi
 
@@ -140,12 +140,12 @@ ask_reboot() {
   read -r -p "Reboot now to apply all changes? [y/N] " answer
   case "$answer" in
     [yY][eE][sS]|[yY])
-      info "Rebooting..."
+      log "Rebooting..."
       sleep 1
       reboot
       ;;
     *)
-      info "Reboot skipped. Remember to reboot later to apply EEPROM and control changes."
+      log "Reboot skipped. Remember to reboot later to apply EEPROM and control changes."
       ;;
   esac
 }
@@ -153,7 +153,7 @@ ask_reboot() {
 # ---- Main ------------------------------------------------------------------
 
 main() {
-  info "Argon One V3 maintenance: EEPROM + control script update"
+  log "Argon One V3 maintenance: EEPROM + control script update"
 
   require_root
   check_network
@@ -161,7 +161,7 @@ main() {
   run_eeprom_update
   run_control_update
 
-  info "All Argon One V3 update steps completed."
+  log "All Argon One V3 update steps completed."
   ask_reboot
 }
 
