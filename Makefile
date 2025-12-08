@@ -10,8 +10,10 @@ BINDIR?=${PREFIX}/bin
 DEBIAN_SCRIPTS=\
 	debian/add-i2pd-repo.bash \
 	debian/add-tor-repo.bash \
+	debian/add-gh-cli-repo.bash \
 	debian/apt-full-upgrade.bash \
 	debian/clean-logs.bash \
+	debian/enable-tor-transport.bash \
 	debian/sync-website.bash \
 	debian/update-argon-one-v3.bash \
 	debian/update-btop.bash \
