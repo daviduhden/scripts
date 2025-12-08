@@ -1,7 +1,5 @@
 #!/bin/bash
-set -euo pipefail  # exit on error, unset variable, or failing pipeline
 
-#
 # Automatically update fastfetch on Debian-based systems.
 # - Fetch latest release tag from GitHub
 # - Download .deb package from GitHub releases
@@ -9,41 +7,72 @@ set -euo pipefail  # exit on error, unset variable, or failing pipeline
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
-#
+
+set -euo pipefail  # exit on error, unset variable, or failing pipeline
 
 # Basic PATH (important when run from cron)
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
+# Optional torsocks for network operations
+if command -v torsocks >/dev/null 2>&1; then
+    TORSOCKS="torsocks"
+else
+    TORSOCKS=""
+fi
+
 REPO="fastfetch-cli/fastfetch"
 API_URL="https://api.github.com/repos/${REPO}/releases/latest"
 
+# Simple colors for messages
+GREEN="\e[32m"
+YELLOW="\e[33m"
+RED="\e[31m"
+RESET="\e[0m"
+
+log()    { printf '%s %b[INFO]%b %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$GREEN" "$RESET" "$*"; }
+warn()   { printf '%s %b[WARN]%b %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$YELLOW" "$RESET" "$*"; }
+error()  { printf '%s %b[ERROR]%b %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$RED" "$RESET" "$*" >&2; exit 1; }
+
 # Ensure we run as root
 if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
-    echo "This script must be run as root. Try: sudo $0"
-    exit 1
+    error "This script must be run as root. Try: sudo $0"
 fi
 
 # Helper to ensure required commands exist
 require_cmd() {
     if ! command -v "$1" >/dev/null 2>&1; then
-        echo "Error: required command '$1' is not installed or not in PATH."
-        exit 1
+        error "required command '$1' is not installed or not in PATH."
     fi
 }
 
 require_cmd curl
 
+net_curl() {
+    if [[ -n "$TORSOCKS" ]]; then
+        "$TORSOCKS" curl -fLsS --retry 5 "$@"
+    else
+        curl -fLsS --retry 5 "$@"
+    fi
+}
+
+apt_net() {
+    if [[ -n "$TORSOCKS" ]]; then
+        "$TORSOCKS" "$@"
+    else
+        "$@"
+    fi
+}
+
 if ! command -v apt-get >/dev/null 2>&1 && ! command -v apt >/dev/null 2>&1; then
-    echo "Error: neither 'apt-get' nor 'apt' is available."
-    exit 1
+    error "neither 'apt-get' nor 'apt' is available."
 fi
 
 # Get the latest version tag from GitHub releases
 get_latest_release() {
     # Read all JSON into a variable to avoid SIGPIPE / curl error 23
     local json
-    if ! json="$(curl -fLsS --retry 5 "$API_URL" 2>/dev/null)"; then
+    if ! json="$(net_curl "$API_URL" 2>/dev/null)"; then
         return 1
     fi
     awk -F'"' '/"tag_name":/ {print $4; exit}' <<<"$json"
@@ -53,8 +82,7 @@ echo "Checking latest fastfetch release from GitHub..."
 LATEST_VERSION="$(get_latest_release || true)"
 
 if [[ -z "${LATEST_VERSION}" ]]; then
-    echo "Error: could not fetch latest release version from GitHub."
-    exit 1
+    error "could not fetch latest release version from GitHub."
 fi
 
 # Strip leading 'v' if present (tags are often like 'v2.55.1')
@@ -118,8 +146,7 @@ case "$ARCH" in
         PKG_ARCH="s390x"
         ;;
     *)
-        echo "Unsupported architecture: ${ARCH}"
-        exit 1
+        error "Unsupported architecture: ${ARCH}"
         ;;
 esac
 
@@ -133,18 +160,17 @@ cleanup() {
 trap cleanup EXIT
 
 echo "Downloading fastfetch ${LATEST_VERSION} (${PKG_ARCH})..."
-if ! curl -fLsS --retry 5 "$DEB_URL" -o "$DEB_FILE"; then
-    echo "Error: download failed from ${DEB_URL}"
-    exit 1
+if ! net_curl "$DEB_URL" -o "$DEB_FILE"; then
+    error "download failed from ${DEB_URL}"
 fi
 
 echo "Download complete: ${DEB_FILE}"
 echo "Installing the package..."
 
 if command -v apt-get >/dev/null 2>&1; then
-    apt-get install -y "$DEB_FILE"
+    apt_net apt-get install -y "$DEB_FILE"
 else
-    apt install -y "$DEB_FILE"
+    apt_net apt install -y "$DEB_FILE"
 fi
 
 echo "Fastfetch installation finished successfully."

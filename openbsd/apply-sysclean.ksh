@@ -1,7 +1,5 @@
 #!/bin/ksh
-set -eu  # exit on error and on use of unset variables
 
-#
 # apply-sysclean – automate OpenBSD sysclean(8) findings
 #
 # This script runs sysclean(8), parses its report, and applies the suggested
@@ -23,8 +21,29 @@ set -eu  # exit on error and on use of unset variables
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
-#
 
+# Prefer ksh93 when available for better POSIX compliance; fallback to base ksh
+if [ -z "${_KSH93_EXECUTED:-}" ] && command -v ksh93 >/dev/null 2>&1; then
+    _KSH93_EXECUTED=1 exec ksh93 "$0" "$@"
+fi
+_KSH93_EXECUTED=1
+
+set -eu  # exit on error and on use of unset variables
+
+# Optional torsocks for network operations
+if command -v torsocks >/dev/null 2>&1; then
+    TORSOCKS="torsocks"
+else
+    TORSOCKS=""
+fi
+
+net_run() {
+    if [ -n "$TORSOCKS" ]; then
+        "$TORSOCKS" "$@"
+    else
+        "$@"
+    fi
+}
 # PATH for cron / non-interactive shells
 PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin
 export PATH
@@ -41,10 +60,9 @@ case "${1:-}" in
         ;;
 esac
 
-log() {
-    # Simple timestamped logger
-    printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
-}
+log()   { printf '%s [INFO]  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
+warn()  { printf '%s [WARN]  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
+error() { printf '%s [ERROR] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 
 echo "----------------------------------------"
 log "apply-sysclean started"
@@ -53,7 +71,7 @@ log "apply-sysclean started"
 # -1. Ensure we are running as root #
 #####################################
 if [ "$(id -u)" -ne 0 ]; then
-    log "Error: this script must be run as root (superuser)."
+    error "This script must be run as root (superuser)."
     exit 1
 fi
 
@@ -62,7 +80,7 @@ fi
 ###############################################################
 if ! command -v sysclean >/dev/null 2>&1; then
     if [ "$DRY_RUN" -eq 1 ]; then
-        log "Error: sysclean is not installed and DRY RUN is enabled; not installing automatically."
+        error "sysclean is not installed and DRY RUN is enabled; not installing automatically."
         exit 1
     fi
 
@@ -71,8 +89,8 @@ if ! command -v sysclean >/dev/null 2>&1; then
     # 0.1 Try to install via pkg_add if available
     if command -v pkg_add >/dev/null 2>&1; then
         log "Trying to install sysclean with pkg_add..."
-        if ! pkg_add -v sysclean; then
-            log "WARNING: pkg_add sysclean failed."
+        if ! net_run pkg_add -v sysclean; then
+            warn "pkg_add sysclean failed."
         else
             log "sysclean installed via pkg_add."
         fi
@@ -85,7 +103,7 @@ if ! command -v sysclean >/dev/null 2>&1; then
         if [ -d ./sysclean ]; then
             log "Trying to install sysclean from ./sysclean via make install..."
             if ! (cd ./sysclean && make install); then
-                log "WARNING: local sysclean make install failed."
+                warn "local sysclean make install failed."
             else
                 log "sysclean installed from ./sysclean."
             fi
@@ -96,21 +114,21 @@ if ! command -v sysclean >/dev/null 2>&1; then
 
     # 0.3 Final check
     if ! command -v sysclean >/dev/null 2>&1; then
-        log "Error: sysclean is still not available after installation attempts; aborting."
+        error "sysclean is still not available after installation attempts; aborting."
         exit 1
     fi
 fi
 
 log "Running sysclean to generate: $SYSCLEAN_OUT"
 if ! sysclean > "$SYSCLEAN_OUT" 2>/dev/null; then
-    log "Error: sysclean execution failed."
+    error "sysclean execution failed."
     exit 1
 fi
 log "sysclean output written to: $SYSCLEAN_OUT"
 
 # Sanity check on the output file
 if [ ! -s "$SYSCLEAN_OUT" ]; then
-    log "Warning: sysclean output file is empty: $SYSCLEAN_OUT"
+    warn "sysclean output file is empty: $SYSCLEAN_OUT"
 fi
 
 ########################################
@@ -132,7 +150,7 @@ while IFS= read -r path; do
 
     if [ -e "$path" ] || [ -L "$path" ]; then
         log "Removing file or directory: $path"
-        rm -rf -- "$path" || log "WARNING: failed to remove: $path"
+        rm -rf -- "$path" || warn "failed to remove: $path"
     else
         log "Skipping non-existent path: $path"
     fi
@@ -159,7 +177,7 @@ while IFS= read -r user; do
     if id "$user" >/dev/null 2>&1; then
         log "Removing user: $user"
         # Just remove the account; data for daemon users is usually small.
-        userdel "$user" || log "WARNING: failed to remove user: $user"
+        userdel "$user" || warn "failed to remove user: $user"
     else
         log "Skipping user (not found): $user"
     fi
@@ -185,7 +203,7 @@ while IFS= read -r group; do
 
     if getent group "$group" >/dev/null 2>&1; then
         log "Removing group: $group"
-        groupdel "$group" || log "WARNING: failed to remove group: $group"
+        groupdel "$group" || warn "failed to remove group: $group"
     else
         log "Skipping group (not found): $group"
     fi

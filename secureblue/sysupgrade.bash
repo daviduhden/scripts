@@ -1,7 +1,5 @@
 #!/bin/bash
-set -euo pipefail
 
-#
 # Secureblue maintenance script
 #
 # This script performs a full, non-interactive maintenance run on a
@@ -18,7 +16,16 @@ set -euo pipefail
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
-#
+
+set -euo pipefail
+
+# Resolve the real path to this script (follow symlinks)
+if command -v readlink >/dev/null 2>&1; then
+  SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
+else
+  # Fallback: may be relative, but still usable as long as CWD is unchanged
+  SCRIPT_PATH="${BASH_SOURCE[0]}"
+fi
 
 # Basic PATH (important when run from cron)
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -30,13 +37,32 @@ elif [[ -d /var/home/linuxbrew/bin ]]; then
   PATH="/var/home/linuxbrew/bin:$PATH"
 fi
 
-if [[ -d /home/linuxbrew/.linuxbrew/bin ]]; then
-  PATH="/home/linuxbrew/.linuxbrew/bin:$PATH"
-elif [[ -d /home/linuxbrew/bin ]]; then
-  PATH="/home/linuxbrew/bin:$PATH"
+export PATH
+
+# Optional torsocks for network operations
+if command -v torsocks >/dev/null 2>&1; then
+  TORSOCKS="torsocks"
+else
+  TORSOCKS=""
 fi
 
-export PATH
+net_run() {
+  if [[ -n "$TORSOCKS" ]]; then
+    "$TORSOCKS" "$@"
+  else
+    "$@"
+  fi
+}
+
+net_run_as_user() {
+  local user="$1"
+  shift
+  if [[ -n "$TORSOCKS" ]]; then
+    runuser -u "$user" -- "$TORSOCKS" "$@"
+  else
+    runuser -u "$user" -- "$@"
+  fi
+}
 
 # Simple colors for messages
 GREEN="\e[32m"
@@ -44,9 +70,9 @@ YELLOW="\e[33m"
 RED="\e[31m"
 RESET="\e[0m"
 
-log()    { echo -e "${GREEN}[INFO]${RESET} $*"; }
-warn()   { echo -e "${YELLOW}[WARN]${RESET} $*"; }
-error()  { echo -e "${RED}[ERROR]${RESET} $*" >&2; }
+log()    { printf '%s %b[INFO]%b %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$GREEN" "$RESET" "$*"; }
+warn()   { printf '%s %b[WARN]%b %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$YELLOW" "$RESET" "$*"; }
+error()  { printf '%s %b[ERROR]%b %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$RED" "$RESET" "$*" >&2; }
 
 trap 'error "Execution interrupted."; exit 1' INT
 
@@ -92,7 +118,7 @@ ensure_root() {
 
   if require_cmd --check run0; then
     log "Re-executing this script via run0 to gain root privileges..."
-    exec run0 -- "$0" "$@"
+    exec run0 -- "$SCRIPT_PATH" "$@"
   else
     error "This script must be run as root and 'run0' was not found. Please run as root or install run0."
     exit 1
@@ -117,9 +143,9 @@ update_system_image() {
   fi
 
   log "Updating system via rpm-ostree (non-interactive)..."
-  rpm-ostree update       || warn "rpm-ostree update failed (continuing)."
-  rpm-ostree upgrade      || warn "rpm-ostree upgrade failed (continuing)."
-  rpm-ostree cleanup -bm  || warn "rpm-ostree cleanup failed (continuing)."
+  net_run rpm-ostree update       || warn "rpm-ostree update failed (continuing)."
+  net_run rpm-ostree upgrade      || warn "rpm-ostree upgrade failed (continuing)."
+  net_run rpm-ostree cleanup -bm  || warn "rpm-ostree cleanup failed (continuing)."
 }
 
 update_firmware() {
@@ -129,9 +155,9 @@ update_firmware() {
   fi
 
   log "Updating firmware via fwupdmgr (non-interactive)..."
-  fwupdmgr refresh --force                     || warn "fwupdmgr refresh failed (continuing)."
-  fwupdmgr get-updates                         || warn "fwupdmgr get-updates failed (continuing)."
-  fwupdmgr update -y --no-reboot-check         || warn "fwupdmgr update failed (continuing)."
+  net_run fwupdmgr refresh --force                     || warn "fwupdmgr refresh failed (continuing)."
+  net_run fwupdmgr get-updates                         || warn "fwupdmgr get-updates failed (continuing)."
+  net_run fwupdmgr update -y --no-reboot-check         || warn "fwupdmgr update failed (continuing)."
 }
 
 update_homebrew() {
@@ -155,31 +181,31 @@ update_homebrew() {
 
   if [[ -z "$PREFIX_UID" || -z "$PREFIX_GID" ]]; then
     warn "Could not read UID/GID for '$BREW_PREFIX'; running brew as root (not ideal)."
-    brew update   || warn "brew update failed (continuing)."
-    brew upgrade  || warn "brew upgrade failed (continuing)."
-    brew cleanup  || warn "brew cleanup failed (continuing)."
+    net_run brew update   || warn "brew update failed (continuing)."
+    net_run brew upgrade  || warn "brew upgrade failed (continuing)."
+    net_run brew cleanup  || warn "brew cleanup failed (continuing)."
     return
   fi
 
   BREW_USER="$(getent passwd "$PREFIX_UID" | cut -d: -f1 || true)"
   if [[ -z "${BREW_USER:-}" ]]; then
     warn "Could not map UID=$PREFIX_UID to a username; running brew as root (not ideal)."
-    brew update   || warn "brew update failed (continuing)."
-    brew upgrade  || warn "brew upgrade failed (continuing)."
-    brew cleanup  || warn "brew cleanup failed (continuing)."
+    net_run brew update   || warn "brew update failed (continuing)."
+    net_run brew upgrade  || warn "brew upgrade failed (continuing)."
+    net_run brew cleanup  || warn "brew cleanup failed (continuing)."
     return
   fi
 
   if require_cmd --check runuser; then
     log "Running brew as Homebrew owner: $BREW_USER"
-    runuser -u "$BREW_USER" -- brew update   || warn "brew update failed (continuing)."
-    runuser -u "$BREW_USER" -- brew upgrade  || warn "brew upgrade failed (continuing)."
-    runuser -u "$BREW_USER" -- brew cleanup  || warn "brew cleanup failed (continuing)."
+    net_run_as_user "$BREW_USER" brew update   || warn "brew update failed (continuing)."
+    net_run_as_user "$BREW_USER" brew upgrade  || warn "brew upgrade failed (continuing)."
+    net_run_as_user "$BREW_USER" brew cleanup  || warn "brew cleanup failed (continuing)."
   else
     warn "'runuser' not available; running brew as root (not ideal)."
-    brew update   || warn "brew update failed (continuing)."
-    brew upgrade  || warn "brew upgrade failed (continuing)."
-    brew cleanup  || warn "brew cleanup failed (continuing)."
+    net_run brew update   || warn "brew update failed (continuing)."
+    net_run brew upgrade  || warn "brew upgrade failed (continuing)."
+    net_run brew cleanup  || warn "brew cleanup failed (continuing)."
   fi
 }
 
@@ -190,9 +216,9 @@ update_flatpak() {
   fi
 
   log "Updating and repairing Flatpak system installation..."
-  flatpak repair --system                          || warn "flatpak system repair failed (continuing)."
-  flatpak update   --system -y                     || warn "flatpak system update failed (continuing)."
-  flatpak uninstall --system --unused -y           || warn "flatpak system cleanup failed (continuing)."
+  net_run flatpak repair --system                          || warn "flatpak system repair failed (continuing)."
+  net_run flatpak update   --system -y                     || warn "flatpak system update failed (continuing)."
+  net_run flatpak uninstall --system --unused -y           || warn "flatpak system cleanup failed (continuing)."
 
   # Per-user updates (best effort)
   if ! require_cmd --check runuser; then
@@ -205,9 +231,9 @@ update_flatpak() {
     [[ "$uid" -ge 1000 && "$uid" -lt 60000 ]] || continue
     if [[ -d "$home/.local/share/flatpak" ]]; then
       log "  -> Flatpak repair/update for user $user"
-      runuser -u "$user" -- flatpak repair --user                 || warn "flatpak user repair failed for $user (continuing)."
-      runuser -u "$user" -- flatpak update --user -y              || warn "flatpak user update failed for $user (continuing)."
-      runuser -u "$user" -- flatpak uninstall --user --unused -y  || warn "flatpak user cleanup failed for $user (continuing)."
+      net_run_as_user "$user" flatpak repair --user                 || warn "flatpak user repair failed for $user (continuing)."
+      net_run_as_user "$user" flatpak update --user -y              || warn "flatpak user update failed for $user (continuing)."
+      net_run_as_user "$user" flatpak uninstall --user --unused -y  || warn "flatpak user cleanup failed for $user (continuing)."
     fi
   done < /etc/passwd
 }
@@ -424,9 +450,9 @@ collect_secureblue_info() {
       if require_cmd --check brew; then
         if [[ -n "${run_user:-}" ]]; then
           # Run brew services as the primary non-root user
-          $run_user brew services list
+          $run_user brew services info --all
         else
-          brew services list
+          brew services info --all
         fi
       else
         echo "brew not available."
@@ -436,7 +462,7 @@ collect_secureblue_info() {
 
   content="${sysinfo}${rpm_ostree_status}${flatpaks}${homebrew_packages}${audit_results}${local_overrides}${recent_events}${failed_services}${brew_services}"
 
-  paste_url=$(printf "%s\n" "$content" | fpaste --private=1 2>/dev/null || true)
+  paste_url=$(printf "%s\n" "$content" | net_run_as_user fpaste --private=1 2>/dev/null || true)
 
   if [[ -n "${paste_url:-}" ]]; then
     log "Secureblue information uploaded to fpaste: $paste_url"

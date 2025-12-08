@@ -26,17 +26,22 @@ set -euo pipefail  # exit on error, unset variable, or failing pipeline
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
+# Simple colors for messages
+GREEN="\e[32m"
+YELLOW="\e[33m"
+RED="\e[31m"
+RESET="\e[0m"
+
+log()    { printf '%s %b[INFO]%b %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$GREEN" "$RESET" "$*"; }
+warn()   { printf '%s %b[WARN]%b %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$YELLOW" "$RESET" "$*"; }
+error()  { printf '%s %b[ERROR]%b %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$RED" "$RESET" "$*" >&2; exit 1; }
+
 DIST=""
 RELEASE=""
 REPO_RELEASE=""
 ARCH_FILTER=""
 APT_CMD=""
 TORSOCKS=""
-
-error() {
-    echo "Error: $*" >&2
-    exit 1
-}
 
 # Helper to ensure required commands exist
 require_cmd() {

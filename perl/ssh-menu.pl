@@ -10,22 +10,43 @@
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
-#
 
 use strict;
 use warnings;
 
-use File::Basename;
+my $GREEN = "\e[32m";
+my $YELLOW = "\e[33m";
+my $RED = "\e[31m";
+my $RESET = "\e[0m";
 
-my $known_hosts = "$ENV{HOME}/.ssh/known_hosts";
+my $TORSOCKS = find_in_path('torsocks') // '';
 
-if ( !-f $known_hosts ) {
-    die "Error: $known_hosts not found.\n";
+sub info {
+    my ($msg) = @_;
+    print "${GREEN}[INFO]${RESET} $msg\n";
 }
 
-###################################################
-# 1. Export environment variables for ksshaskpass #
-###################################################
+sub warn_msg {
+    my ($msg) = @_;
+    print STDERR "${YELLOW}[WARN]${RESET} $msg\n";
+}
+
+sub error {
+    my ($msg, $code) = @_;
+    $code //= 1;
+    print STDERR "${RED}[ERROR]${RESET} $msg\n";
+    exit $code;
+}
+
+my $known_hosts = $ENV{SSH_MENU_KNOWN_HOSTS} // "$ENV{HOME}/.ssh/known_hosts";
+
+if ( !-f $known_hosts ) {
+    error("$known_hosts not found.");
+}
+
+#######################################
+# 1. Export environment variables     #
+#######################################
 
 # Simple PATH search for ksshaskpass (no extra modules needed)
 sub find_in_path {
@@ -38,65 +59,65 @@ sub find_in_path {
     return;
 }
 
-my $ksshaskpass = find_in_path('ksshaskpass') // '/usr/bin/ksshaskpass';
+my $ksshaskpass = find_in_path('ksshaskpass');
 
-$ENV{SSH_ASKPASS}         = $ksshaskpass;
-$ENV{SSH_ASKPASS_REQUIRE} = 'prefer';  # or 'force' if you want always GUI
+if ($ksshaskpass) {
+    $ENV{SSH_ASKPASS}         = $ksshaskpass;
+    $ENV{SSH_ASKPASS_REQUIRE} = 'prefer';  # or 'force' if you want always GUI
+} else {
+    warn_msg('ksshaskpass not found in PATH; continuing without SSH_ASKPASS');
+}
+
+#######################################
+# 1b. Optional torsocks for ssh       #
+#######################################
+
+if ($TORSOCKS) {
+    info("torsocks detected: $TORSOCKS");
+}
 
 #######################################
 # 2. Build host list from known_hosts #
 #######################################
 
-my @hosts;
-my @ports;
-my @displays;
+my @entries;
 my %seen;
 my $hashed_count = 0;
 
 open my $fh, '<', $known_hosts
-  or die "Error: cannot open $known_hosts: $!\n";
+  or error("cannot open $known_hosts: $!");
 
 while (my $line = <$fh>) {
     chomp $line;
-    next if $line =~ /^\s*$/;        # skip empty
-    next if $line =~ /^\s*#/;        # skip comments
+    next if $line =~ /^\s*$/;
+    next if $line =~ /^\s*#/;
 
-    if ( $line =~ /^\s*\|/ ) {       # hashed entries
+    if ( $line =~ /^\s*\|/ ) {
         $hashed_count++;
         next;
     }
 
-    # Take first field (host spec: host1,host2,ip,...)
     my ($field) = split /\s+/, $line, 2;
     next unless defined $field && length $field;
 
-    # Split by comma and clean elements
     my @parts = grep {
         defined $_ && length $_ && $_ !~ /^\s*#/ && $_ !~ /^\s*\|/
     } split /,/, $field;
 
     next unless @parts;
 
-    # Primary host is the first element
     my $primary = $parts[0];
     my $host    = $primary;
     my $port    = '';
 
-    # Match [host]:port
     if ( $host =~ /^\[(.+)\]:(\d+)$/ ) {
         $host = $1;
         $port = $2;
     }
 
     my $key = join ':', $host, ($port || 'default');
-
-    # Skip duplicates for the same host:port
     next if $seen{$key}++;
 
-    push @hosts, $host;
-    push @ports, $port;
-
-    # Build display string (include aliases if present)
     my $display;
     if (@parts > 1) {
         my @aliases   = @parts[1 .. $#parts];
@@ -114,86 +135,117 @@ while (my $line = <$fh>) {
         }
     }
 
-    push @displays, $display;
+    push @entries, {
+        host    => $host,
+        port    => $port,
+        display => $display,
+    };
 }
 close $fh;
 
-if ( !@hosts ) {
+if ( !@entries ) {
     if ( $hashed_count > 0 ) {
-        die
-          "No valid plain hosts found in $known_hosts.\n"
-        . "It looks like your known_hosts file contains only hashed entries.\n"
-        . "This script cannot recover hostnames from hashed lines.\n"
-        . "Consider keeping a separate non-hashed file (e.g. ~/.ssh/known_hosts.menu)\n"
-        . "for use with this menu script.\n";
+        error(
+            "No valid plain hosts found in $known_hosts.\n"
+          . "It looks like your known_hosts file contains only hashed entries.\n"
+          . "This script cannot recover hostnames from hashed lines.\n"
+          . "Consider keeping a separate non-hashed file (e.g. ~/.ssh/known_hosts.menu)\n"
+          . "for use with this menu script."
+        );
     } else {
-        die "No valid hosts found in $known_hosts.\n";
+        error("No valid hosts found in $known_hosts.");
     }
 }
+
+@entries = sort { lc $a->{display} cmp lc $b->{display} } @entries;
+
+warn_msg("Skipped $hashed_count hashed known_hosts entries.") if $hashed_count > 0;
 
 ##########################################
 # 3. Interactive menu to choose a server #
 ##########################################
 
-print "Select a server to connect to:\n\n";
+info("Select a server to connect to:");
+print "\n";
 
-for my $i (0 .. $#displays) {
-    printf "  %2d) %s\n", $i + 1, $displays[$i];
+for my $i (0 .. $#entries) {
+    printf "  %2d) %s\n", $i + 1, $entries[$i]{display};
 }
-printf "  %2d) Quit\n\n", scalar(@displays) + 1;
+printf "  %2d) Quit\n\n", scalar(@entries) + 1;
 
 my $selected_idx;
 while (1) {
-    print "Choice [1-", scalar(@displays) + 1, "]: ";
+    print "Choice [1-", scalar(@entries) + 1, "]: ";
     my $input = <STDIN>;
-    defined $input or die "\nInput closed.\n";
+    defined $input or error("Input closed.");
     chomp $input;
+    if ( $input =~ /^[qQ]$/ ) {
+        info("Exiting.");
+        exit 0;
+    }
+
     next if $input !~ /^\d+$/;
 
     my $num = int($input);
 
-    if ( $num == scalar(@displays) + 1 ) {
-        print "Exiting.\n";
+    if ( $num == scalar(@entries) + 1 ) {
+        info("Exiting.");
         exit 0;
     }
 
-    if ( $num >= 1 && $num <= scalar(@displays) ) {
+    if ( $num >= 1 && $num <= scalar(@entries) ) {
         $selected_idx = $num - 1;
         last;
     }
 
-    print "Invalid option. Please try again.\n";
+    warn_msg("Invalid option. Please try again.");
 }
 
-my $selected_host = $hosts[$selected_idx];
-my $selected_port = $ports[$selected_idx];
+my $selected_host    = $entries[$selected_idx]{host};
+my $selected_port    = $entries[$selected_idx]{port};
+my $selected_display = $entries[$selected_idx]{display};
 
-print "Selected server: $displays[$selected_idx]\n";
+info("Selected server: $selected_display");
 
 #######################
 # 4. Ask for SSH user #
 #######################
 
-print "SSH user: ";
+my $default_user = $ENV{SSH_MENU_USER} // $ENV{USER} // '';
+
+print "SSH user" . (length $default_user ? " [$default_user]" : '') . ": ";
 my $ssh_user = <STDIN>;
-defined $ssh_user or die "\nInput closed.\n";
+defined $ssh_user or error("Input closed.");
 chomp $ssh_user;
 
 if ( !length $ssh_user ) {
-    die "Empty user. Aborting.\n";
+    if ( length $default_user ) {
+        $ssh_user = $default_user;
+    } else {
+        error("Empty user. Aborting.");
+    }
+}
+
+if ( $ssh_user =~ /^\s+$/ ) {
+    error("Empty user. Aborting.");
 }
 
 ######################
 # 5. Connect via SSH #
 ######################
 
-print "Connecting to $ssh_user\@$selected_host ...\n";
-
 my @cmd;
 if ( $selected_port ) {
+    info("Connecting to $ssh_user\@$selected_host (port $selected_port)...");
     @cmd = ('ssh', '-p', $selected_port, "$ssh_user\@$selected_host");
 } else {
+    info("Connecting to $ssh_user\@$selected_host ...");
     @cmd = ('ssh', "$ssh_user\@$selected_host");
 }
 
-exec @cmd or die "Failed to exec ssh: $!\n";
+if ($TORSOCKS) {
+    unshift @cmd, $TORSOCKS;
+    info("Wrapping ssh with torsocks");
+}
+
+exec @cmd or error("Failed to exec ssh: $!");

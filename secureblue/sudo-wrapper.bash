@@ -32,14 +32,22 @@ set -o errexit   # exit on any unhandled error
 set -o nounset   # treat use of unset variables as an error
 set -o pipefail  # propagate pipeline errors
 
+# Simple colors for messages
+GREEN="\e[32m"
+YELLOW="\e[33m"
+RED="\e[31m"
+RESET="\e[0m"
+
+log()    { printf '%s %b[INFO]%b %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$GREEN" "$RESET" "$*"; }
+warn()   { printf '%s %b[WARN]%b %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$YELLOW" "$RESET" "$*"; }
+error()  { printf '%s %b[ERROR]%b %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$RED" "$RESET" "$*" >&2; exit 1; }
+
 # Detect how this script was called (sudo vs visudo vs sudoedit, etc.)
 prog_name="$(basename -- "$0")"
 
 # Optional: fail fast if run0 is not available in PATH.
 if ! command -v run0 >/dev/null 2>&1; then
-    echo "${prog_name}-wrapper error: 'run0' is not installed or not in PATH." >&2
-    echo "Please install or enable run0 before using this wrapper." >&2
-    exit 1
+    error "${prog_name}-wrapper error: 'run0' is not installed or not in PATH. Please install or enable run0 before using this wrapper."
 fi
 
 ##########################################
@@ -69,9 +77,7 @@ if [[ "$prog_name" == "visudo" ]]; then
 
     # Final sanity check
     if [[ ! -x "$real_visudo" ]]; then
-        echo "sudo-wrapper error: could not locate the real 'visudo' binary." >&2
-        echo "Expected /usr/sbin/visudo or another executable visudo in PATH." >&2
-        exit 1
+        error "sudo-wrapper error: could not locate the real 'visudo' binary. Expected /usr/sbin/visudo or another executable visudo in PATH."
     fi
 
     # Optional hint variable
@@ -97,8 +103,7 @@ if [[ "$prog_name" == "sudoedit" ]]; then
     #
 
     if [[ "$#" -lt 1 ]]; then
-        echo "Usage: sudoedit FILE..." >&2
-        exit 1
+        error "Usage: sudoedit FILE..."
     fi
 
     # Determine preferred editor
@@ -109,14 +114,12 @@ if [[ "$prog_name" == "sudoedit" ]]; then
     editor_cmd=($editor)
 
     if [[ "${#editor_cmd[@]}" -eq 0 ]]; then
-        echo "sudo-wrapper error: editor is empty." >&2
-        exit 1
+        error "sudo-wrapper error: editor is empty."
     fi
 
     # Check that the base command exists
     if ! command -v "${editor_cmd[0]}" >/dev/null 2>&1; then
-        echo "sudo-wrapper error: editor '${editor_cmd[0]}' not found in PATH." >&2
-        exit 1
+        error "sudo-wrapper error: editor '${editor_cmd[0]}' not found in PATH."
     fi
 
     # Optional hint variable
