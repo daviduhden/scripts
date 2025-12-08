@@ -60,15 +60,14 @@ require_cmd() {
 }
 
 print_header() {
-    printf '%s\n' "=================================================="
-    printf '%s\n' "$1"
-    printf '%s\n' "=================================================="
+    log "=================================================="
+    log "$1"
+    log "=================================================="
 }
 
 select_device() {
     print_header "Available block devices"
     lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT
-    printf '\n'
     read -r -p "Enter the LUKS *partition* device (e.g. /dev/sdb1): " LUKS_DEV
     if [[ ! -b "$LUKS_DEV" ]]; then
         error "'$LUKS_DEV' is not a block device."
@@ -88,7 +87,6 @@ ensure_luks() {
 }
 
 open_luks() {
-    printf '\n'
     read -r -p "Enter a name for the opened LUKS mapper (e.g. ext_btrfs): " LUKS_NAME
     LUKS_NAME=${LUKS_NAME:-ext_btrfs}
 
@@ -128,7 +126,7 @@ umount_if_mounted() {
     mounts=$(lsblk -no MOUNTPOINT "$MAPPER_DEV" | grep -v '^$' || true)
     if [[ -n "$mounts" ]]; then
         log "Device is currently mounted at:"
-        printf '%s\n' "$mounts"
+        log "$mounts"
         if ask_yes_no "Unmount all these mountpoints now?"; then
             while read -r mp; do
                 [[ -z "$mp" ]] && continue
@@ -158,13 +156,10 @@ run_btrfs_convert() {
     print_header "Converting ext4 → Btrfs with btrfs-convert"
     log "This will modify the filesystem *inside* $MAPPER_DEV."
     log "The LUKS layer on $LUKS_DEV is NOT changed."
-    printf '\n'
     log "A backup subvolume (ext2_saved) will be created so you can revert"
     log "if needed, as long as you don't delete it later."
-    printf '\n'
     warn "!!! RISK WARNING !!!"
     warn "Power loss, hardware issues, or bugs may still cause DATA LOSS."
-    printf '\n'
 
     if ! ask_yes_no "Do you REALLY want to run btrfs-convert on $MAPPER_DEV?"; then
         warn "Aborting conversion."
@@ -186,12 +181,9 @@ mount_btrfs() {
     fi
 
     mount -t btrfs "$MAPPER_DEV" "$MOUNT_POINT"
-    printf '\n'
     log "Mounted $MAPPER_DEV on $MOUNT_POINT"
-    printf '\n'
     log "Listing top-level files:"
     ls "$MOUNT_POINT" || true
-    printf '\n'
     log "Listing Btrfs subvolumes:"
     btrfs subvolume list "$MOUNT_POINT" || true
 }
@@ -218,10 +210,8 @@ update_fstab() {
     local fstab_line
     fstab_line="UUID=$uuid  $MOUNT_POINT  btrfs  $FSTAB_OPTS  0  0"
 
-    printf '\n'
     log "About to append this line to /etc/fstab:"
-    printf '%s\n' "$fstab_line"
-    printf '\n'
+    log "$fstab_line"
 
     if ask_yes_no "Proceed and append to /etc/fstab?"; then
         log "Creating backup of /etc/fstab at /etc/fstab.bak-$(date +%Y%m%d-%H%M%S)"
@@ -239,10 +229,8 @@ delete_ext2_saved() {
     log "Inside the Btrfs filesystem, a subvolume ext2_saved should exist."
     log "As long as ext2_saved exists, you (in theory) can revert to ext4."
     warn "If you delete ext2_saved, you CANNOT revert using btrfs-convert."
-    printf '\n'
     log "It's recommended to keep ext2_saved for some time until you are confident"
     log "everything works fine with Btrfs."
-    printf '\n'
 
     if ! ask_yes_no "Do you want to delete ext2_saved NOW (NOT recommended early)?"; then
         log "Keeping ext2_saved."
@@ -296,19 +284,15 @@ main() {
     mount_btrfs
     update_fstab
 
-    printf '\n'
     log "Conversion to Btrfs is done and the filesystem is mounted."
     log "You can start using it now."
-    printf '\n'
 
     delete_ext2_saved
 
-    printf '\n'
     log "All done. Remember:"
     log "- LUKS encryption is unchanged."
     log "- You are now using Btrfs inside the LUKS volume."
     log "- If you kept ext2_saved, you still have a way back to ext (in theory)."
-    printf '\n'
 }
 
 main "$@"

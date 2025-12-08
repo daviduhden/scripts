@@ -24,7 +24,7 @@ set -u  # treat use of unset variables as an error
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
 
-# Prefer ksh93 when available for better POSIX compliance; fallback to base ksh
+# Prefer ksh93 when available; fallback to base ksh
 if [ -z "${_KSH93_EXECUTED:-}" ] && command -v ksh93 >/dev/null 2>&1; then
     _KSH93_EXECUTED=1 exec ksh93 "$0" "$@"
 fi
@@ -33,6 +33,9 @@ _KSH93_EXECUTED=1
 log()   { printf '%s [INFO]  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
 warn()  { printf '%s [WARN]  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 error() { printf '%s [ERROR] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
+
+typeset prog_name real_visudo candidate editor
+typeset -a editor_cmd
 
 # Detect how this script was called (sudo vs visudo vs sudoedit, etc.)
 prog_name=$(basename -- "$0")

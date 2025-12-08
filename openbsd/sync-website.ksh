@@ -11,7 +11,7 @@ set -u
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
 
-# Prefer ksh93 when available for better POSIX compliance; fallback to base ksh
+# Prefer ksh93 when available; fallback to base ksh
 if [ -z "${_KSH93_EXECUTED:-}" ] && command -v ksh93 >/dev/null 2>&1; then
     _KSH93_EXECUTED=1 exec ksh93 "$0" "$@"
 fi
@@ -32,11 +32,13 @@ error() { printf '%s [ERROR] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 # GH_USER: system user whose GitHub CLI config (hosts.yml/config.yml) supplies the token.
 # GH_HOST: GitHub hostname; override for GHES if needed.
 # REPO_SLUG: owner/repo for gh sync fallback.
+typeset GH_USER GH_HOST REPO_SLUG
 GH_USER="${GH_USER:-root}"
 GH_HOST="${GH_HOST:-github.com}"
 REPO_SLUG="${REPO_SLUG:-daviduhden/cyberpunk-handbook}"
 
 # Try to resolve the home directory of GH_USER in a portable way.
+typeset GH_HOME GH_CONFIG_DIR
 if command -v getent >/dev/null 2>&1; then
     GH_HOME="$(getent passwd "$GH_USER" | awk -F: '{print $6}')"
 else
@@ -56,6 +58,7 @@ run_as_gh_user() {
 }
 
 stage_from_source() {
+    typeset srcdir
     srcdir="$1"
 
     if [ -d "$WWW_DIR/.git" ]; then
@@ -88,7 +91,9 @@ stage_from_source() {
 # Main synchronization config #
 ###############################
 
+typeset WWW_DIR BRANCH SERVICE_NAME OWNER_USER OWNER_GROUP WWW_HOST
 WWW_DIR="/var/www/htdocs/cyberpunk-handbook"
+WWW_HOST="handbook.uhden.dev"
 BRANCH="main"
 SERVICE_NAME="httpd"
 OWNER_USER="root"
@@ -96,6 +101,7 @@ OWNER_GROUP="daemon"
 
 # GitHub ZIP URL for fallback
 # Example: https://github.com/user/repo/archive/refs/heads/main.zip
+typeset ZIP_URL
 ZIP_URL="https://${GH_HOST}/${REPO_SLUG}/archive/refs/heads/${BRANCH}.zip"
 
 log "----------------------------------------"
@@ -108,6 +114,7 @@ if [ ! -d "$WWW_DIR" ]; then
 fi
 
 # Simple lock to avoid concurrent runs
+typeset LOCKDIR
 LOCKDIR="$WWW_DIR/.sync.lock"
 if ! mkdir "$LOCKDIR" 2>/dev/null; then
     log "Another sync is already running (lock: $LOCKDIR). Exiting."
@@ -123,10 +130,7 @@ trap cleanup EXIT INT TERM
 # Function: Sync using GitHub CLI #
 ###################################
 sync_with_gh_cli() {
-    repo_slug=""
-    attempt=1
-    tmpdir=""
-    stagedir=""
+    typeset repo_slug="" attempt=1 tmpdir="" stagedir="" clone_err_file="" line
 
     if ! command -v gh >/dev/null 2>&1; then
         log "GitHub CLI (gh) is not installed; skipping gh sync."
@@ -175,7 +179,7 @@ sync_with_gh_cli() {
                 break
             fi
             log "gh repo clone attempt ${attempt} failed; retrying..."
-            sleep $((2 ** attempt))
+            continue
         else
             clone_err_file=$(mktemp "/tmp/gh-clone-err.XXXXXX") || {
                 error "unable to create temporary file for gh clone diagnostics."
@@ -214,9 +218,7 @@ sync_with_gh_cli() {
 # Function: Sync using GIT #
 ############################
 sync_with_git() {
-    origin_url=""
-    tmpdir=""
-    stagedir=""
+    typeset origin_url="" tmpdir="" stagedir=""
 
     if ! command -v git >/dev/null 2>&1; then
         log "git is not installed or not in PATH. Skipping git sync."
@@ -264,6 +266,7 @@ sync_with_git() {
 # Function: fallback using GitHub ZIP #
 #######################################
 sync_with_github_zip() {
+    typeset tmpdir zipfile unpack_dir srcdir
     # Check required tools
     if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
         error "neither curl nor wget is installed; cannot download ZIP."
@@ -374,6 +377,7 @@ post_update_steps() {
 # MAIN FLOW #
 #############
 
+typeset SYNC_OK
 SYNC_OK=0
 
 # 1) Prefer GitHub CLI if available
@@ -398,6 +402,18 @@ fi
 if ! post_update_steps; then
     error "post-update steps failed."
     exit 1
+fi
+
+# 3) Renew certificate
+if command -v acme-client >/dev/null 2>&1; then
+    log "Running acme-client for ${WWW_HOST}..."
+    if acme-client "${WWW_HOST}"; then
+        log "acme-client completed for ${WWW_HOST}."
+    else
+        warn "acme-client failed for ${WWW_HOST}."
+    fi
+else
+    warn "acme-client not found; skipping certificate renewal for ${WWW_HOST}."
 fi
 
 log "Sync completed"

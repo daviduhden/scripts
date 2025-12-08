@@ -8,13 +8,13 @@ PREFIX?=/usr/local
 BINDIR?=${PREFIX}/bin
 
 DEBIAN_SCRIPTS=\
+	debian/add-gh-cli-repo.bash \
 	debian/add-i2pd-repo.bash \
 	debian/add-tor-repo.bash \
-	debian/add-gh-cli-repo.bash \
-	debian/apt-full-upgrade.bash \
 	debian/clean-logs.bash \
 	debian/enable-tor-transport.bash \
 	debian/sync-website.bash \
+	debian/sysupgrade.bash \
 	debian/update-argon-one-v3.bash \
 	debian/update-btop.bash \
 	debian/update-fastfetch.bash \
@@ -25,7 +25,8 @@ OPENBSD_SCRIPTS=\
 	openbsd/apply-sysclean.ksh \
 	openbsd/clean-logs.ksh \
 	openbsd/sudo-wrapper.ksh \
-	openbsd/sync-website.ksh
+	openbsd/sync-website.ksh \
+	openbsd/sysupgrade-current.ksh
 
 SECUREBLUE_SCRIPTS=\
 	secureblue/luks-ext4-to-btrfs.bash \

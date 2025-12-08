@@ -8,7 +8,7 @@ set -eu  # exit on error and on use of unset variables
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
 
-# Prefer ksh93 when available for better POSIX compliance; fallback to base ksh
+# Prefer ksh93 when available; fallback to base ksh
 if [ -z "${_KSH93_EXECUTED:-}" ] && command -v ksh93 >/dev/null 2>&1; then
     _KSH93_EXECUTED=1 exec ksh93 "$0" "$@"
 fi
@@ -20,6 +20,7 @@ export PATH
 
 # If DRY_RUN=1 is set in the environment, the script will only show
 # what would be deleted, without actually removing files.
+typeset DRY_RUN
 DRY_RUN="${DRY_RUN:-0}"
 
 # Also allow --dry-run or -n as a first argument
