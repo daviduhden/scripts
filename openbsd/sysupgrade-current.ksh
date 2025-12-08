@@ -50,7 +50,11 @@ echo "Running apply-sysclean..."
 
 echo "Collecting system info and uploading to 0x0.st..."
 collect_system_info_and_upload() {
-    if ! command -v curl >/dev/null 2>&1; then
+    CURL_BIN="/usr/local/bin/curl"
+    if [ ! -x "$CURL_BIN" ]; then
+        CURL_BIN="/usr/bin/curl"
+    fi
+    if [ ! -x "$CURL_BIN" ]; then
         printf '%s\n' "curl not found; skipping system info upload."
         return
     fi
@@ -73,7 +77,7 @@ collect_system_info_and_upload() {
         printf '\n=== Disk Usage (df -h) ===\n\n'
         if command -v df >/dev/null 2>&1; then df -h; else printf '%s\n' "df not available."; fi
     } > "$tmpf"
-    /usr/local/bin/curl -fLsS --retry 5 -F "file=@${tmpf}" -F "expires=${expires_ms}" https://0x0.st 2>/dev/null | tr -d "[:space:]" || true
+    "$CURL_BIN" -fLsS --retry 5 -F "file=@${tmpf}" -F "expires=${expires_ms}" https://0x0.st 2>/dev/null | tr -d "[:space:]" || true
     rm -f "$tmpf"
 }
 
