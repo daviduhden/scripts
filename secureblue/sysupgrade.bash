@@ -446,7 +446,7 @@ collect_secureblue_info() {
 
   content="${sysinfo}${rpm_ostree_status}${flatpaks}${homebrew_packages}${audit_results}${local_overrides}${recent_events}${failed_services}${brew_services}"
 
-  paste_url=$(printf "%s\n" "$content" | net_run_as_user fpaste --private=1 2>/dev/null || true)
+  paste_url=$(printf "%s\n" "$content" | fpaste --private=1 2>/dev/null || true)
 
   if [[ -n "${paste_url:-}" ]]; then
     log "Secureblue information uploaded to fpaste: $paste_url"
