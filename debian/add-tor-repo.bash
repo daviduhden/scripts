@@ -320,15 +320,16 @@ Architectures: ${ARCH_FILTER}
 Signed-By: /usr/share/keyrings/deb.torproject.org-keyring.gpg
 EOF
 
-# Optional nightly (commented out by default). Uncomment to enable nightly builds.
-cat >> /etc/apt/sources.list.d/tor.sources <<'EOF'
-#
-# Types: deb deb-src
-# URIs: ${REPO_URL}
-# Suites: tor-nightly-main-${SUITE_CODENAME}
-# Components: main
-# Architectures: ${ARCH_FILTER}
-# Signed-By: /usr/share/keyrings/deb.torproject.org-keyring.gpg
+# Optional nightly stanza, disabled by default. Set Enabled: yes to use.
+cat >> /etc/apt/sources.list.d/tor.sources <<EOF
+
+Enabled: no
+Types: deb deb-src
+URIs: ${REPO_URL}
+Suites: tor-nightly-main-${SUITE_CODENAME}
+Components: main
+Architectures: ${ARCH_FILTER}
+Signed-By: /usr/share/keyrings/deb.torproject.org-keyring.gpg
 EOF
 
 log "Updating APT index (including Tor repository)..."
