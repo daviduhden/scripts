@@ -16,6 +16,10 @@ set -euo pipefail
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
+# Force predictable US English output (useful for logs/parsing)
+export LANG=C.UTF-8
+export LC_ALL=C.UTF-8
+
 APT_BIN="/bin/apt"
 
 BACKUP_ROOT="/var/backups/apt-config-backups"
