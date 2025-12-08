@@ -7,6 +7,7 @@ set -euo pipefail
 # - Backs up /etc before the upgrade
 # - Runs autoremove and autoclean
 # - Reloads systemd and restarts services (if needrestart is available)
+# - Collects system information and uploads it to 0x0.st (expires in 24 hours)
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
@@ -92,6 +93,80 @@ restart_services() {
   fi
 }
 
+collect_system_info_and_upload() {
+  if ! command -v curl >/dev/null 2>&1; then
+    warn "curl not found; skipping system info upload."
+    return
+  fi
+
+  log "Collecting system info and uploading to 0x0.st (24h expiry)..."
+
+  local sysinfo upgrades recent_events last_boot_events failed_services disk_usage content tmpfile upload_url expires_ms
+
+  sysinfo=$(
+    {
+      printf '\n=== System Info ===\n\n'
+      uname -a
+      printf '\n'
+      if [[ -f /etc/os-release ]]; then
+        cat /etc/os-release
+      fi
+    } 2>&1 || true
+  )
+
+  upgrades=$(
+    {
+      printf '\n=== Upgradable Packages ===\n\n'
+      apt list --upgradable 2>/dev/null
+    } 2>&1 || true
+  )
+
+  last_boot_events=$(
+    {
+      printf '\n=== Previous Boot Journal (warnings/errors) ===\n\n'
+      journalctl -b -1 -p warning..alert
+    } 2>&1 || true
+  )
+
+  recent_events=$(
+    {
+      printf '\n=== Recent Journal (warnings/errors, last hour) ===\n\n'
+      journalctl -p warning..alert --since "1 hour ago"
+    } 2>&1 || true
+  )
+
+  failed_services=$(
+    {
+      printf '\n=== Failed Systemd Services ===\n\n'
+      systemctl list-units --state=failed
+    } 2>&1 || true
+  )
+
+  disk_usage=$(
+    {
+      printf '\n=== Disk Usage (df -h) ===\n\n'
+      df -h
+    } 2>&1 || true
+  )
+
+  content="${sysinfo}${upgrades}${last_boot_events}${recent_events}${failed_services}${disk_usage}"
+
+  tmpfile="$(mktemp /tmp/debian-info.XXXXXX)"
+  printf "%s\n" "$content" >"$tmpfile"
+
+  expires_ms=$(( ( $(date +%s) + 24*3600 ) * 1000 ))
+
+  upload_url=$(curl -fLsS --retry 5 -F "file=@${tmpfile}" -F "expires=${expires_ms}" https://0x0.st 2>/dev/null | tr -d '[:space:]' || true)
+
+  rm -f "$tmpfile"
+
+  if [[ -n "${upload_url:-}" ]]; then
+    log "System info uploaded to 0x0.st (expires in 24h): $upload_url"
+  else
+    warn "Failed to upload system info to 0x0.st."
+  fi
+}
+
 main() {
   require_root
 
@@ -101,6 +176,7 @@ main() {
   apt_full_upgrade
   apt_cleanup
   restart_services
+  collect_system_info_and_upload
   log "Apt maintenance run completed successfully."
 }
 

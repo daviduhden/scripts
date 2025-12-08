@@ -116,11 +116,11 @@ run_control_update() {
 }
 
 ask_reboot() {
+  local answer
   # Flags take precedence
   case "$AUTO_REBOOT" in
     yes)
       log "Auto reboot enabled by flag; rebooting now..."
-      sleep 1
       reboot
       ;;
     no)
@@ -136,12 +136,10 @@ ask_reboot() {
   fi
 
   # Interactive: ask the user
-  printf '\n'
   read -r -p "Reboot now to apply all changes? [y/N] " answer
   case "$answer" in
     [yY][eE][sS]|[yY])
       log "Rebooting..."
-      sleep 1
       reboot
       ;;
     *)

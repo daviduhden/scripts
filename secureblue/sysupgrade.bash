@@ -13,7 +13,7 @@ set -euo pipefail
 #   3. Homebrew packages (brew)
 #   4. Flatpak runtimes and applications (system + per-user)
 #   5. Storage maintenance (ext4/btrfs filesystems)
-#   6. Secureblue debug information (uploaded to fpaste)
+#   6. Secureblue debug information (uploaded to 0x0.st)
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
@@ -38,11 +38,7 @@ fi
 
 export PATH
 
-net_run() {
-  "$@"
-}
-
-net_run_as_user() {
+run_as_user() {
   local user="$1"
   shift
   runuser -u "$user" -- "$@"
@@ -125,11 +121,21 @@ update_system_image() {
     warn "rpm-ostree not found, skipping system image update."
     return
   fi
+  disk_usage=$(
+    {
+      printf '\n=== Disk Usage (df -h) ===\n\n'
+      if require_cmd --check df; then
+        df -h
+      else
+        printf 'df not available.\n'
+      fi
+    } 2>&1 || true
+  )
 
   log "Updating system via rpm-ostree (non-interactive)..."
-  net_run rpm-ostree update       || warn "rpm-ostree update failed (continuing)."
-  net_run rpm-ostree upgrade      || warn "rpm-ostree upgrade failed (continuing)."
-  net_run rpm-ostree cleanup -bm  || warn "rpm-ostree cleanup failed (continuing)."
+  rpm-ostree update       || warn "rpm-ostree update failed (continuing)."
+  rpm-ostree upgrade      || warn "rpm-ostree upgrade failed (continuing)."
+  rpm-ostree cleanup -bm  || warn "rpm-ostree cleanup failed (continuing)."
 }
 
 update_firmware() {
@@ -139,9 +145,9 @@ update_firmware() {
   fi
 
   log "Updating firmware via fwupdmgr (non-interactive)..."
-  net_run fwupdmgr refresh --force                     || warn "fwupdmgr refresh failed (continuing)."
-  net_run fwupdmgr get-updates                         || warn "fwupdmgr get-updates failed (continuing)."
-  net_run fwupdmgr update -y --no-reboot-check         || warn "fwupdmgr update failed (continuing)."
+  fwupdmgr refresh --force                     || warn "fwupdmgr refresh failed (continuing)."
+  fwupdmgr get-updates                         || warn "fwupdmgr get-updates failed (continuing)."
+  fwupdmgr update -y --no-reboot-check         || warn "fwupdmgr update failed (continuing)."
 }
 
 update_homebrew() {
@@ -165,31 +171,31 @@ update_homebrew() {
 
   if [[ -z "$PREFIX_UID" || -z "$PREFIX_GID" ]]; then
     warn "Could not read UID/GID for '$BREW_PREFIX'; running brew as root (not ideal)."
-    net_run brew update   || warn "brew update failed (continuing)."
-    net_run brew upgrade  || warn "brew upgrade failed (continuing)."
-    net_run brew cleanup  || warn "brew cleanup failed (continuing)."
+    brew update   || warn "brew update failed (continuing)."
+    brew upgrade  || warn "brew upgrade failed (continuing)."
+    brew cleanup  || warn "brew cleanup failed (continuing)."
     return
   fi
 
   BREW_USER="$(getent passwd "$PREFIX_UID" | cut -d: -f1 || true)"
   if [[ -z "${BREW_USER:-}" ]]; then
     warn "Could not map UID=$PREFIX_UID to a username; running brew as root (not ideal)."
-    net_run brew update   || warn "brew update failed (continuing)."
-    net_run brew upgrade  || warn "brew upgrade failed (continuing)."
-    net_run brew cleanup  || warn "brew cleanup failed (continuing)."
+    brew update   || warn "brew update failed (continuing)."
+    brew upgrade  || warn "brew upgrade failed (continuing)."
+    brew cleanup  || warn "brew cleanup failed (continuing)."
     return
   fi
 
   if require_cmd --check runuser; then
     log "Running brew as Homebrew owner: $BREW_USER"
-    net_run_as_user "$BREW_USER" brew update   || warn "brew update failed (continuing)."
-    net_run_as_user "$BREW_USER" brew upgrade  || warn "brew upgrade failed (continuing)."
-    net_run_as_user "$BREW_USER" brew cleanup  || warn "brew cleanup failed (continuing)."
+    run_as_user "$BREW_USER" brew update   || warn "brew update failed (continuing)."
+    run_as_user "$BREW_USER" brew upgrade  || warn "brew upgrade failed (continuing)."
+    run_as_user "$BREW_USER" brew cleanup  || warn "brew cleanup failed (continuing)."
   else
     warn "'runuser' not available; running brew as root (not ideal)."
-    net_run brew update   || warn "brew update failed (continuing)."
-    net_run brew upgrade  || warn "brew upgrade failed (continuing)."
-    net_run brew cleanup  || warn "brew cleanup failed (continuing)."
+    brew update   || warn "brew update failed (continuing)."
+    brew upgrade  || warn "brew upgrade failed (continuing)."
+    brew cleanup  || warn "brew cleanup failed (continuing)."
   fi
 }
 
@@ -200,9 +206,9 @@ update_flatpak() {
   fi
 
   log "Updating and repairing Flatpak system installation..."
-  net_run flatpak repair --system                          || warn "flatpak system repair failed (continuing)."
-  net_run flatpak update   --system -y                     || warn "flatpak system update failed (continuing)."
-  net_run flatpak uninstall --system --unused -y           || warn "flatpak system cleanup failed (continuing)."
+  flatpak repair --system                          || warn "flatpak system repair failed (continuing)."
+  flatpak update   --system -y                     || warn "flatpak system update failed (continuing)."
+  flatpak uninstall --system --unused -y           || warn "flatpak system cleanup failed (continuing)."
 
   # Per-user updates (best effort)
   if ! require_cmd --check runuser; then
@@ -215,9 +221,9 @@ update_flatpak() {
     [[ "$uid" -ge 1000 && "$uid" -lt 60000 ]] || continue
     if [[ -d "$home/.local/share/flatpak" ]]; then
       log "  -> Flatpak repair/update for user $user"
-      net_run_as_user "$user" flatpak repair --user                 || warn "flatpak user repair failed for $user (continuing)."
-      net_run_as_user "$user" flatpak update --user -y              || warn "flatpak user update failed for $user (continuing)."
-      net_run_as_user "$user" flatpak uninstall --user --unused -y  || warn "flatpak user cleanup failed for $user (continuing)."
+      run_as_user "$user" flatpak repair --user                 || warn "flatpak user repair failed for $user (continuing)."
+      run_as_user "$user" flatpak update --user -y              || warn "flatpak user update failed for $user (continuing)."
+      run_as_user "$user" flatpak uninstall --user --unused -y  || warn "flatpak user cleanup failed for $user (continuing)."
     fi
   done < /etc/passwd
 }
@@ -310,9 +316,9 @@ maintain_filesystems() {
   fi
 }
 
-collect_secureblue_info() {
-  if ! require_cmd --check ujust fpaste; then
-    warn "ujust or fpaste not found; skipping Secureblue information collection."
+collect_system_info_and_upload() {
+  if ! require_cmd --check ujust fpaste curl; then
+    warn "ujust, fpaste or curl not found; skipping Secureblue information collection."
     return
   fi
 
@@ -334,15 +340,15 @@ collect_secureblue_info() {
     fi
   fi
 
-  log "Collecting Secureblue debug information and uploading to fpaste (non-interactive)..."
+  log "Collecting Secureblue debug information and uploading to 0x0.st (non-interactive)..."
 
   local sysinfo rpm_ostree_status flatpaks homebrew_packages
-  local audit_results local_overrides recent_events failed_services brew_services
-  local content paste_url
+  local audit_results local_overrides recent_events last_boot_events failed_services brew_services disk_usage
+  local content tmpfile upload_url
 
   sysinfo=$(
     {
-      printf '\n'
+      printf '\n=== System Info ===\n\n'
       fpaste --sysinfo --printonly
     } 2>&1 || true
   )
@@ -414,10 +420,17 @@ collect_secureblue_info() {
     } 2>&1 || true
   )
 
+  last_boot_events=$(
+    {
+      printf '\n=== Previous Boot Events (warnings/errors) ===\n\n'
+      journalctl -b -1 -p warning..alert
+    } 2>&1 || true
+  )
+
   recent_events=$(
     {
-      printf '\n=== Recent System Events ===\n\n'
-      journalctl -b -p err..alert --since "1 hour ago"
+      printf '\n=== Recent System Events (warnings/errors, last hour) ===\n\n'
+      journalctl -b -p warning..alert --since "1 hour ago"
     } 2>&1 || true
   )
 
@@ -444,14 +457,35 @@ collect_secureblue_info() {
     } 2>&1 || true
   )
 
-  content="${sysinfo}${rpm_ostree_status}${flatpaks}${homebrew_packages}${audit_results}${local_overrides}${recent_events}${failed_services}${brew_services}"
+  disk_usage=$(
+    {
+      printf '\n=== Disk Usage (df -h) ===\n\n'
+      if require_cmd --check df; then
+        df -h
+      else
+        printf 'df not available.\n'
+      fi
+    } 2>&1 || true
+  )
 
-  paste_url=$(printf "%s\n" "$content" | fpaste --private=1 2>/dev/null || true)
+  content="${sysinfo}${rpm_ostree_status}${flatpaks}${homebrew_packages}${audit_results}${local_overrides}${last_boot_events}${recent_events}${failed_services}${brew_services}${disk_usage}"
 
-  if [[ -n "${paste_url:-}" ]]; then
-    log "Secureblue information uploaded to fpaste: $paste_url"
+  tmpfile="$(mktemp /tmp/secureblue-info.XXXXXX)"
+  printf "%s\n" "$content" >"$tmpfile"
+
+  local expires_ms
+  expires_ms=$(( ( $(date +%s) + 24*3600 ) * 1000 ))
+
+  upload_url=$(
+    curl -fLsS --retry 5 -F "file=@${tmpfile}" -F "expires=${expires_ms}" https://0x0.st 2>/dev/null | tr -d '[:space:]' || true
+  )
+
+  rm -f "$tmpfile"
+
+  if [[ -n "${upload_url:-}" ]]; then
+    log "Secureblue information uploaded to 0x0.st (expires in 24h): $upload_url"
   else
-    warn "Failed to upload Secureblue information to fpaste."
+    warn "Failed to upload Secureblue information to 0x0.st."
   fi
 }
 
@@ -464,7 +498,7 @@ main() {
   update_homebrew
   update_flatpak
   maintain_filesystems
-  collect_secureblue_info
+  collect_system_info_and_upload
 
   log "Update process completed."
 }

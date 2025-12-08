@@ -88,6 +88,7 @@ stage_from_source() {
 ###############################
 
 WWW_DIR="/var/www/daviduhden-website"
+WWW_HOST="daviduhden-website"
 BRANCH="main"
 SERVICE_NAME="apache2"
 OWNER_USER="www-data"
@@ -170,7 +171,7 @@ sync_with_gh_cli() {
                 break
             fi
             log "gh repo clone attempt ${attempt} failed; retrying..."
-            sleep $((2 ** attempt))
+            continue
         else
             local clone_err_file=""
             clone_err_file=$(mktemp "/tmp/gh-clone-err.XXXXXX") || {
@@ -391,6 +392,38 @@ fi
 if ! post_update_steps; then
     error "post-update steps failed."
     exit 1
+fi
+
+# 3) Renew certificate
+if command -v certbot >/dev/null 2>&1; then
+    case "$SERVICE_NAME" in
+        nginx)
+            log "Running certbot --nginx for ${WWW_HOST}..."
+            if certbot --nginx --non-interactive -d "${WWW_HOST}"; then
+                log "certbot completed for ${WWW_HOST}."
+            else
+                warn "certbot failed for ${WWW_HOST}."
+            fi
+            ;;
+        apache2|apache)
+            log "Running certbot --apache for ${WWW_HOST}..."
+            if certbot --apache --non-interactive -d "${WWW_HOST}"; then
+                log "certbot completed for ${WWW_HOST}."
+            else
+                warn "certbot failed for ${WWW_HOST}."
+            fi
+            ;;
+        *)
+            log "Running certbot certonly for ${WWW_HOST}..."
+            if certbot certonly --non-interactive -d "${WWW_HOST}"; then
+                log "certbot completed for ${WWW_HOST}."
+            else
+                warn "certbot failed for ${WWW_HOST}."
+            fi
+            ;;
+    esac
+else
+    warn "certbot not found; skipping certificate renewal for ${WWW_HOST}."
 fi
 
 log "Sync completed"

@@ -23,7 +23,7 @@ set -eu  # exit on error and on use of unset variables
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
 
-# Prefer ksh93 when available for better POSIX compliance; fallback to base ksh
+# Prefer ksh93 when available; fallback to base ksh
 if [ -z "${_KSH93_EXECUTED:-}" ] && command -v ksh93 >/dev/null 2>&1; then
     _KSH93_EXECUTED=1 exec ksh93 "$0" "$@"
 fi
@@ -34,10 +34,12 @@ PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin
 export PATH
 
 # Default sysclean output file (can be overridden with SYSCLEAN_OUT env var)
+typeset SYSCLEAN_OUT SYSCLEAN_BUNDLED_DIR
 SYSCLEAN_OUT="${SYSCLEAN_OUT:-/tmp/sysclean.out}"
 SYSCLEAN_BUNDLED_DIR="/usr/local/bin/sysclean"
 
 # Dry-run flag: environment or first argument
+typeset DRY_RUN
 DRY_RUN=0
 case "${1:-}" in
     --dry-run|-n)
@@ -64,6 +66,7 @@ fi
 ###############################################################
 # 0. Check that sysclean is installed (and install if needed) #
 ###############################################################
+typeset sysclean_path
 sysclean_path="$(command -v sysclean 2>/dev/null || true)"
 
 if [ -n "$sysclean_path" ] && [ -d "$SYSCLEAN_BUNDLED_DIR" ] && [ "$DRY_RUN" -ne 1 ]; then
