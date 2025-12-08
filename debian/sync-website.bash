@@ -398,7 +398,7 @@ fi
 if command -v certbot >/dev/null 2>&1; then
     case "$SERVICE_NAME" in
         nginx)
-            log "Running certbot --nginx for ${WWW_HOST}..."
+            log "Running certbot for ${WWW_HOST}..."
             if certbot --nginx renew --non-interactive; then
                 log "certbot completed for ${WWW_HOST}."
                 systemctl restart "${SERVICE_NAME}" >/dev/null 2>&1 || warn "service ${SERVICE_NAME} restart failed after certbot."
@@ -407,7 +407,7 @@ if command -v certbot >/dev/null 2>&1; then
             fi
             ;;
         apache2|apache)
-            log "Running certbot --apache for ${WWW_HOST}..."
+            log "Running certbot for ${WWW_HOST}..."
             if certbot --apache renew --non-interactive; then
                 log "certbot completed for ${WWW_HOST}."
                 systemctl restart "${SERVICE_NAME}" >/dev/null 2>&1 || warn "service ${SERVICE_NAME} restart failed after certbot."
@@ -416,7 +416,7 @@ if command -v certbot >/dev/null 2>&1; then
             fi
             ;;
         *)
-            log "Running certbot certonly for ${WWW_HOST}..."
+            log "Running certbot for ${WWW_HOST}..."
             if certbot certonly --non-interactive -d "${WWW_HOST}"; then
                 log "certbot completed for ${WWW_HOST}."
                 systemctl restart "${SERVICE_NAME}" >/dev/null 2>&1 || warn "service ${SERVICE_NAME} restart failed after certbot."
