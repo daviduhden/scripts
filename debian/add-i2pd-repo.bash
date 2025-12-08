@@ -1,7 +1,6 @@
 #!/bin/bash
 set -euo pipefail  # exit on error, unset variable, or failing pipeline
 
-#
 # This script adds the Purple I2P APT repository,
 # installs i2pd automatically and enables/starts the service
 # on systemd, SysV-init, OpenRC, runit, sinit (via SysV scripts),
@@ -20,7 +19,6 @@ set -euo pipefail  # exit on error, unset variable, or failing pipeline
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
-#
 
 # Basic PATH (important when run from cron)
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -41,7 +39,6 @@ RELEASE=""
 REPO_RELEASE=""
 ARCH_FILTER=""
 APT_CMD=""
-TORSOCKS=""
 
 # Helper to ensure required commands exist
 require_cmd() {
@@ -57,25 +54,12 @@ if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
 fi
 
 require_cmd curl
-require_cmd gpg
 require_cmd dpkg
 require_cmd ps
 
-# Detect torsocks (for all network operations)
-if command -v torsocks >/dev/null 2>&1; then
-    TORSOCKS="torsocks"
-    echo "torsocks detected. Network operations will be wrapped with torsocks."
-else
-    TORSOCKS=""
-fi
-
-# Wrapper for curl with optional torsocks
+# Wrapper for curl
 net_curl() {
-    if [[ -n "$TORSOCKS" ]]; then
-        "$TORSOCKS" curl -fLsS --retry 5 "$@"
-    else
-        curl -fLsS --retry 5 "$@"
-    fi
+    curl -fLsS --retry 5 "$@"
 }
 
 # Detect apt/apt-get
@@ -86,15 +70,6 @@ elif command -v apt >/dev/null 2>&1; then
 else
     error "neither 'apt-get' nor 'apt' is available. This script supports only Debian-like/Ubuntu-like systems."
 fi
-
-# Wrapper for apt commands with optional torsocks
-net_apt() {
-    if [[ -n "$TORSOCKS" ]]; then
-        "$TORSOCKS" "$APT_CMD" "$@"
-    else
-        "$APT_CMD" "$@"
-    fi
-}
 
 # Load system release information
 if [[ -r /etc/os-release ]]; then
@@ -249,72 +224,121 @@ detect_arch_filter() {
     esac
 }
 
+ensure_base_dependencies() {
+    echo "Updating APT index for base repositories..."
+    "$APT_CMD" update
+
+    if ! command -v gpg >/dev/null 2>&1; then
+        echo "Installing gnupg (for gpg)..."
+        "$APT_CMD" install -y gnupg
+    fi
+
+    if ! dpkg -s apt-transport-https >/dev/null 2>&1; then
+        echo "Installing apt-transport-https..."
+        "$APT_CMD" install -y apt-transport-https
+    fi
+}
+
+enable_i2pd_shepherd() {
+    echo "Detected GNU Shepherd. Enabling and starting i2pd via shepherd..."
+    herd enable i2pd || true
+    herd start i2pd || true
+}
+
+enable_i2pd_openrc() {
+    echo "Detected OpenRC. Enabling and starting i2pd via OpenRC..."
+    rc-update add i2pd default || true
+    rc-service i2pd restart || rc-service i2pd start || true
+}
+
+enable_i2pd_runit() {
+    echo "Detected runit. Enabling and starting i2pd via runit..."
+    if [[ -d /etc/sv/i2pd && ! -e /etc/service/i2pd ]]; then
+        mkdir -p /etc/service
+        ln -s /etc/sv/i2pd /etc/service/i2pd || true
+    fi
+    sv restart i2pd || sv start i2pd || true
+}
+
+enable_i2pd_systemd() {
+    echo "Detected systemd. Enabling and starting i2pd.service..."
+    systemctl daemon-reload || true
+
+    if systemctl list-unit-files | grep -q '^i2pd\.service'; then
+        systemctl enable i2pd.service
+        systemctl restart i2pd.service
+    else
+        echo "Warning: i2pd systemd service not found; you may need to enable/start it manually."
+    fi
+}
+
+enable_i2pd_s6() {
+    echo "Detected s6-based init. i2pd is installed, but this script does not manage s6 services automatically."
+    echo "Please enable and start the 'i2pd' service using your s6/s6-rc configuration."
+}
+
+enable_i2pd_sysv() {
+    echo "Detected SysV-style init. Enabling and starting i2pd via init scripts..."
+    if command -v update-rc.d >/dev/null 2>&1; then
+        update-rc.d i2pd defaults || true
+    elif command -v chkconfig >/dev/null 2>&1; then
+        chkconfig i2pd on || true
+    fi
+
+    if command -v service >/dev/null 2>&1; then
+        service i2pd restart || service i2pd start || true
+    elif [[ -x /etc/init.d/i2pd ]]; then
+        /etc/init.d/i2pd restart || /etc/init.d/i2pd start || true
+    fi
+}
+
 enable_and_start_i2pd() {
     local init_comm
     init_comm="$(ps -p 1 -o comm= 2>/dev/null | tr -d ' ' || true)"
 
-    # GNU Shepherd
-    if [[ "$init_comm" == "shepherd" ]] || command -v herd >/dev/null 2>&1; then
-        echo "Detected GNU Shepherd. Enabling and starting i2pd via shepherd..."
-        herd enable i2pd || true
-        herd start i2pd || true
-        return
-    fi
-
-    # OpenRC
-    if [[ "$init_comm" == "openrc-init" ]] || command -v rc-update >/dev/null 2>&1; then
-        if command -v rc-update >/dev/null 2>&1 && command -v rc-service >/dev/null 2>&1; then
-            echo "Detected OpenRC. Enabling and starting i2pd via OpenRC..."
-            rc-update add i2pd default || true
-            rc-service i2pd restart || rc-service i2pd start || true
-            return
-        fi
-    fi
-
-    # runit
-    if [[ "$init_comm" == "runit" ]] || [[ "$init_comm" == "runit-init" ]] || command -v sv >/dev/null 2>&1; then
-        if command -v sv >/dev/null 2>&1; then
-            echo "Detected runit. Enabling and starting i2pd via runit..."
-            if [[ -d /etc/sv/i2pd && ! -e /etc/service/i2pd ]]; then
-                mkdir -p /etc/service
-                ln -s /etc/sv/i2pd /etc/service/i2pd || true
+    case "$init_comm" in
+        shepherd)
+            if command -v herd >/dev/null 2>&1; then
+                enable_i2pd_shepherd; return
             fi
-            sv restart i2pd || sv start i2pd || true
-            return
-        fi
-    fi
+            ;;
+        openrc-init)
+            if command -v rc-update >/dev/null 2>&1 && command -v rc-service >/dev/null 2>&1; then
+                enable_i2pd_openrc; return
+            fi
+            ;;
+        runit|runit-init)
+            if command -v sv >/dev/null 2>&1; then
+                enable_i2pd_runit; return
+            fi
+            ;;
+        systemd)
+            if command -v systemctl >/dev/null 2>&1; then
+                enable_i2pd_systemd; return
+            fi
+            ;;
+        s6-svscan*)
+            enable_i2pd_s6; return
+            ;;
+    esac
 
-    # systemd
-    if [[ "$init_comm" == "systemd" ]] && command -v systemctl >/dev/null 2>&1; then
-        echo "Detected systemd. Enabling and starting i2pd.service..."
-        systemctl daemon-reload || true
-        systemctl enable i2pd.service
-        systemctl restart i2pd.service
-        return
+    if command -v herd >/dev/null 2>&1; then
+        enable_i2pd_shepherd; return
     fi
-
-    # s6
-    if [[ "$init_comm" == s6-svscan* ]] || command -v s6-rc >/dev/null 2>&1 || command -v s6-svc >/dev/null 2>&1; then
-        echo "Detected s6-based init. i2pd is installed, but this script does not manage s6 services automatically."
-        echo "Please enable and start the 'i2pd' service using your s6/s6-rc configuration."
-        return
+    if command -v rc-update >/dev/null 2>&1 && command -v rc-service >/dev/null 2>&1; then
+        enable_i2pd_openrc; return
     fi
-
-    # SysV-style (covers classic sysvinit and sinit using /etc/init.d)
+    if command -v sv >/dev/null 2>&1; then
+        enable_i2pd_runit; return
+    fi
+    if command -v systemctl >/dev/null 2>&1; then
+        enable_i2pd_systemd; return
+    fi
+    if command -v s6-rc >/dev/null 2>&1 || command -v s6-svc >/dev/null 2>&1; then
+        enable_i2pd_s6; return
+    fi
     if command -v service >/dev/null 2>&1 || [[ -x /etc/init.d/i2pd ]]; then
-        echo "Detected SysV-style init. Enabling and starting i2pd via init scripts..."
-        if command -v update-rc.d >/dev/null 2>&1; then
-            update-rc.d i2pd defaults || true
-        elif command -v chkconfig >/dev/null 2>&1; then
-            chkconfig i2pd on || true
-        fi
-
-        if command -v service >/dev/null 2>&1; then
-            service i2pd restart || service i2pd start || true
-        elif [[ -x /etc/init.d/i2pd ]]; then
-            /etc/init.d/i2pd restart || /etc/init.d/i2pd start || true
-        fi
-        return
+        enable_i2pd_sysv; return
     fi
 
     echo "Warning: could not detect a known service manager (systemd, SysV, OpenRC, runit, s6, shepherd)."
@@ -323,6 +347,7 @@ enable_and_start_i2pd() {
 
 get_release
 detect_arch_filter
+ensure_base_dependencies
 
 # Compute repo release codename (Raspbian uses <release>-rpi)
 REPO_RELEASE="$RELEASE"
@@ -339,17 +364,33 @@ echo "Importing signing key..."
 install -d -m 0755 /usr/share/keyrings
 net_curl https://repo.i2pd.xyz/r4sas.gpg | gpg --dearmor -o /usr/share/keyrings/purplei2p.gpg
 
-echo "Adding APT repository..."
-cat > /etc/apt/sources.list.d/purplei2p.list <<EOF
-deb [arch=${ARCH_FILTER} signed-by=/usr/share/keyrings/purplei2p.gpg] https://repo.i2pd.xyz/${DIST} ${REPO_RELEASE} main
-# deb-src [arch=${ARCH_FILTER} signed-by=/usr/share/keyrings/purplei2p.gpg] https://repo.i2pd.xyz/${DIST} ${REPO_RELEASE} main
+echo "Writing APT deb822 sources file for Purple I2P..."
+rm -f /etc/apt/sources.list.d/purplei2p.list
+cat > /etc/apt/sources.list.d/purplei2p.sources <<EOF
+Types: deb
+URIs: https://repo.i2pd.xyz/${DIST}
+Suites: ${REPO_RELEASE}
+Components: main
+Architectures: ${ARCH_FILTER}
+Signed-By: /usr/share/keyrings/purplei2p.gpg
+EOF
+
+# Optional deb-src entry (commented out). Uncomment to enable source packages.
+cat >> /etc/apt/sources.list.d/purplei2p.sources <<'EOF'
+#
+# Types: deb-src
+# URIs: https://repo.i2pd.xyz/${DIST}
+# Suites: ${REPO_RELEASE}
+# Components: main
+# Architectures: ${ARCH_FILTER}
+# Signed-By: /usr/share/keyrings/purplei2p.gpg
 EOF
 
 echo "Updating APT index..."
-net_apt update
+"$APT_CMD" update
 
 echo "Installing i2pd..."
-net_apt install -y i2pd
+"$APT_CMD" install -y i2pd
 
 echo "Enabling and starting i2pd service..."
 enable_and_start_i2pd

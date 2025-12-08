@@ -1,4 +1,6 @@
 #!/bin/ksh
+set -e  # exit on any unhandled error
+set -u  # treat use of unset variables as an error
 
 # Compatibility shim that redirects sudo calls to doas and wraps visudo/sudoedit
 # to be executed via doas as well.
@@ -27,9 +29,6 @@ if [ -z "${_KSH93_EXECUTED:-}" ] && command -v ksh93 >/dev/null 2>&1; then
     _KSH93_EXECUTED=1 exec ksh93 "$0" "$@"
 fi
 _KSH93_EXECUTED=1
-# Ksh safety settings.
-set -e  # exit on any unhandled error
-set -u  # treat use of unset variables as an error
 
 log()   { printf '%s [INFO]  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
 warn()  { printf '%s [WARN]  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }

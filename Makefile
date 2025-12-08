@@ -1,5 +1,8 @@
 # Simple installer for Debian, OpenBSD, secureblue, shell helpers, and Perl scripts
 # Uses only POSIX sh in recipes; compatible with BSD make.
+#
+# See the LICENSE file at the top of the project tree for copyright
+# and license details.
 
 PREFIX?=/usr/local
 BINDIR?=${PREFIX}/bin
@@ -11,6 +14,7 @@ DEBIAN_SCRIPTS=\
 	debian/clean-logs.bash \
 	debian/sync-website.bash \
 	debian/update-argon-one-v3.bash \
+	debian/update-btop.bash \
 	debian/update-fastfetch.bash \
 	debian/update-golang.bash \
 	debian/update-monero.bash
@@ -49,6 +53,18 @@ install-openbsd:
 		printf 'Installing %s -> %s\n' "$$f" "${BINDIR}/$$name"; \
 		install -m 0755 "$$f" "${BINDIR}/$$name"; \
 	done
+	@wrapper="${BINDIR}/sudo-wrapper"; \
+	if [ -x "$$wrapper" ]; then \
+		ln -sf "$$wrapper" "${BINDIR}/sudo"; \
+		for link in visudo sudoedit; do \
+			printf 'Symlinking %s -> %s\n' "${BINDIR}/$$link" "$$wrapper"; \
+			ln -sf "$$wrapper" "${BINDIR}/$$link"; \
+		done; \
+	fi
+	@printf 'Installing openbsd/sysclean -> %s\n' "${BINDIR}/sysclean"; \
+	rm -rf "${BINDIR}/sysclean"; \
+	cp -R openbsd/sysclean "${BINDIR}/sysclean"; \
+	chmod -R a+rX "${BINDIR}/sysclean"
 
 install-secureblue:
 	@install -d ${BINDIR}
@@ -57,6 +73,14 @@ install-secureblue:
 		printf 'Installing %s -> %s\n' "$$f" "${BINDIR}/$$name"; \
 		install -m 0755 "$$f" "${BINDIR}/$$name"; \
 	done
+	@wrapper="${BINDIR}/sudo-wrapper"; \
+	if [ -x "$$wrapper" ]; then \
+		ln -sf "$$wrapper" "${BINDIR}/sudo"; \
+		for link in visudo sudoedit; do \
+			printf 'Symlinking %s -> %s\n' "${BINDIR}/$$link" "$$wrapper"; \
+			ln -sf "$$wrapper" "${BINDIR}/$$link"; \
+		done; \
+	fi
 
 install-shell:
 	@# Install global-vi-mode into /etc/profile.d

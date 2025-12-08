@@ -14,15 +14,9 @@ set -euo pipefail  # exit on error, unset variable, or failing pipeline
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
-# Optional torsocks for network operations
-if command -v torsocks >/dev/null 2>&1; then
-    TORSOCKS="torsocks"
-else
-    TORSOCKS=""
-fi
-
 REPO="fastfetch-cli/fastfetch"
 API_URL="https://api.github.com/repos/${REPO}/releases/latest"
+REPO_URL="https://github.com/${REPO}.git"
 
 # Simple colors for messages
 GREEN="\e[32m"
@@ -47,21 +41,14 @@ require_cmd() {
 }
 
 require_cmd curl
+require_cmd awk
 
 net_curl() {
-    if [[ -n "$TORSOCKS" ]]; then
-        "$TORSOCKS" curl -fLsS --retry 5 "$@"
-    else
-        curl -fLsS --retry 5 "$@"
-    fi
+    curl -fLsS --retry 5 "$@"
 }
 
-apt_net() {
-    if [[ -n "$TORSOCKS" ]]; then
-        "$TORSOCKS" "$@"
-    else
-        "$@"
-    fi
+has_cmd() {
+    command -v "$1" >/dev/null 2>&1
 }
 
 if ! command -v apt-get >/dev/null 2>&1 && ! command -v apt >/dev/null 2>&1; then
@@ -70,8 +57,29 @@ fi
 
 # Get the latest version tag from GitHub releases
 get_latest_release() {
-    # Read all JSON into a variable to avoid SIGPIPE / curl error 23
-    local json
+    local tag json
+
+    if has_cmd gh; then
+        tag="$(gh release view --repo "$REPO" --json tagName -q .tagName 2>/dev/null || true)"
+        if [[ -n "$tag" ]]; then
+            echo "$tag"
+            return 0
+        fi
+    fi
+
+    if has_cmd git; then
+        tag="$(git ls-remote --tags --refs "$REPO_URL" 2>/dev/null \
+            | awk '{print $2}' \
+            | sed 's#refs/tags/##' \
+            | sed 's/\^{}//' \
+            | sort -Vr \
+            | head -n1)"
+        if [[ -n "$tag" ]]; then
+            echo "$tag"
+            return 0
+        fi
+    fi
+
     if ! json="$(net_curl "$API_URL" 2>/dev/null)"; then
         return 1
     fi
@@ -150,27 +158,49 @@ case "$ARCH" in
         ;;
 esac
 
-DEB_URL="https://github.com/${REPO}/releases/download/${LATEST_VERSION}/fastfetch-linux-${PKG_ARCH}.deb"
-
-# Create a temporary file for the .deb
-DEB_FILE="$(mktemp /tmp/fastfetch-XXXXXX.deb)"
+TMPDIR="$(mktemp -d /tmp/fastfetch-XXXXXX)"
+DEB_FILE="$TMPDIR/fastfetch-linux-${PKG_ARCH}.deb"
 cleanup() {
-    rm -f "$DEB_FILE" 2>/dev/null || true
+    rm -rf "$TMPDIR" 2>/dev/null || true
 }
 trap cleanup EXIT
 
+download_deb() {
+    local version="$1" arch="$2" out_dir="$3" out_file="$4" url
+
+    if has_cmd gh; then
+        echo "Attempting download via GitHub CLI..."
+        if gh release download "$version" --repo "$REPO" --pattern "fastfetch-linux-${arch}.deb" --dir "$out_dir" --clobber >/dev/null 2>&1; then
+            return 0
+        fi
+        echo "gh release download failed; falling back to curl."
+    fi
+
+    url="https://github.com/${REPO}/releases/download/${version}/fastfetch-linux-${arch}.deb"
+    net_curl "$url" -o "$out_file"
+}
+
 echo "Downloading fastfetch ${LATEST_VERSION} (${PKG_ARCH})..."
-if ! net_curl "$DEB_URL" -o "$DEB_FILE"; then
-    error "download failed from ${DEB_URL}"
+if ! download_deb "$LATEST_VERSION" "$PKG_ARCH" "$TMPDIR" "$DEB_FILE"; then
+    error "download failed for fastfetch ${LATEST_VERSION} (${PKG_ARCH})"
+fi
+
+if [[ ! -f "$DEB_FILE" ]]; then
+    alt_file="$(find "$TMPDIR" -maxdepth 1 -type f -name 'fastfetch-linux-*.deb' | head -n1)"
+    if [[ -n "$alt_file" ]]; then
+        DEB_FILE="$alt_file"
+    else
+        error "download did not produce a .deb file"
+    fi
 fi
 
 echo "Download complete: ${DEB_FILE}"
 echo "Installing the package..."
 
 if command -v apt-get >/dev/null 2>&1; then
-    apt_net apt-get install -y "$DEB_FILE"
+    apt-get install -y "$DEB_FILE"
 else
-    apt_net apt install -y "$DEB_FILE"
+    apt install -y "$DEB_FILE"
 fi
 
 echo "Fastfetch installation finished successfully."

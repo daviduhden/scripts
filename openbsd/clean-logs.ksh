@@ -1,4 +1,5 @@
 #!/bin/ksh
+set -eu  # exit on error and on use of unset variables
 
 # Log cleanup script
 # - Removes *.gz files under /var/log and *.old files under / (root filesystem only).
@@ -12,8 +13,6 @@ if [ -z "${_KSH93_EXECUTED:-}" ] && command -v ksh93 >/dev/null 2>&1; then
     _KSH93_EXECUTED=1 exec ksh93 "$0" "$@"
 fi
 _KSH93_EXECUTED=1
-
-set -eu  # exit on error and on use of unset variables
 
 # PATH for cron / non-interactive shells
 PATH=/bin:/sbin:/usr/bin:/usr/sbin

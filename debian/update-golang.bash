@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail  # exit on error, unset variable, or failing pipeline
 
 # Automatically install/update Go (golang) to the latest stable version
 # on Linux systems using official tarballs.
@@ -10,18 +11,9 @@
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
 
-set -euo pipefail  # exit on error, unset variable, or failing pipeline
-
 # Basic PATH (important when run from cron)
 PATH=/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
-
-# Optional torsocks for network operations
-if command -v torsocks >/dev/null 2>&1; then
-    TORSOCKS="torsocks"
-else
-    TORSOCKS=""
-fi
 
 GO_BASE_URL="https://go.dev/dl"
 VERSION_URL="https://go.dev/VERSION?m=text"
@@ -55,11 +47,7 @@ require_cmd tar
 require_cmd install
 
 net_curl() {
-    if [[ -n "$TORSOCKS" ]]; then
-        "$TORSOCKS" curl -fLsS --retry 5 "$@"
-    else
-        curl -fLsS --retry 5 "$@"
-    fi
+    curl -fLsS --retry 5 "$@"
 }
 
 OS="$(uname -s)"

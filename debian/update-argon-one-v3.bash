@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 
 # Argon One V3 maintenance script
 #  - Updates EEPROM (argon-eeprom.sh)
@@ -8,18 +9,9 @@
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
 
-set -euo pipefail
-
 # Basic PATH (important when run from cron)
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
-
-# Optional torsocks for network operations
-if command -v torsocks >/dev/null 2>&1; then
-  TORSOCKS="torsocks"
-else
-  TORSOCKS=""
-fi
 
 EEPROM_URL="https://download.argon40.com/argon-eeprom.sh"
 CONTROL_URL="https://download.argon40.com/argon1.sh"
@@ -99,11 +91,7 @@ require_root() {
 }
 
 net_curl() {
-  if [[ -n "$TORSOCKS" ]]; then
-    "$TORSOCKS" curl -fLsS --retry 5 "$@"
-  else
-    curl -fLsS --retry 5 "$@"
-  fi
+  curl -fLsS --retry 5 "$@"
 }
 
 check_network() {

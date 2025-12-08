@@ -1,6 +1,8 @@
 #!/bin/bash
+set -o errexit   # exit on any unhandled error
+set -o nounset   # treat use of unset variables as an error
+set -o pipefail  # propagate pipeline errors
 
-#
 # Compatibility shim that redirects sudo calls to run0
 # and wraps visudo and sudoedit to be executed via run0 as well.
 #
@@ -25,12 +27,6 @@
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
-#
-
-# Bash safety settings
-set -o errexit   # exit on any unhandled error
-set -o nounset   # treat use of unset variables as an error
-set -o pipefail  # propagate pipeline errors
 
 # Simple colors for messages
 GREEN="\e[32m"

@@ -1,13 +1,11 @@
 #!/bin/bash
 set -euo pipefail
 
-#
 # Interactive helper to convert an ext4 filesystem inside a LUKS-encrypted device
 # to Btrfs in-place using run0 for privilege escalation.
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
-#
 
 # Basic PATH (important when run from cron)
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
