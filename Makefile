@@ -56,7 +56,7 @@ install-openbsd:
 	@wrapper="${BINDIR}/sudo-wrapper"; \
 	if [ -x "$$wrapper" ]; then \
 		ln -sf "$$wrapper" "${BINDIR}/sudo"; \
-		for link in visudo sudoedit; do \
+		for link in sudo visudo sudoedit; do \
 			printf 'Symlinking %s -> %s\n' "${BINDIR}/$$link" "$$wrapper"; \
 			ln -sf "$$wrapper" "${BINDIR}/$$link"; \
 		done; \
@@ -76,7 +76,7 @@ install-secureblue:
 	@wrapper="${BINDIR}/sudo-wrapper"; \
 	if [ -x "$$wrapper" ]; then \
 		ln -sf "$$wrapper" "${BINDIR}/sudo"; \
-		for link in visudo sudoedit; do \
+		for link in sudo visudo sudoedit; do \
 			printf 'Symlinking %s -> %s\n' "${BINDIR}/$$link" "$$wrapper"; \
 			ln -sf "$$wrapper" "${BINDIR}/$$link"; \
 		done; \
