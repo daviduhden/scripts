@@ -88,7 +88,7 @@ stage_from_source() {
 ###############################
 
 WWW_DIR="/var/www/daviduhden-website"
-WWW_HOST="daviduhden-website"
+WWW_HOST="uhden.dev"
 BRANCH="main"
 SERVICE_NAME="apache2"
 OWNER_USER="www-data"
