@@ -25,10 +25,10 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Ensure unzip is installed
+      - name: Ensure curl and unzip are installed
         run: |
           sudo apt-get update
-          sudo apt-get install -y unzip curl
+          sudo apt-get install -y curl unzip
 
       - name: Fetch sysclean from Codeberg (git with ZIP fallback)
         run: |
