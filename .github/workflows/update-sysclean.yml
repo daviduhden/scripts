@@ -1,0 +1,81 @@
+name: Update sysclean from Codeberg
+
+on:
+  schedule:
+    # Check for updates every hour (UTC)
+    - cron: "0 * * * *"
+  # Allow manual runs from the Actions tab
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  update-sysclean:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure git user
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Ensure unzip is installed
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y unzip
+
+      - name: Fetch sysclean from Codeberg (git with ZIP fallback)
+        run: |
+          set -e
+
+          rm -rf /tmp/sysclean /tmp/sysclean.zip /tmp/sysclean-extracted
+          mkdir -p /tmp/sysclean
+
+          echo "Trying to clone sysclean via git..."
+          if git clone --depth=1 https://codeberg.org/semarie/sysclean.git /tmp/sysclean; then
+            echo "Git clone succeeded."
+          else
+            echo "Git clone failed, falling back to ZIP download..."
+            curl -fLsS --retry 5 "https://codeberg.org/semarie/sysclean/archive/main.zip" -o /tmp/sysclean.zip
+
+            mkdir -p /tmp/sysclean-extracted
+            unzip -q /tmp/sysclean.zip -d /tmp/sysclean-extracted
+
+            # Find the extracted directory (usually something like sysclean-main)
+            SRC_DIR="$(find /tmp/sysclean-extracted -maxdepth 1 -mindepth 1 -type d | head -n1)"
+            if [ -z "$SRC_DIR" ]; then
+              echo "ERROR: Could not find extracted sysclean directory." >&2
+              exit 1
+            fi
+
+            echo "Copying contents from ZIP-extracted directory: $SRC_DIR"
+            cp -a "$SRC_DIR/." /tmp/sysclean/
+          fi
+
+      - name: Sync sysclean into openbsd/sysclean
+        run: |
+          mkdir -p openbsd
+          # Remove previous content
+          rm -rf openbsd/sysclean
+          mkdir -p openbsd/sysclean
+
+          # Copy all content (including .git if present), then remove .git
+          cp -a /tmp/sysclean/. openbsd/sysclean/
+          rm -rf openbsd/sysclean/.git
+
+      - name: Commit changes if any
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "Changes detected, committing..."
+            git add -A openbsd/sysclean
+            git commit -m "Update openbsd/sysclean from upstream sysclean"
+            git push
+          else
+            echo "No changes to commit."
+          fi
