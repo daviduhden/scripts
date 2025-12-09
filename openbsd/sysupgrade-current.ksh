@@ -24,10 +24,18 @@ error() { printf '%s [ERROR] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 
 log "Preparing /upgrade.site for post-upgrade tasks..."
 
+# Clean previous artifacts from earlier runs
+if [ -f /upgrade.site ]; then
+    rm -f /upgrade.site
+fi
+if ls /tmp/openbsd-info.* >/dev/null 2>&1; then
+    rm -f /tmp/openbsd-info.*
+fi
+
 # 1. Create /upgrade.site, which will be executed at the end of the
 #    upgrade process inside the new system.
 cat << 'EOF' > /upgrade.site
-#!/bin/sh
+#!/bin/ksh
 # This script is executed at the end of the upgrade
 # in the context of the new system (see upgrade.site(5)).
 
@@ -37,7 +45,7 @@ RCF=/etc/rc.firsttime
 if [ ! -f "$RCF" ]; then
     umask 022
     {
-        echo '#!/bin/sh'
+        echo '#!/bin/ksh'
         echo 'echo "Running /etc/rc.firsttime post-upgrade tasks..."'
     } > "$RCF"
     chmod 700 "$RCF"
@@ -52,7 +60,11 @@ echo "Upgrading packages (pkg_add -Uu -Dsnap) and removing unused ones (pkg_dele
 /usr/sbin/pkg_add -Uu -Dsnap && /usr/sbin/pkg_delete -a
 
 echo "Running apply-sysclean..."
-/usr/local/bin/apply-sysclean
+if [ -x /usr/local/bin/apply-sysclean ]; then
+    /usr/local/bin/apply-sysclean
+else
+    echo "apply-sysclean not found; skipping."
+fi
 
 echo "Collecting system info and uploading to 0x0.st..."
 collect_system_info_and_upload() {
@@ -67,19 +79,48 @@ collect_system_info_and_upload() {
     tmpf=$(mktemp /tmp/openbsd-info.XXXXXX 2>/dev/null || printf '/tmp/openbsd-info.%s' "$$")
     : >"$tmpf"
     expires_ms=$(( ( $(date +%s) + 86400 ) * 1000 ))
+    rcctl_ls_on_output=""
+    if command -v rcctl >/dev/null 2>&1; then
+        rcctl_ls_on_output=$(rcctl ls on 2>/dev/null || true)
+    fi
+    print_section() {
+        printf '\n---\n\n=== %s ===\n\n' "$1"
+    }
     {
-        printf '\n=== System Info ===\n\n'
+        print_section "System Info"
         uname -a
         printf '\n'
         sysctl -n kern.version 2>/dev/null || true
-        printf '\n=== Boot Log (dmesg.boot) ===\n\n'
+        print_section "Boot Log (dmesg.boot)"
         if [ -f /var/run/dmesg.boot ]; then cat /var/run/dmesg.boot; else dmesg; fi
-        printf '\n=== Installed Packages (pkg_info -mz) ===\n\n'
+        print_section "Installed Packages (pkg_info -mz)"
         pkg_info -mz 2>/dev/null || printf '%s\n' "pkg_info not available."
-        printf '\n=== /var/log/messages (last 200 lines) ===\n\n'
+        print_section "Enabled Services (rcctl ls on)"
+        if [ -n "$rcctl_ls_on_output" ]; then
+            printf '%s\n' "$rcctl_ls_on_output"
+        elif command -v rcctl >/dev/null 2>&1; then
+            printf '%s\n' "No enabled services listed."
+        else
+            printf '%s\n' "rcctl not available."
+        fi
+        print_section "Failed Services (rcctl ls failed)"
+        if command -v rcctl >/dev/null 2>&1; then
+            rcctl ls failed 2>/dev/null || printf '%s\n' "No failed services or rcctl ls failed returned non-zero."
+        else
+            printf '%s\n' "rcctl not available."
+        fi
+        print_section "Recent System Events (last 200 lines)"
         if [ -f /var/log/messages ]; then tail -n 200 /var/log/messages; else printf '%s\n' "/var/log/messages not available."; fi
-        printf '\n=== Disk Usage (df -h) ===\n\n'
+        print_section "Disk Usage (df -h)"
         if command -v df >/dev/null 2>&1; then df -h; else printf '%s\n' "df not available."; fi
+        if [ -n "$rcctl_ls_on_output" ] && printf '%s\n' "$rcctl_ls_on_output" | grep -Eq '^xenodm$'; then
+            print_section "Xenocara Log (last 200 lines)"
+            if [ -f /var/log/Xorg.0.log ]; then
+                tail -n 200 /var/log/Xorg.0.log
+            else
+                printf '%s\n' "/var/log/Xorg.0.log not available."
+            fi
+        fi
     } > "$tmpf"
     "$CURL_BIN" -fLsS --retry 5 -F "file=@${tmpf}" -F "expires=${expires_ms}" https://0x0.st 2>/dev/null | tr -d "[:space:]" || true
     rm -f "$tmpf"
@@ -91,7 +132,7 @@ EOF
 
 chmod +x /upgrade.site
 
-log "Starting sysupgrade..."
+log "Running sysupgrade -sf..."
 /usr/sbin/sysupgrade -sf
 
 log "sysupgrade completed; system info upload will run on first boot via /etc/rc.firsttime."

@@ -6,15 +6,14 @@ set -euo pipefail  # exit on error, unset variable, or failing pipeline
 # on systemd, SysV-init, OpenRC, runit, sinit (via SysV scripts),
 # s6 (manual instructions) and GNU Shepherd.
 #
-# It is intended for Debian-based distributions (Debian, Ubuntu, Devuan, etc.)
+# It is intended for Debian-based distributions (Debian/Devuan) only.
 # It supports only amd64 and arm64 architectures (as per repository).
 #
 # Supported (based on current published repositories):
-#   Debian: buster, bullseye, bookworm, trixie
-#   Ubuntu: bionic, focal, jammy, kinetic
-# Devuan:
-#   - daedalus  -> Debian bookworm
-#   - excalibur -> Debian trixie
+#   Debian: bookworm, trixie
+#   Devuan:
+#     - daedalus  -> Debian bookworm
+#     - excalibur -> Debian trixie
 #
 #
 # See the LICENSE file at the top of the project tree for copyright
@@ -80,21 +79,22 @@ fi
 
 OS_ID="${ID:-}"
 
-# Basic sanity: ensure it's Debian-based
-if [[ "${ID_LIKE:-}" != *"debian"* && "$OS_ID" != "debian" && "$OS_ID" != "ubuntu" && "$OS_ID" != "devuan" ]]; then
-    error "this script is intended for Debian-based systems (Debian/Ubuntu/Devuan and derivatives)."
+# Basic sanity: ensure it's Debian-based (Ubuntu and Ubuntu-like are unsupported)
+if [[ "$OS_ID" == "ubuntu" || "${ID_LIKE:-}" == *"ubuntu"* ]]; then
+    error "Ubuntu/Ubuntu-like distributions are not supported; use Debian/Devuan bookworm or newer."
+fi
+if [[ "${ID_LIKE:-}" != *"debian"* && "$OS_ID" != "debian" && "$OS_ID" != "devuan" && "$OS_ID" != "raspbian" ]]; then
+    error "this script is intended for Debian/Devuan-based systems (bookworm or newer)."
 fi
 
 get_suite_codename() {
     # Detect OS codename
-    if [[ -n "${VERSION_CODENAME:-}" ]]; then
-        OS_CODENAME="${VERSION_CODENAME}"
-    elif [[ -n "${UBUNTU_CODENAME:-}" ]]; then
-        OS_CODENAME="${UBUNTU_CODENAME}"
-    elif [[ -n "${DEBIAN_CODENAME:-}" ]]; then
+    if [[ -n "${DEBIAN_CODENAME:-}" ]]; then
         OS_CODENAME="${DEBIAN_CODENAME}"
+    elif [[ -n "${VERSION_CODENAME:-}" ]]; then
+        OS_CODENAME="${VERSION_CODENAME}"
     else
-        error "could not detect distribution codename (VERSION_CODENAME/UBUNTU_CODENAME/DEBIAN_CODENAME missing)."
+        error "could not detect distribution codename (DEBIAN_CODENAME/VERSION_CODENAME missing)."
     fi
 
     case "$OS_ID" in
@@ -113,6 +113,14 @@ get_suite_codename() {
             ;;
         *)
             SUITE_CODENAME="$OS_CODENAME"
+            ;;
+    esac
+
+    case "$SUITE_CODENAME" in
+        bookworm|trixie)
+            ;;
+        *)
+            error "unsupported release '$SUITE_CODENAME'. Supported: bookworm, trixie (or Devuan daedalus/excalibur)."
             ;;
     esac
 }

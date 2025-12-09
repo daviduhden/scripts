@@ -6,16 +6,14 @@ set -euo pipefail  # exit on error, unset variable, or failing pipeline
 # on systemd, SysV-init, OpenRC, runit, sinit (via SysV scripts),
 # s6 (manual instructions) and GNU Shepherd.
 #
-# It is intended for Debian-based distributions (Debian, Ubuntu, Devuan, etc.).
+# It is intended for Debian-based distributions (Debian/Devuan and derivatives).
 # It supports only amd64, i386, arm64 and armhf architectures (as per repository).
 #
 # Supported (based on current published repos):
-#   Debian:   buster, bullseye, bookworm, trixie, sid
-#   Raspbian: buster, bullseye, bookworm, trixie  (repo codename: <release>-rpi, e.g. trixie-rpi)
-#   Ubuntu:   focal, jammy, noble, plucky, questing, oracular
-# Devuan:
-#   - daedalus  -> Debian bookworm
-#   - excalibur -> Debian trixie
+#   Debian/Raspbian: bookworm, trixie, sid (raspbian uses <release>-rpi)
+#   Devuan:
+#     - daedalus  -> Debian bookworm
+#     - excalibur -> Debian trixie
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
@@ -80,6 +78,13 @@ fi
 
 DIST="${ID:-}"
 
+if [[ "$DIST" == "ubuntu" || "${ID_LIKE:-}" == *"ubuntu"* ]]; then
+    error "Ubuntu/Ubuntu-like distributions are not supported; use Debian/Devuan bookworm or newer."
+fi
+if [[ "${ID_LIKE:-}" != *"debian"* && "$DIST" != "debian" && "$DIST" != "devuan" && "$DIST" != "raspbian" ]]; then
+    error "This installer supports Debian/Devuan-based systems (bookworm or newer)."
+fi
+
 get_release() {
     case "$ID" in
         ##################
@@ -125,51 +130,21 @@ get_release() {
             # DIST remains actual ID: debian or raspbian
             DIST="$ID"
             ;;
-        #################
-        # Native Ubuntu #
-        #################
-        ubuntu)
-            if [[ -n "${UBUNTU_CODENAME:-}" ]]; then
-                RELEASE="$UBUNTU_CODENAME"
+        ###################################################
+        # Other Debian-like systems (derivatives)         #
+        ###################################################
+        *)
+            if [[ -z "${ID_LIKE:-}" || "$ID_LIKE" != *"debian"* ]]; then
+                error "your system is not supported. Only Debian-like systems are supported."
+            fi
+
+            DIST="debian"
+            if [[ -n "${DEBIAN_CODENAME:-}" ]]; then
+                RELEASE="$DEBIAN_CODENAME"
             elif [[ -n "${VERSION_CODENAME:-}" ]]; then
                 RELEASE="$VERSION_CODENAME"
             else
-                error "couldn't find UBUNTU_CODENAME or VERSION_CODENAME in /etc/os-release."
-            fi
-            DIST="ubuntu"
-            ;;
-        ###################################################
-        # Other Debian-/Ubuntu-like systems (derivatives) #
-        ###################################################
-        *)
-            if [[ -z "${ID_LIKE:-}" ]]; then
-                error "your system is not supported. Only Debian-like and Ubuntu-like systems are supported."
-            fi
-
-            # Ubuntu-like derivative (e.g. Linux Mint, Pop!_OS, etc.)
-            if [[ "$ID_LIKE" == *"ubuntu"* ]]; then
-                DIST="ubuntu"
-                if [[ -n "${UBUNTU_CODENAME:-}" ]]; then
-                    RELEASE="$UBUNTU_CODENAME"
-                elif [[ -n "${VERSION_CODENAME:-}" ]]; then
-                    RELEASE="$VERSION_CODENAME"
-                else
-                    error "couldn't find UBUNTU_CODENAME or VERSION_CODENAME for Ubuntu-like system."
-                fi
-
-            # Debian-like derivative (generic)
-            elif [[ "$ID_LIKE" == *"debian"* ]]; then
-                DIST="debian"
-                if [[ -n "${DEBIAN_CODENAME:-}" ]]; then
-                    RELEASE="$DEBIAN_CODENAME"
-                elif [[ -n "${VERSION_CODENAME:-}" ]]; then
-                    RELEASE="$VERSION_CODENAME"
-                else
-                    error "couldn't find DEBIAN_CODENAME or VERSION_CODENAME for Debian-like system."
-                fi
-
-            else
-                error "your system is not supported. Only Debian-like and Ubuntu-like systems are supported."
+                error "couldn't find DEBIAN_CODENAME or VERSION_CODENAME for Debian-like system."
             fi
             ;;
     esac
@@ -182,19 +157,10 @@ get_release() {
     case "$DIST" in
         debian|raspbian)
             case "$RELEASE" in
-                buster|bullseye|bookworm|trixie|sid)
+                bookworm|trixie|sid)
                     ;;
                 *)
-                    error "unsupported ${DIST} release codename '$RELEASE'. Supported: buster, bullseye, bookworm, trixie, sid."
-                    ;;
-            esac
-            ;;
-        ubuntu)
-            case "$RELEASE" in
-                focal|jammy|noble|plucky|questing|oracular)
-                    ;;
-                *)
-                    error "unsupported ubuntu release codename '$RELEASE'. Supported: focal, jammy, noble, plucky, questing, oracular."
+                    error "unsupported ${DIST} release codename '$RELEASE'. Supported: bookworm, trixie, sid."
                     ;;
             esac
             ;;

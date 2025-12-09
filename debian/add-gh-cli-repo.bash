@@ -1,9 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
-# Add the official GitHub CLI APT repository 
+# Add the official GitHub CLI APT repository
 # and install gh using a deb822 source with the key in
-# /etc/apt/keyrings.
+# /etc/apt/keyrings. Supports Debian/Devuan (bookworm or newer).
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
@@ -41,10 +41,41 @@ fi
 
 OS_ID="${ID:-}"
 OS_LIKE="${ID_LIKE:-}"
+RELEASE=""
 
-if [[ "$OS_ID" != "debian" && "$OS_ID" != "ubuntu" && "$OS_ID" != "devuan" && "$OS_LIKE" != *"debian"* ]]; then
-    error "This installer supports Debian/Ubuntu/Devuan (and derivatives with ID_LIKE=debian)."
+if [[ "$OS_ID" != "debian" && "$OS_ID" != "devuan" && "$OS_ID" != "raspbian" && "$OS_LIKE" != *"debian"* ]]; then
+    error "This installer supports Debian/Devuan derivatives (bookworm or newer)."
 fi
+
+if [[ -n "${DEBIAN_CODENAME:-}" ]]; then
+    RELEASE="$DEBIAN_CODENAME"
+elif [[ -n "${VERSION_CODENAME:-}" ]]; then
+    RELEASE="$VERSION_CODENAME"
+else
+    error "could not detect distribution codename (DEBIAN_CODENAME/VERSION_CODENAME)."
+fi
+
+if [[ "$OS_ID" == "devuan" ]]; then
+    case "$RELEASE" in
+        daedalus)
+            RELEASE="bookworm"
+            ;;
+        excalibur)
+            RELEASE="trixie"
+            ;;
+        *)
+            error "unsupported Devuan codename '$RELEASE'. Supported: daedalus (bookworm) or excalibur (trixie)."
+            ;;
+    esac
+fi
+
+case "$RELEASE" in
+    bookworm|trixie|sid)
+        ;;
+    *)
+        error "unsupported release '$RELEASE'. Supported: bookworm, trixie, sid (or Devuan daedalus/excalibur)."
+        ;;
+esac
 
 APT_CMD=""
 if command -v apt-get >/dev/null 2>&1; then

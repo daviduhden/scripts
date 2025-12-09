@@ -105,11 +105,15 @@ collect_system_info_and_upload() {
 
   log "Collecting system info and uploading to 0x0.st (24h expiry)..."
 
+  print_section() {
+    printf '\n=== %s ===\n\n' "$1"
+  }
+
   local sysinfo upgrades recent_events last_boot_events failed_services disk_usage content tmpfile upload_url expires_ms
 
   sysinfo=$(
     {
-      printf '\n=== System Info ===\n\n'
+      print_section "System Info"
       uname -a
       printf '\n'
       if [[ -f /etc/os-release ]]; then
@@ -120,35 +124,35 @@ collect_system_info_and_upload() {
 
   upgrades=$(
     {
-      printf '\n=== Upgradable Packages ===\n\n'
+      print_section "Upgradable Packages"
       apt list --upgradable 2>/dev/null
     } 2>&1 || true
   )
 
   last_boot_events=$(
     {
-      printf '\n=== Previous Boot Journal (warnings/errors) ===\n\n'
+      print_section "Previous Boot Journal (warnings/errors)"
       journalctl -b -1 -p warning..alert
     } 2>&1 || true
   )
 
   recent_events=$(
     {
-      printf '\n=== Recent Journal (warnings/errors, last hour) ===\n\n'
+      print_section "Recent Journal (warnings/errors, last hour)"
       journalctl -p warning..alert --since "1 hour ago"
     } 2>&1 || true
   )
 
   failed_services=$(
     {
-      printf '\n=== Failed Systemd Services ===\n\n'
+      print_section "Failed Systemd Services"
       systemctl list-units --state=failed
     } 2>&1 || true
   )
 
   disk_usage=$(
     {
-      printf '\n=== Disk Usage (df -h) ===\n\n'
+      print_section "Disk Usage (df -h)"
       df -h
     } 2>&1 || true
   )

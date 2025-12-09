@@ -346,20 +346,24 @@ collect_system_info_and_upload() {
 
   log "Collecting Secureblue debug information and uploading to 0x0.st (non-interactive)..."
 
+  print_section() {
+    printf '\n=== %s ===\n\n' "$1"
+  }
+
   local sysinfo rpm_ostree_status flatpaks homebrew_packages
   local audit_results local_overrides recent_events last_boot_events failed_services brew_services disk_usage
   local content tmpfile upload_url
 
   sysinfo=$(
     {
-      printf '\n=== System Info ===\n\n'
+      print_section "System Info"
       fpaste --sysinfo --printonly
     } 2>&1 || true
   )
 
   rpm_ostree_status=$(
     {
-      printf '=== Rpm-Ostree Status ===\n\n'
+      print_section "Rpm-Ostree Status"
       if require_cmd --check rpm-ostree; then
         rpm-ostree status --verbose
       else
@@ -370,7 +374,7 @@ collect_system_info_and_upload() {
 
   flatpaks=$(
     {
-      printf '=== Flatpaks Installed ===\n'
+      print_section "Flatpaks Installed"
       if require_cmd --check flatpak; then
         if [[ -n "${run_user:-}" ]]; then
           # Run flatpak as the primary non-root user
@@ -386,7 +390,7 @@ collect_system_info_and_upload() {
 
   homebrew_packages=$(
     {
-      printf '\n=== Homebrew Packages Installed ===\n\n'
+      print_section "Homebrew Packages Installed"
       if require_cmd --check brew; then
         if [[ -n "${run_user:-}" ]]; then
           # Run brew as the primary non-root user
@@ -402,7 +406,7 @@ collect_system_info_and_upload() {
 
   audit_results=$(
     {
-      printf '\n=== Audit Results ===\n\n'
+      print_section "Audit Results"
       if [[ -n "${run_user:-}" ]]; then
         # Run ujust as the primary non-root user
         $run_user ujust audit-secureblue
@@ -414,7 +418,7 @@ collect_system_info_and_upload() {
 
   local_overrides=$(
     {
-      printf '\n=== Listing Local Overrides ===\n\n'
+      print_section "Listing Local Overrides"
       if [[ -n "${run_user:-}" ]]; then
         # Run ujust as the primary non-root user
         $run_user ujust check-local-overrides
@@ -426,28 +430,28 @@ collect_system_info_and_upload() {
 
   last_boot_events=$(
     {
-      printf '\n=== Previous Boot Events (warnings/errors) ===\n\n'
+      print_section "Previous Boot Events (warnings/errors)"
       journalctl -b -1 -p warning..alert
     } 2>&1 || true
   )
 
   recent_events=$(
     {
-      printf '\n=== Recent System Events (warnings/errors, last hour) ===\n\n'
+      print_section "Recent System Events (warnings/errors, last hour)"
       journalctl -b -p warning..alert --since "1 hour ago"
     } 2>&1 || true
   )
 
   failed_services=$(
     {
-      printf '\n=== Failed Systemd Services ===\n\n'
+      print_section "Failed Systemd Services"
       systemctl list-units --state=failed
     } 2>&1 || true
   )
 
   brew_services=$(
     {
-      printf '\n=== Homebrew Services Status ===\n\n'
+      print_section "Homebrew Services Status"
       if require_cmd --check brew; then
         if [[ -n "${run_user:-}" ]]; then
           # Run brew services as the primary non-root user
@@ -463,7 +467,7 @@ collect_system_info_and_upload() {
 
   disk_usage=$(
     {
-      printf '\n=== Disk Usage (df -h) ===\n\n'
+      print_section "Disk Usage (df -h)"
       if require_cmd --check df; then
         df -h
       else
