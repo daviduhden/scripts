@@ -347,7 +347,7 @@ collect_system_info_and_upload() {
   log "Collecting Secureblue debug information and uploading to 0x0.st (non-interactive)..."
 
   print_section() {
-    printf '\n=== %s ===\n\n' "$1"
+    printf '\n---\n\n=== %s ===\n\n' "$1"
   }
 
   local sysinfo rpm_ostree_status flatpaks homebrew_packages

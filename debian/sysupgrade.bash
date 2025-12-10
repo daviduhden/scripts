@@ -55,7 +55,8 @@ backup_etc() {
 
   log "Backing up /etc to ${archive}..."
   # Preserve permissions, ACLs and xattrs where possible
-  tar --numeric-owner --xattrs --acls -cpzf "$archive" /etc
+  # Use -C / to avoid tar's leading-slash warning while keeping absolute paths in the archive
+  tar --numeric-owner --xattrs --acls -cpzf "$archive" -C / etc
   log "Backup completed."
 }
 
@@ -106,10 +107,10 @@ collect_system_info_and_upload() {
   log "Collecting system info and uploading to 0x0.st (24h expiry)..."
 
   print_section() {
-    printf '\n=== %s ===\n\n' "$1"
+    printf '\n---\n\n=== %s ===\n\n' "$1"
   }
 
-  local sysinfo upgrades recent_events last_boot_events failed_services disk_usage content tmpfile upload_url expires_ms
+  local sysinfo hardware_info upgrades recent_events last_boot_events failed_services disk_usage uptime_info mount_info inet_info inode_usage top_procs content tmpfile upload_url expires_ms
 
   sysinfo=$(
     {
@@ -119,6 +120,28 @@ collect_system_info_and_upload() {
       if [[ -f /etc/os-release ]]; then
         cat /etc/os-release
       fi
+    } 2>&1 || true
+  )
+
+  uptime_info=$(
+    {
+      print_section "Uptime / Load"
+      uptime
+      printf '\n'
+      free -h 2>/dev/null || true
+    } 2>&1 || true
+  )
+
+  hardware_info=$(
+    {
+      print_section "CPU"
+      lscpu 2>/dev/null || true
+      print_section "Memory (MemTotal from /proc/meminfo)"
+      grep -E '^Mem(Total|Available):' /proc/meminfo 2>/dev/null || true
+      print_section "PCI Devices"
+      lspci -nn 2>/dev/null || printf 'lspci not available.\n'
+      print_section "USB Devices"
+      lsusb 2>/dev/null || printf 'lsusb not available.\n'
     } 2>&1 || true
   )
 
@@ -157,7 +180,39 @@ collect_system_info_and_upload() {
     } 2>&1 || true
   )
 
-  content="${sysinfo}${upgrades}${last_boot_events}${recent_events}${failed_services}${disk_usage}"
+  inode_usage=$(
+    {
+      print_section "Inode Usage (df -i)"
+      df -i
+    } 2>&1 || true
+  )
+
+  mount_info=$(
+    {
+      print_section "Block Devices"
+      lsblk -f 2>/dev/null || lsblk 2>/dev/null || true
+      print_section "Mounts"
+      mount || true
+    } 2>&1 || true
+  )
+
+  inet_info=$(
+    {
+      print_section "Network (ip -br a)"
+      ip -br a 2>/dev/null || true
+      print_section "Routes"
+      ip route 2>/dev/null || true
+    } 2>&1 || true
+  )
+
+  top_procs=$(
+    {
+      print_section "Top Processes (by RSS)"
+      ps -eo pid,ppid,cmd,%mem,%cpu,rss --sort=-rss | head -n 20
+    } 2>&1 || true
+  )
+
+  content="${sysinfo}${hardware_info}${uptime_info}${upgrades}${last_boot_events}${recent_events}${failed_services}${disk_usage}${inode_usage}${mount_info}${inet_info}${top_procs}"
 
   tmpfile="$(mktemp /tmp/debian-info.XXXXXX)"
   printf "%s\n" "$content" >"$tmpfile"
