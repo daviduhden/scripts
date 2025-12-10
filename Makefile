@@ -40,7 +40,7 @@ SHELL_SCRIPTS=\
 PERL_SCRIPTS=\
 	perl/ssh-menu.pl
 
-.PHONY: install-debian install-openbsd install-secureblue install-shell install-perl
+.PHONY: install-debian install-openbsd install-secureblue install-shell install-shell-openbsd install-perl
 
 install-debian:
 	@install -d ${BINDIR}
@@ -90,6 +90,14 @@ install-shell:
 	@# Install global-vi-mode into /etc/profile.d
 	@run0 install -d /etc/profile.d
 	@run0 install -m 0644 shell/global-vi-mode.sh /etc/profile.d/global-vi-mode.sh
+
+# OpenBSD does not ship /etc/profile.d; provide guidance instead of editing /etc/profile automatically.
+install-shell-openbsd:
+	@echo "OpenBSD does not provide /etc/profile.d; to install global-vi-mode.sh do:" ; \
+	 echo "  install -d /etc/shinit.d" ; \
+	 echo "  install -m 0644 shell/global-vi-mode.sh /etc/shinit.d/global-vi-mode.sh" ; \
+	 echo "Then source it from /etc/shinit (and optionally /etc/profile) with:" ; \
+	 echo "  . /etc/shinit.d/global-vi-mode.sh"
 
 install-perl:
 	@install -d ${BINDIR}
