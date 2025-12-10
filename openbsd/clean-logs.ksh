@@ -1,5 +1,5 @@
 #!/bin/ksh
-set -eu  # exit on error and on use of unset variables
+set -eu
 
 # Log cleanup script
 # - Removes *.gz files under /var/log and *.old files under / (root filesystem only).

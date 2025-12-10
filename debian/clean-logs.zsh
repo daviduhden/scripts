@@ -1,5 +1,5 @@
-#!/bin/bash
-set -euo pipefail  # exit on error, unset variable, or failing pipeline
+#!/usr/bin/env zsh
+set -euo pipefail
 
 # Log cleanup script
 # - Removes *.gz files under /var/log and *.old files under / (root filesystem only).

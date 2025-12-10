@@ -34,4 +34,4 @@ make install-shell
 make install-perl
 ```
 
-Recipes use `install(1)` and strip `.pl`/`.bash`/`.ksh`/`.sh` when placing shell scripts in `${BINDIR}`.
+Recipes use `install(1)` and strip `.pl`/`.bash`/`.zsh`/`.ksh` when placing shell scripts in `${BINDIR}`.

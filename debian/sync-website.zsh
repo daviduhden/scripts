@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env zsh
 set -uo pipefail
 
 # Synchronizes a deployed website directory with a GitHub repository:
@@ -399,7 +399,7 @@ if command -v certbot >/dev/null 2>&1; then
     case "$SERVICE_NAME" in
         nginx)
             log "Running certbot for ${WWW_HOST}..."
-            if certbot --nginx renew --non-interactive; then
+            if certbot --nginx renew --non-interactive >/dev/null 2>&1; then
                 log "certbot completed for ${WWW_HOST}."
                 systemctl restart "${SERVICE_NAME}" >/dev/null 2>&1 || warn "service ${SERVICE_NAME} restart failed after certbot."
             else
@@ -408,7 +408,7 @@ if command -v certbot >/dev/null 2>&1; then
             ;;
         apache2|apache)
             log "Running certbot for ${WWW_HOST}..."
-            if certbot --apache renew --non-interactive; then
+            if certbot --apache renew --non-interactive >/dev/null 2>&1; then
                 log "certbot completed for ${WWW_HOST}."
                 systemctl restart "${SERVICE_NAME}" >/dev/null 2>&1 || warn "service ${SERVICE_NAME} restart failed after certbot."
             else
@@ -417,7 +417,7 @@ if command -v certbot >/dev/null 2>&1; then
             ;;
         *)
             log "Running certbot for ${WWW_HOST}..."
-            if certbot certonly --non-interactive -d "${WWW_HOST}"; then
+            if certbot certonly --non-interactive -d "${WWW_HOST}" >/dev/null 2>&1; then
                 log "certbot completed for ${WWW_HOST}."
                 systemctl restart "${SERVICE_NAME}" >/dev/null 2>&1 || warn "service ${SERVICE_NAME} restart failed after certbot."
             else

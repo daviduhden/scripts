@@ -1,4 +1,6 @@
-#!/bin/bash
+#!/usr/bin/env zsh
+
+set -euo pipefail
 
 # Automatically update fastfetch on Debian-based systems.
 # - Fetch latest release tag from GitHub
@@ -7,8 +9,6 @@
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
-
-set -euo pipefail  # exit on error, unset variable, or failing pipeline
 
 # Basic PATH (important when run from cron)
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin

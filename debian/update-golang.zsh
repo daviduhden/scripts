@@ -1,5 +1,5 @@
-#!/bin/bash
-set -euo pipefail  # exit on error, unset variable, or failing pipeline
+#!/usr/bin/env zsh
+set -euo pipefail
 
 # Automatically install/update Go (golang) to the latest stable version
 # on Linux systems using official tarballs.
