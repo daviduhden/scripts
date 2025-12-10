@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -euo pipefail
 
 # Automated script to install or update Rust-based Tor software (arti and oniux)

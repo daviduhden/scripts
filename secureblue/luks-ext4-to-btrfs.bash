@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -euo pipefail
 
 # Interactive helper to convert an ext4 filesystem inside a LUKS-encrypted device

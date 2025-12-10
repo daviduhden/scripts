@@ -1,5 +1,5 @@
 #!/bin/ksh
-set -eu  # exit on error and on use of unset variables
+set -eu
 
 # apply-sysclean – automate OpenBSD sysclean(8) findings
 #

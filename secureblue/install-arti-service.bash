@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -euo pipefail
 
 # Install and enable the arti user service using the unit in ./systemd/arti.service.

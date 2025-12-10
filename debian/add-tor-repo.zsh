@@ -1,5 +1,5 @@
-#!/bin/bash
-set -euo pipefail  # exit on error, unset variable, or failing pipeline
+#!/usr/bin/env zsh
+set -euo pipefail
 
 # This script adds the Tor Project APT repository,
 # installs tor automatically and enables/starts the service

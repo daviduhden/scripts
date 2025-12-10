@@ -1,5 +1,4 @@
 #!/bin/ksh
-
 set -e
 
 # Upgrade to snapshot (-current) and schedule post-upgrade actions

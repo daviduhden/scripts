@@ -1,6 +1,5 @@
 #!/bin/ksh
-set -e  # exit on any unhandled error
-set -u  # treat use of unset variables as an error
+set -eu
 
 # Compatibility shim that redirects sudo calls to doas and wraps visudo/sudoedit
 # to be executed via doas as well.
