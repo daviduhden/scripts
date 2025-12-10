@@ -105,13 +105,13 @@ check_network() {
 
 run_eeprom_update() {
   log "Running EEPROM update script from Argon40..."
-  net_curl "$EEPROM_URL" | bash
+  net_curl "$EEPROM_URL" | zsh 
   log "EEPROM update script finished."
 }
 
 run_control_update() {
   log "Running Argon One V3 control script installer..."
-  net_curl "$CONTROL_URL" | bash
+  net_curl "$CONTROL_URL" | zsh 
   log "Argon One V3 control script finished."
 }
 
