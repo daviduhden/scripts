@@ -1,14 +1,13 @@
-#
 # This script is intended to reside in /etc/profile.d/global-vi-mode.sh
 # so that it is sourced system-wide for login and interactive shells.
+# On OpenBSD (no /etc/profile.d), append or source it from /etc/profile
+# or /etc/shinit to achieve the same effect.
 #
 # It enables vi-style line editing for bash, zsh and ksh, and sets
 # a default EDITOR/VISUAL if they are not already defined.
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
-#
-
 
 # If this is not an interactive shell, do nothing
 case $- in
@@ -40,6 +39,10 @@ fi
 # ksh integration #
 ###################
 if [ -n "${KSH_VERSION-}" ]; then
+    if command -v ksh93 >/dev/null 2>&1; then
+        # Prefer ksh93 when available
+        alias ksh='ksh93'
+    fi
     # Enable vi mode in ksh
     set -o vi
 fi
@@ -48,7 +51,16 @@ fi
 # Set global editor if not defined yet #
 ########################################
 if [ -z "${EDITOR-}" ]; then
-    export EDITOR=vi
+    if command -v vim >/dev/null 2>&1; then
+        export EDITOR=vim
+        alias vi='vim'
+    elif command -v nvi >/dev/null 2>&1; then
+        export EDITOR=vi
+        alias vi='nvi'
+    else
+        export EDITOR=vi
+        alias vi='vi'
+    fi
 fi
 
 if [ -z "${VISUAL-}" ]; then
