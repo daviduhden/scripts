@@ -8,18 +8,18 @@ PREFIX?=/usr/local
 BINDIR?=${PREFIX}/bin
 
 DEBIAN_SCRIPTS=\
-	debian/add-gh-cli-repo.bash \
-	debian/add-i2pd-repo.bash \
-	debian/add-tor-repo.bash \
-	debian/clean-logs.bash \
-	debian/enable-tor-transport.bash \
-	debian/sync-website.bash \
-	debian/sysupgrade.bash \
-	debian/update-argon-one-v3.bash \
-	debian/update-btop.bash \
-	debian/update-fastfetch.bash \
-	debian/update-golang.bash \
-	debian/update-monero.bash
+	debian/add-gh-cli-repo.zsh \
+	debian/add-i2pd-repo.zsh \
+	debian/add-tor-repo.zsh \
+	debian/clean-logs.zsh \
+	debian/enable-tor-transport.zsh \
+	debian/sync-website.zsh \
+	debian/sysupgrade.zsh \
+	debian/update-argon-one-v3.zsh \
+	debian/update-btop.zsh \
+	debian/update-fastfetch.zsh \
+	debian/update-golang.zsh \
+	debian/update-monero.zsh
 
 OPENBSD_SCRIPTS=\
 	openbsd/apply-sysclean.ksh \
@@ -45,7 +45,7 @@ PERL_SCRIPTS=\
 install-debian:
 	@install -d ${BINDIR}
 	@for f in ${DEBIAN_SCRIPTS}; do \
-		base=$${f##*/}; name=$${base%.bash}; \
+		base=$${f##*/}; name=$${base%.zsh}; \
 		printf 'Installing %s -> %s\n' "$$f" "${BINDIR}/$$name"; \
 		install -m 0755 "$$f" "${BINDIR}/$$name"; \
 	done
