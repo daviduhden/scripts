@@ -74,13 +74,13 @@ run_apply_sysclean() {
 
 run_lynis_audit() {
     echo "Running Lynis security audit (if available)..."
-    if command -v lynis >/dev/null 2>&1; then
+    if [ -x /usr/local/bin/lynis ]; then
         audit_dir="/var/log/openbsd"
         mkdir -p "$audit_dir"
         audit_ts=$(date +%Y%m%d-%H%M%S)
         audit_log="${audit_dir}/lynis-audit-${audit_ts}.log"
         audit_report="${audit_dir}/lynis-report-${audit_ts}.dat"
-        if lynis audit system --quiet --logfile "$audit_log" --report-file "$audit_report"; then
+        if /usr/local/bin/lynis audit system --quiet --logfile "$audit_log" --report-file "$audit_report"; then
             chmod 0600 "$audit_log" "$audit_report" || true
             echo "Lynis security audit completed (log: $audit_log)."
         else
