@@ -2,26 +2,23 @@
 set -euo pipefail
 
 # Compatibility shim that redirects sudo calls to run0
-# and wraps visudo and sudoedit to be executed via run0 as well.
+# and wraps visudo via run0, and sudoedit via run0edit (safe graphical/root editor).
 #
 # This script is intended to be installed as /usr/local/bin/sudo
 # so that it appears earlier in $PATH than /usr/bin/sudo.
 #
 # You can also symlink it as:
 #   - /usr/local/bin/visudo   → visudo goes through run0
-#   - /usr/local/bin/sudoedit → sudoedit goes through run0
+#   - /usr/local/bin/sudoedit → sudoedit goes through run0edit
 #
 # Any script or program that runs "sudo ..." (without an absolute path)
 # will effectively use run0 instead.
 #
 # Notes:
-# - This does NOT modify /usr/bin/sudo or /usr/sbin/visudo themselves.
-# - Scripts that call /usr/bin/sudo explicitly will still use the real sudo
-#   (if it exists on the system).
+# - This does NOT modify /usr/bin/sudo or /usr/sbin/visudo.
+# - Scripts that call /usr/bin/sudo explicitly will still use the real sudo (if it exists).
 # - Permission handling is controlled by polkit (run0), not /etc/sudoers.
-# - The sudoedit behavior implemented here is a simplification:
-#     * It runs your editor as root on the target files via run0,
-#       instead of fully emulating sudoedit's temp-file semantics.
+# - sudoedit here uses run0edit, which provides safe/graphical editing as root.
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
