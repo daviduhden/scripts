@@ -48,7 +48,6 @@ run_as_user() {
   runuser -u "$user" -- "$@"
 }
 
-
 # Simple colors for messages
 GREEN="\e[32m"
 YELLOW="\e[33m"
