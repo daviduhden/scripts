@@ -20,9 +20,9 @@ OWNER="${OWNER:-daviduhden}"
 DEFAULT_BASE_DIR="/var/home/david/git"
 NON_INTERACTIVE=0
 
-log()   { printf '%s [INFO]  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
-warn()  { printf '%s [WARN]  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
-error() { printf '%s [ERROR] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
+log()   { printf '%s [INFO]  🟦 %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
+warn()  { printf '%s [WARN]  ⚠️  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
+error() { printf '%s [ERROR] ❌ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 
 require_bin() {
   if ! command -v "$1" >/dev/null 2>&1; then
