@@ -15,7 +15,6 @@ set -euo pipefail
 #     - daedalus  -> Debian bookworm
 #     - excalibur -> Debian trixie
 #
-#
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
 
