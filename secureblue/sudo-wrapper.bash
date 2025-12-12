@@ -32,7 +32,7 @@ YELLOW="\e[33m"
 RED="\e[31m"
 RESET="\e[0m"
 
-log()    { printf '%s %b[INFO]%b 🟦 %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$GREEN" "$RESET" "$*"; }
+log()    { printf '%s %b[INFO]%b ✅ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$GREEN" "$RESET" "$*"; }
 warn()   { printf '%s %b[WARN]%b ⚠️ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$YELLOW" "$RESET" "$*"; }
 error()  { printf '%s %b[ERROR]%b ❌ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$RED" "$RESET" "$*" >&2; exit 1; }
 
@@ -89,39 +89,21 @@ fi
 if [[ "$prog_name" == "sudoedit" ]]; then
     #
     # Simplified sudoedit emulation:
-    #   - Determine the editor from SUDO_EDITOR / VISUAL / EDITOR / vi.
-    #   - Run that editor as root via run0 on the given files.
+    #   - Use run0edit for graphical/safe editing as root.
     #
-    # This does NOT implement sudoedit's temp-file semantics, but for
-    # common "sudoedit /etc/foo" usage it behaves as "edit this file as root".
-    #
-
     if [[ "$#" -lt 1 ]]; then
         error "Usage: sudoedit FILE..."
     fi
 
-    # Determine preferred editor
-    editor="${SUDO_EDITOR:-${VISUAL:-${EDITOR:-vi}}}"
-
-    # Split editor into argv array (supports things like 'code -w')
-    # shellcheck disable=SC2206
-    editor_cmd=($editor)
-
-    if [[ "${#editor_cmd[@]}" -eq 0 ]]; then
-        error "sudo-wrapper error: editor is empty."
+    # Determine preferred editor (pass to run0edit)
+    editor="${SUDO_EDITOR:-${VISUAL:-${EDITOR:-}}}"
+    run0edit_args=()
+    if [[ -n "$editor" ]]; then
+        run0edit_args+=(--editor "$editor")
     fi
 
-    # Check that the base command exists
-    if ! command -v "${editor_cmd[0]}" >/dev/null 2>&1; then
-        error "sudo-wrapper error: editor '${editor_cmd[0]}' not found in PATH."
-    fi
-
-    # Optional hint variable
     export SUDOEDIT_VIA_RUN0=1
-
-    # Run the editor as root via run0 on the requested files
-    # editor_cmd may contain extra arguments (e.g. 'code -w'), then we append file list "$@"
-    exec run0 "${editor_cmd[@]}" "$@"
+    exec run0edit "${run0edit_args[@]}" "$@"
     exit 1
 fi
 
