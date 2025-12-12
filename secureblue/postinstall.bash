@@ -20,7 +20,7 @@ declare -a FAILURES=()
 have() { command -v "$1" >/dev/null 2>&1; }
 say()  { printf "%b\n" "$*"; }
 hr()   { printf "%s\n" "------------------------------------------------------------"; }
-info()  { say "🟦  $*"; }
+info()  { say "✅  $*"; }
 ok()    { say "✅  $*"; }
 warn2() { say "⚠️  $*"; }
 fail()  { say "❌  $*"; }

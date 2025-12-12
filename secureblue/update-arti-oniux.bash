@@ -22,7 +22,7 @@ YELLOW="\e[33m"
 RED="\e[31m"
 RESET="\e[0m"
 
-log()   { printf '%b[INFO]%b 🟦 %s\n' "$GREEN" "$RESET" "$*" >&2; }
+log()   { printf '%b[INFO]%b ✅ %s\n' "$GREEN" "$RESET" "$*" >&2; }
 warn()  { printf '%b[WARN]%b ⚠️ %s\n' "$YELLOW" "$RESET" "$*" >&2; }
 error() { printf '%b[ERROR]%b ❌ %s\n' "$RED" "$RESET" "$*" >&2; }
 
