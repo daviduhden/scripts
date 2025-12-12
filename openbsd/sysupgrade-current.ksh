@@ -21,63 +21,84 @@ log()   { printf '%s [INFO]  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
 warn()  { printf '%s [WARN]  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 error() { printf '%s [ERROR] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 
-log "Preparing /upgrade.site for post-upgrade tasks..."
+cleanup_previous_artifacts() {
+    if [ -f /upgrade.site ]; then
+        rm -f /upgrade.site
+    fi
+    if ls /tmp/openbsd-info.* >/dev/null 2>&1; then
+        rm -f /tmp/openbsd-info.*
+    fi
+}
 
-# Clean previous artifacts from earlier runs
-if [ -f /upgrade.site ]; then
-    rm -f /upgrade.site
-fi
-if ls /tmp/openbsd-info.* >/dev/null 2>&1; then
-    rm -f /tmp/openbsd-info.*
-fi
-
-# 1. Create /upgrade.site, which will be executed at the end of the
-#    upgrade process inside the new system.
-cat << 'EOF' > /upgrade.site
+write_upgrade_site() {
+    cat << 'EOF' > /upgrade.site
 #!/bin/ksh
 # This script is executed at the end of the upgrade
 # in the context of the new system (see upgrade.site(5)).
 
 RCF=/etc/rc.firsttime
 
-# Create /etc/rc.firsttime if it does not exist
-if [ ! -f "$RCF" ]; then
+ensure_rc_firsttime() {
+    if [ -f "$RCF" ]; then
+        return
+    fi
+
     umask 022
     {
         echo '#!/bin/ksh'
         echo 'echo "Running /etc/rc.firsttime post-upgrade tasks..."'
     } > "$RCF"
     chmod 700 "$RCF"
-fi
+}
 
-# Append the actions to be run on the first boot after the upgrade
-cat <<'EOF_APPEND' >> "$RCF"
-echo "Running sysmerge -b..."
-/usr/sbin/sysmerge -b
+append_firstboot_tasks() {
+    cat <<'EOF_APPEND' >> "$RCF"
+run_sysmerge() {
+    echo "Running sysmerge -b..."
+    /usr/sbin/sysmerge -b
+}
 
-echo "Upgrading packages (pkg_add -Uu -Dsnap) and removing unused ones (pkg_delete -a)..."
-/usr/sbin/pkg_add -Uu -Dsnap && /usr/sbin/pkg_delete -a
+upgrade_packages() {
+    echo "Upgrading packages (pkg_add -Uu -Dsnap) and removing unused ones (pkg_delete -a)..."
+    /usr/sbin/pkg_add -Uu -Dsnap && /usr/sbin/pkg_delete -a
+}
 
-echo "Running apply-sysclean..."
-if [ -x /usr/local/bin/apply-sysclean ]; then
-    /usr/local/bin/apply-sysclean
-else
-    echo "apply-sysclean not found; skipping."
-fi
+run_apply_sysclean() {
+    echo "Running apply-sysclean..."
+    if [ -x /usr/local/bin/apply-sysclean ]; then
+        /usr/local/bin/apply-sysclean
+    else
+        echo "apply-sysclean not found; skipping."
+    fi
+}
 
-echo "Collecting system info and uploading to 0x0.st..."
+run_lynis_audit() {
+    echo "Running Lynis security audit (if available)..."
+    if command -v lynis >/dev/null 2>&1; then
+        audit_dir="/var/log/openbsd"
+        mkdir -p "$audit_dir"
+        audit_ts=$(date +%Y%m%d-%H%M%S)
+        audit_log="${audit_dir}/lynis-audit-${audit_ts}.log"
+        audit_report="${audit_dir}/lynis-report-${audit_ts}.dat"
+        if lynis audit system --quiet --logfile "$audit_log" --report-file "$audit_report"; then
+            chmod 0600 "$audit_log" "$audit_report" || true
+            echo "Lynis security audit completed (log: $audit_log)."
+        else
+            echo "Lynis security audit encountered errors; see $audit_log."
+        fi
+        find "$audit_dir" -type f \( -name 'lynis-audit-*.log' -o -name 'lynis-report-*.dat' \) -mtime +7 -exec rm -f {} + 2>/dev/null || true
+    else
+        echo "lynis not found; skipping security audit."
+    fi
+}
+
 collect_system_info_and_upload() {
-    CURL_BIN="/usr/local/bin/curl"
-    if [ ! -x "$CURL_BIN" ]; then
-        CURL_BIN="/usr/bin/curl"
-    fi
-    if [ ! -x "$CURL_BIN" ]; then
-        printf '%s\n' "curl not found; skipping system info upload."
-        return
-    fi
+    echo "Collecting system info and writing to /var/log/openbsd..."
     tmpf=$(mktemp /tmp/openbsd-info.XXXXXX 2>/dev/null || printf '/tmp/openbsd-info.%s' "$$")
     : >"$tmpf"
-    expires_ms=$(( ( $(date +%s) + 86400 ) * 1000 ))
+    out_dir="/var/log/openbsd"
+    out_log="${out_dir}/sysupgrade-info-$(date +%Y%m%d-%H%M%S).log"
+    mkdir -p "$out_dir"
     rcctl_ls_on_output=""
     if command -v rcctl >/dev/null 2>&1; then
         rcctl_ls_on_output=$(rcctl ls on 2>/dev/null || true)
@@ -121,17 +142,50 @@ collect_system_info_and_upload() {
             fi
         fi
     } > "$tmpf"
-    "$CURL_BIN" -fLsS --retry 5 -F "file=@${tmpf}" -F "expires=${expires_ms}" https://0x0.st 2>/dev/null | tr -d "[:space:]" || true
-    rm -f "$tmpf"
+    if mv "$tmpf" "$out_log"; then
+        chmod 0600 "$out_log" || true
+        printf '%s\n' "System info written to ${out_log}."
+    else
+        printf '%s\n' "Failed to write system info to ${out_log}."
+        rm -f "$tmpf"
+    fi
+
+    find "$out_dir" -type f -name 'sysupgrade-info-*.log' -mtime +7 -exec rm -f {} + 2>/dev/null || true
 }
 
-collect_system_info_and_upload
+main() {
+    run_sysmerge
+    upgrade_packages
+    run_apply_sysclean
+    run_lynis_audit
+    collect_system_info_and_upload
+}
+
+main "$@"
 EOF_APPEND
+}
+
+main() {
+    ensure_rc_firsttime
+    append_firstboot_tasks
+}
+
+main "$@"
 EOF
+}
 
-chmod +x /upgrade.site
+run_sysupgrade() {
+    log "Running sysupgrade -sf..."
+    /usr/sbin/sysupgrade -sf
+}
 
-log "Running sysupgrade -sf..."
-/usr/sbin/sysupgrade -sf
+main() {
+    log "Preparing /upgrade.site for post-upgrade tasks..."
+    cleanup_previous_artifacts
+    write_upgrade_site
+    chmod +x /upgrade.site
+    run_sysupgrade
+    log "sysupgrade completed; system info collection will run on first boot via /etc/rc.firsttime."
+}
 
-log "sysupgrade completed; system info upload will run on first boot via /etc/rc.firsttime."
+main "$@"

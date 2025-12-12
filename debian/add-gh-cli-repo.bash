@@ -1,4 +1,4 @@
-#!/usr/bin/env zsh
+#!/bin/bash
 set -euo pipefail
 
 # Add the official GitHub CLI APT repository

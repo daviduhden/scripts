@@ -320,11 +320,43 @@ maintain_filesystems() {
   fi
 }
 
+run_security_audit() {
+  local audit_dir audit_ts audit_log audit_report
+  audit_dir="/var/log/secureblue"
+  mkdir -p "$audit_dir"
+
+  if command -v lynis >/dev/null 2>&1; then
+    audit_ts="$(date +%Y%m%d-%H%M%S)"
+    audit_log="${audit_dir}/lynis-audit-${audit_ts}.log"
+    audit_report="${audit_dir}/lynis-report-${audit_ts}.dat"
+    log "Running Lynis security audit (log: ${audit_log}, report: ${audit_report})..."
+    if lynis audit system --quiet --logfile "$audit_log" --report-file "$audit_report"; then
+      chmod 0600 "$audit_log" "$audit_report" || true
+      log "Lynis security audit completed."
+    else
+      warn "Lynis security audit encountered errors. See ${audit_log} for details."
+    fi
+  else
+    warn "lynis not installed; skipping security audit."
+  fi
+
+  if find "$audit_dir" -type f \( -name 'lynis-audit-*.log' -o -name 'lynis-report-*.dat' \) -mtime +7 -print0 2>/dev/null | xargs -0r rm -f; then
+    log "Old security audit logs older than 7 days removed (if any)."
+  else
+    warn "Failed to clean old security audit logs in ${audit_dir}."
+  fi
+}
+
 collect_system_info_and_upload() {
-  if ! require_cmd --check ujust fpaste curl; then
-    warn "ujust, fpaste or curl not found; skipping Secureblue information collection."
+  if ! require_cmd --check ujust fpaste; then
+    warn "ujust or fpaste not found; skipping Secureblue information collection."
     return
   fi
+
+  local info_log_dir info_log
+  info_log_dir="/var/log/secureblue"
+  mkdir -p "$info_log_dir"
+  info_log="${info_log_dir}/secureblue-info-$(date +%Y%m%d-%H%M%S).log"
 
   # Determine a primary non-root user to run ujust/flatpak/brew as.
   # This avoids collecting information as root when user context is needed.
@@ -344,7 +376,7 @@ collect_system_info_and_upload() {
     fi
   fi
 
-  log "Collecting Secureblue debug information and uploading to 0x0.st (non-interactive)..."
+  log "Collecting Secureblue debug information to ${info_log} (non-interactive)..."
 
   print_section() {
     printf '\n---\n\n=== %s ===\n\n' "$1"
@@ -352,7 +384,7 @@ collect_system_info_and_upload() {
 
   local sysinfo rpm_ostree_status flatpaks homebrew_packages
   local audit_results local_overrides recent_events last_boot_events failed_services brew_services disk_usage
-  local content tmpfile upload_url
+  local content tmpfile
 
   sysinfo=$(
     {
@@ -481,19 +513,18 @@ collect_system_info_and_upload() {
   tmpfile="$(mktemp /tmp/secureblue-info.XXXXXX)"
   printf "%s\n" "$content" >"$tmpfile"
 
-  local expires_ms
-  expires_ms=$(( ( $(date +%s) + 24*3600 ) * 1000 ))
-
-  upload_url=$(
-    curl -fLsS --retry 5 -F "file=@${tmpfile}" -F "expires=${expires_ms}" https://0x0.st 2>/dev/null | tr -d '[:space:]' || true
-  )
-
-  rm -f "$tmpfile"
-
-  if [[ -n "${upload_url:-}" ]]; then
-    log "Secureblue information uploaded to 0x0.st (expires in 24h): $upload_url"
+  if mv "$tmpfile" "$info_log"; then
+    chmod 0600 "$info_log" || true
+    log "Secureblue information written to ${info_log}."
   else
-    warn "Failed to upload Secureblue information to 0x0.st."
+    warn "Failed to write Secureblue information to ${info_log}."
+    rm -f "$tmpfile"
+  fi
+
+  if find "$info_log_dir" -type f -name 'secureblue-info-*.log' -mtime +7 -print0 2>/dev/null | xargs -0r rm -f; then
+    log "Old Secureblue info logs older than 7 days removed (if any)."
+  else
+    warn "Failed to clean old Secureblue info logs in ${info_log_dir}."
   fi
 }
 
@@ -507,6 +538,7 @@ main() {
   update_flatpak
   maintain_filesystems
   collect_system_info_and_upload
+  run_security_audit
 
   log "Update process completed."
 }

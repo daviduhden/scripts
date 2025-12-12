@@ -1,4 +1,4 @@
-#!/usr/bin/env zsh
+#!/bin/bash
 set -euo pipefail
 
 # Automatically install/update Monero CLI to the latest stable version
