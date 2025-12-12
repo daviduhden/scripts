@@ -1,4 +1,4 @@
-#!/usr/bin/env zsh
+#!/bin/bash
 set -euo pipefail
 
 # Build and install the latest btop++ from source on Debian-based systems.

@@ -1,4 +1,4 @@
-#!/usr/bin/env zsh
+#!/bin/bash
 set -uo pipefail
 
 # Synchronizes a deployed website directory with a GitHub repository:
@@ -58,19 +58,22 @@ run_as_gh_user() {
 stage_from_source() {
     local srcdir="$1"
 
-    if [ -d "$WWW_DIR/.git" ]; then
-        if ! rm -rf "$WWW_DIR/.git"; then
-            error "failed to remove existing .git in target."; return 1
-        fi
+    # Ensure VCS/CI metadata is absent in the target
+    if [ -d "$WWW_DIR/.git" ] && ! rm -rf "$WWW_DIR/.git"; then
+        error "failed to remove existing .git in target."; return 1
+    fi
+    if [ -d "$WWW_DIR/.github" ] && ! rm -rf "$WWW_DIR/.github"; then
+        error "failed to remove existing .github in target."; return 1
     fi
 
     if command -v rsync >/dev/null 2>&1; then
-        if ! rsync -a --delete --exclude=".git" "$srcdir"/ "$WWW_DIR"/; then
+        # Exclude VCS/CI metadata that should not be deployed
+        if ! rsync -a --delete --exclude=".git" --exclude=".github" "$srcdir"/ "$WWW_DIR"/; then
             error "rsync failed while staging content."
             return 1
         fi
     else
-        if ! find "$WWW_DIR" -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +; then
+        if ! find "$WWW_DIR" -mindepth 1 -maxdepth 1 ! -name ".git" ! -name ".github" -exec rm -rf {} +; then
             error "failed to clean target directory before copy."
             return 1
         fi
@@ -78,6 +81,8 @@ stage_from_source() {
             error "copy from staging to $WWW_DIR failed."
             return 1
         fi
+        # Remove CI metadata that should not ship
+        rm -rf "$WWW_DIR/.git" "$WWW_DIR/.github"
     fi
 
     return 0

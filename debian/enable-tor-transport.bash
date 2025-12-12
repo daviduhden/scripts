@@ -1,4 +1,4 @@
-#!/usr/bin/env zsh
+#!/bin/bash
 set -euo pipefail
 
 # Enable tor+https/tor+http transports for all APT repositories on Debian-based systems.
