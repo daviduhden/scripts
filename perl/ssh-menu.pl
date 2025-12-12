@@ -16,23 +16,25 @@ use warnings;
 my $GREEN = "\e[32m";
 my $YELLOW = "\e[33m";
 my $RED = "\e[31m";
+my $CYAN = "\e[36m";
+my $BOLD = "\e[1m";
 my $RESET = "\e[0m";
 
 
 sub info {
     my ($msg) = @_;
-    print "${GREEN}[INFO]${RESET} $msg\n";
+    print "${GREEN}✅ [INFO]${RESET} $msg\n";
 }
 
 sub warn_msg {
     my ($msg) = @_;
-    print STDERR "${YELLOW}[WARN]${RESET} $msg\n";
+    print STDERR "${YELLOW}⚠️  [WARN]${RESET} $msg\n";
 }
 
 sub error {
     my ($msg, $code) = @_;
     $code //= 1;
-    print STDERR "${RED}[ERROR]${RESET} $msg\n";
+    print STDERR "${RED}❌ [ERROR]${RESET} $msg\n";
     exit $code;
 }
 
@@ -157,11 +159,10 @@ warn_msg("Skipped $hashed_count hashed known_hosts entries.") if $hashed_count >
 
 info("Select a server to connect to:");
 print "\n";
-
 for my $i (0 .. $#entries) {
-    printf "  %2d) %s\n", $i + 1, $entries[$i]{display};
+    printf "  ${CYAN}%2d)${RESET} ${BOLD}%s${RESET}\n", $i + 1, $entries[$i]{display};
 }
-printf "  %2d) Quit\n\n", scalar(@entries) + 1;
+printf "  ${CYAN}%2d)${RESET} ${BOLD}Quit${RESET}\n\n", scalar(@entries) + 1;
 
 my $selected_idx;
 while (1) {
@@ -203,7 +204,7 @@ info("Selected server: $selected_display");
 
 my $default_user = $ENV{SSH_MENU_USER} // $ENV{USER} // '';
 
-print "SSH user" . (length $default_user ? " [$default_user]" : '') . ": ";
+print "${BOLD}SSH user${RESET}" . (length $default_user ? " [${CYAN}$default_user${RESET}]" : '') . ": ";
 my $ssh_user = <STDIN>;
 defined $ssh_user or error("Input closed.");
 chomp $ssh_user;

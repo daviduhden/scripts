@@ -21,6 +21,8 @@ use File::Copy qw(copy);
 my $GREEN = "\e[32m";
 my $YELLOW = "\e[33m";
 my $RED = "\e[31m";
+my $CYAN = "\e[36m";
+my $BOLD = "\e[1m";
 my $RESET = "\e[0m";
 
 ###############
@@ -30,18 +32,18 @@ my $RESET = "\e[0m";
 sub error {
     my ($msg, $code) = @_;
     $code //= 1;
-    print STDERR "${RED}[ERROR]${RESET} $msg\n";
+    print STDERR "${RED}❌ [ERROR]${RESET} $msg\n";
     exit $code;
 }
 
 sub warn_msg {
     my ($msg) = @_;
-    print STDERR "${YELLOW}[WARN]${RESET} $msg\n";
+    print STDERR "${YELLOW}⚠️  [WARN]${RESET} $msg\n";
 }
 
 sub log_info {
     my ($msg) = @_;
-    print "${GREEN}[INFO]${RESET} $msg\n";
+    print "${GREEN}✅ [INFO]${RESET} $msg\n";
 }
 
 ########################
