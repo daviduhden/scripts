@@ -15,7 +15,7 @@ RED="\e[31m"
 RESET="\e[0m"
 
 log()   { printf '%b[INFO]%b 🟦 %s\n' "$GREEN" "$RESET" "$*"; }
-warn()  { printf '%b[WARN]%b ⚠️  %s\n' "$YELLOW" "$RESET" "$*"; }
+warn()  { printf '%b[WARN]%b ⚠️ %s\n' "$YELLOW" "$RESET" "$*"; }
 error() { printf '%b[ERROR]%b ❌ %s\n' "$RED" "$RESET" "$*" >&2; }
 
 require_cmd() {
