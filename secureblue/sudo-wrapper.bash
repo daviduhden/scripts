@@ -85,8 +85,7 @@ fi
 ############################################
 if [[ "$prog_name" == "sudoedit" ]]; then
     #
-    # Simplified sudoedit emulation:
-    #   - Use run0edit for graphical/safe editing as root.
+    # Use run0edit for graphical/safe editing as root.
     #
     if [[ "$#" -lt 1 ]]; then
         error "Usage: sudoedit FILE..."
