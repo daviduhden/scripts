@@ -156,7 +156,7 @@ warn_info("Skipped $hashed_count hashed known_hosts entries.") if $hashed_count 
 # 3. Interactive menu to choose a server #
 ##########################################
 
-info("Select a server to connect to:");
+log_info("Select a server to connect to:");
 print "\n";
 for my $i (0 .. $#entries) {
     printf "  ${CYAN}%2d)${RESET} ${BOLD}%s${RESET}\n", $i + 1, $entries[$i]{display};
@@ -195,7 +195,7 @@ my $selected_host    = $entries[$selected_idx]{host};
 my $selected_port    = $entries[$selected_idx]{port};
 my $selected_display = $entries[$selected_idx]{display};
 
-info("Selected server: $selected_display");
+log_info("Selected server: $selected_display");
 
 #######################
 # 4. Ask for SSH user #
