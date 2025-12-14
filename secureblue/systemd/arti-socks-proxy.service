@@ -1,0 +1,38 @@
+# UNIX socket -> Arti SOCKS bridge (socat) — systemd unit file
+#
+# See the LICENSE file at the top of the project tree for copyright
+# and license details.
+
+[Unit]
+Description=UNIX socket -> Arti SOCKS bridge (socat)
+After=arti.service
+Requires=arti.service
+PartOf=arti.service
+
+[Service]
+Type=simple
+
+# Ensure the target directory exists
+ExecStartPre=/usr/bin/mkdir -p %h/.local/state/arti
+
+# Remove any stale socket from a previous crash
+ExecStartPre=/usr/bin/rm -f %h/.local/state/arti/arti-socks.sock
+
+# Listen on a UNIX domain socket and forward to Arti's TCP SOCKS port
+ExecStart=/usr/bin/socat \
+  UNIX-LISTEN:%h/.local/state/arti/arti-socks.sock,fork,mode=0600 \
+  TCP:127.0.0.1:9150
+
+Restart=on-failure
+RestartSec=1
+
+# Hardening
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=full
+ReadOnlyPaths=/
+ReadWritePaths=%h/.local/state/arti
+
+[Install]
+WantedBy=default.target

@@ -88,6 +88,13 @@ install-secureblue:
 		printf '%s Installing %s -> %s\n' "${INFO}" "$$f" "${BINDIR}/$$name"; \
 		install -m 0755 "$$f" "${BINDIR}/$$name"; \
 	done
+	@# Copy systemd unit templates for secureblue helpers alongside the installed scripts
+	@if [ -d secureblue/systemd ]; then \
+		printf '%s Installing %s -> %s\n' "${INFO}" "secureblue/systemd" "${BINDIR}/systemd"; \
+		rm -rf "${BINDIR}/systemd"; \
+		cp -R secureblue/systemd "${BINDIR}/systemd"; \
+		chmod -R a+rX "${BINDIR}/systemd"; \
+	fi
 	@wrapper="${BINDIR}/sudo-wrapper"; \
 	if [ -x "$$wrapper" ]; then \
 		ln -sf "$$wrapper" "${BINDIR}/sudo"; \
