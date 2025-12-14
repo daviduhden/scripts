@@ -33,6 +33,7 @@ SECUREBLUE_SCRIPTS=\
 	secureblue/install-arti-service.bash \
 	secureblue/luks-ext4-to-btrfs.bash \
 	secureblue/postinstall.bash \
+	secureblue/setup-clamav.bash \
 	secureblue/sudo-wrapper.bash \
 	secureblue/sync-gh-repos.bash \
 	secureblue/sysupgrade.bash \

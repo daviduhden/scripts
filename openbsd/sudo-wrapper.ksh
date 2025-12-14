@@ -1,4 +1,22 @@
 #!/bin/ksh
+
+# If we are NOT already running under ksh93, try to re-exec with ksh93.
+# If ksh93 is not available, fall back to the base ksh (OpenBSD /bin/ksh).
+case "${KSH_VERSION-}" in
+    *93*) : ;;  # already ksh93
+    *)
+        if command -v ksh93 >/dev/null 2>&1; then
+            exec ksh93 "$0" "$@"
+        elif [ -x /usr/local/bin/ksh93 ]; then
+            exec /usr/local/bin/ksh93 "$0" "$@"
+        elif command -v ksh >/dev/null 2>&1; then
+            exec ksh "$0" "$@"
+        elif [ -x /bin/ksh ]; then
+            exec /bin/ksh "$0" "$@"
+        fi
+    ;;
+esac
+
 set -eu
 
 # Compatibility shim that redirects sudo calls to doas and wraps visudo/sudoedit
@@ -23,46 +41,37 @@ set -eu
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
 
-# Prefer ksh93 when available; fallback to base ksh
-if [ -z "${_KSH93_EXECUTED:-}" ] && command -v ksh93 >/dev/null 2>&1; then
-    _KSH93_EXECUTED=1 exec ksh93 "$0" "$@"
+if [ -t 1 ] && [ "${NO_COLOR:-}" != "1" ]; then
+    GREEN="\033[32m"; YELLOW="\033[33m"; RED="\033[31m"; RESET="\033[0m"
+else
+    GREEN=""; YELLOW=""; RED=""; RESET=""
 fi
-_KSH93_EXECUTED=1
 
-log()   { printf '%s [INFO]  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
-warn()  { printf '%s [WARN]  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
-error() { printf '%s [ERROR] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
+log()   { print "$(date '+%Y-%m-%d %H:%M:%S') ${GREEN}[INFO]${RESET} ✅ $*"; }
+warn()  { print "$(date '+%Y-%m-%d %H:%M:%S') ${YELLOW}[WARN]${RESET} ⚠️ $*" >&2; }
+error() { print "$(date '+%Y-%m-%d %H:%M:%S') ${RED}[ERROR]${RESET} ❌ $*" >&2; }
 
-typeset prog_name real_visudo candidate editor
-typeset -a editor_cmd
+ensure_doas() {
+    typeset prog_name
+    prog_name="$1"
 
-# Detect how this script was called (sudo vs visudo vs sudoedit, etc.)
-prog_name=$(basename -- "$0")
+    if command -v doas >/dev/null 2>&1; then
+        return 0
+    fi
 
-# Fail fast if doas is not available in PATH.
-if ! command -v doas >/dev/null 2>&1; then
     error "${prog_name}-wrapper error: 'doas' is not installed or not in PATH."
     error "Please install or enable doas before using this wrapper."
     exit 1
-fi
+}
 
-##########################################
-# Special handling when called as visudo #
-##########################################
-if [ "$prog_name" = "visudo" ]; then
-    #
-    # We want to execute the real visudo binary with elevated privileges
-    # using doas, while avoiding recursive calls back into this wrapper.
-    #
+handle_visudo() {
+    typeset real_visudo candidate
 
-    # Preferred path for visudo as installed from packages on OpenBSD
     real_visudo="/usr/local/sbin/visudo"
 
-    # If that path doesn't exist, fall back to command -v
     if [ ! -x "$real_visudo" ]; then
         if command -v visudo >/dev/null 2>&1; then
             candidate=$(command -v visudo)
-            # Avoid picking ourselves (in case the symlink is found in PATH)
             if [ "$candidate" != "$0" ]; then
                 real_visudo="$candidate"
             else
@@ -73,44 +82,27 @@ if [ "$prog_name" = "visudo" ]; then
         fi
     fi
 
-    # Final sanity check
     if [ -z "$real_visudo" ] || [ ! -x "$real_visudo" ]; then
         error "sudo-wrapper error: could not locate the real 'visudo' binary."
         error "Expected /usr/local/sbin/visudo or another executable visudo in PATH."
         exit 1
     fi
 
-    # Export a hint variable for tools/scripts
     export VISUDO_VIA_DOAS=1
-
-    # Execute real visudo via doas as root
     exec doas "$real_visudo" "$@"
-    # We should never reach here
-    exit 1
-fi
+}
 
-############################################
-# Special handling when called as sudoedit #
-############################################
-if [ "$prog_name" = "sudoedit" ]; then
-    #
-    # Simplified sudoedit emulation:
-    #   - Determine the editor from SUDO_EDITOR / VISUAL / EDITOR / vi.
-    #   - Run that editor as root via doas on the given files.
-    #
-    # This does NOT implement sudoedit's temp-file semantics, but for
-    # common "sudoedit /etc/foo" usage it behaves as "edit this file as root".
-    #
+handle_sudoedit() {
+    typeset editor
+    typeset -a editor_cmd
 
     if [ "$#" -lt 1 ]; then
         error "Usage: sudoedit FILE..."
         exit 1
     fi
 
-    # Determine preferred editor
     editor="${SUDO_EDITOR:-${VISUAL:-${EDITOR:-vi}}}"
 
-    # Split editor into an argument array (handles things like "code -w")
     # shellcheck disable=SC2086
     set -A editor_cmd -- $editor
 
@@ -119,34 +111,38 @@ if [ "$prog_name" = "sudoedit" ]; then
         exit 1
     fi
 
-    # Check that the base command exists
     if ! command -v "${editor_cmd[0]}" >/dev/null 2>&1; then
         error "sudo-wrapper error: editor '${editor_cmd[0]}' not found in PATH."
         exit 1
     fi
 
-    # Hint variable for scripts/tools
     export SUDOEDIT_VIA_DOAS=1
-
-    # Run the editor as root via doas on the requested files.
-    # editor_cmd may contain extra args (e.g. 'code -w'); then we append "$@".
     exec doas "${editor_cmd[@]}" "$@"
-    exit 1
-fi
+}
 
-################################
-# Default path: called as sudo #
-################################
+handle_sudo() {
+    export SUDO_VIA_DOAS=1
+    export SUDO_PREFER_DOAS=1
+    exec doas "$@"
+}
 
-# Informational variable so scripts can detect that sudo is being redirected.
-export SUDO_VIA_DOAS=1
+main() {
+    typeset prog_name
+    prog_name=$(basename -- "$0")
 
-# Informational variable if you want to standardize on doas.
-export SUDO_PREFER_DOAS=1
+    ensure_doas "$prog_name"
 
-# Optional: log when this wrapper is used, for auditing or debugging.
-# Uncomment the line below if you want syslog entries.
-# logger -t sudo-doas-wrapper "sudo invoked as doas by user '${USER:-unknown}' with args: $*"
+    case "$prog_name" in
+        visudo)
+            handle_visudo "$@"
+            ;;
+        sudoedit)
+            handle_sudoedit "$@"
+            ;;
+        *)
+            handle_sudo "$@"
+            ;;
+    esac
+}
 
-# Finally, exec doas with all the arguments passed to sudo.
-exec doas "$@"
+main "$@"

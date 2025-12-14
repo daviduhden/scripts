@@ -9,10 +9,17 @@ set -euo pipefail
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
 
-GREEN="\e[32m"
-YELLOW="\e[33m"
-RED="\e[31m"
-RESET="\e[0m"
+if [ -t 1 ] && [ "${NO_COLOR:-0}" != "1" ]; then
+  GREEN="\033[32m"
+  YELLOW="\033[33m"
+  RED="\033[31m"
+  RESET="\033[0m"
+else
+  GREEN=""
+  YELLOW=""
+  RED=""
+  RESET=""
+fi
 
 log()    { printf '%s %b[INFO]%b ✅ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$GREEN" "$RESET" "$*"; }
 warn()   { printf '%s %b[WARN]%b ⚠️ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$YELLOW" "$RESET" "$*"; }

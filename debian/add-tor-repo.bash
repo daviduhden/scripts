@@ -1,4 +1,9 @@
 #!/bin/bash
+
+if [[ -z "${ZSH_VERSION:-}" ]] && command -v zsh >/dev/null 2>&1; then
+    exec zsh "$0" "$@"
+fi
+
 set -euo pipefail
 
 # This script adds the Tor Project APT repository,
@@ -11,6 +16,7 @@ set -euo pipefail
 #
 # Supported (based on current published repositories):
 #   Debian: bookworm, trixie
+#   Ubuntu: jammy, noble
 #   Devuan:
 #     - daedalus  -> Debian bookworm
 #     - excalibur -> Debian trixie
@@ -18,7 +24,6 @@ set -euo pipefail
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
 
-# Basic PATH (important when run from cron)
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
@@ -29,10 +34,17 @@ ARCH_FILTER=""
 APT_CMD=""
 
 # Simple colors for messages
-GREEN="\e[32m"
-YELLOW="\e[33m"
-RED="\e[31m"
-RESET="\e[0m"
+if [ -t 1 ] && [ "${NO_COLOR:-0}" != "1" ]; then
+    GREEN="\033[32m"
+    YELLOW="\033[33m"
+    RED="\033[31m"
+    RESET="\033[0m"
+else
+    GREEN=""
+    YELLOW=""
+    RED=""
+    RESET=""
+fi
 
 log()    { printf '%s %b[INFO]%b ✅ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$GREEN" "$RESET" "$*"; }
 warn()   { printf '%s %b[WARN]%b ⚠️ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$YELLOW" "$RESET" "$*"; }
@@ -45,55 +57,21 @@ require_cmd() {
     fi
 }
 
-# Ensure we run as root
-if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
-    error "This script must be run as root. Try: sudo $0"
-fi
-
-require_cmd curl
-require_cmd dpkg
-require_cmd ps
-
 # Simple curl wrapper
 net_curl() {
     curl -fLsS --retry 5 "$@"
 }
 
-# Detect apt/apt-get
-if command -v apt-get >/dev/null 2>&1; then
-    APT_CMD="apt-get"
-elif command -v apt >/dev/null 2>&1; then
-    APT_CMD="apt"
-else
-    error "neither 'apt-get' nor 'apt' is available. This script supports only Debian-like/Ubuntu-like systems."
-fi
-
-# Load system release information
-if [[ -r /etc/os-release ]]; then
-    # shellcheck disable=SC1091
-    . /etc/os-release
-else
-    error "/etc/os-release not found. Cannot detect distribution."
-fi
-
-OS_ID="${ID:-}"
-
-# Basic sanity: ensure it's Debian-based (Ubuntu and Ubuntu-like are unsupported)
-if [[ "$OS_ID" == "ubuntu" || "${ID_LIKE:-}" == *"ubuntu"* ]]; then
-    error "Ubuntu/Ubuntu-like distributions are not supported; use Debian/Devuan bookworm or newer."
-fi
-if [[ "${ID_LIKE:-}" != *"debian"* && "$OS_ID" != "debian" && "$OS_ID" != "devuan" && "$OS_ID" != "raspbian" ]]; then
-    error "this script is intended for Debian/Devuan-based systems (bookworm or newer)."
-fi
-
 get_suite_codename() {
     # Detect OS codename
     if [[ -n "${DEBIAN_CODENAME:-}" ]]; then
         OS_CODENAME="${DEBIAN_CODENAME}"
+    elif [[ -n "${UBUNTU_CODENAME:-}" ]]; then
+        OS_CODENAME="${UBUNTU_CODENAME}"
     elif [[ -n "${VERSION_CODENAME:-}" ]]; then
         OS_CODENAME="${VERSION_CODENAME}"
     else
-        error "could not detect distribution codename (DEBIAN_CODENAME/VERSION_CODENAME missing)."
+        error "could not detect distribution codename (DEBIAN_CODENAME/UBUNTU_CODENAME/VERSION_CODENAME missing)."
     fi
 
     case "$OS_ID" in
@@ -110,16 +88,26 @@ get_suite_codename() {
                     ;;
             esac
             ;;
+        ubuntu)
+            case "$OS_CODENAME" in
+                jammy|noble)
+                    SUITE_CODENAME="$OS_CODENAME"
+                    ;;
+                *)
+                    error "unsupported Ubuntu codename '$OS_CODENAME'. Supported: jammy, noble."
+                    ;;
+            esac
+            ;;
         *)
             SUITE_CODENAME="$OS_CODENAME"
             ;;
     esac
 
     case "$SUITE_CODENAME" in
-        bookworm|trixie)
+        bookworm|trixie|jammy|noble)
             ;;
         *)
-            error "unsupported release '$SUITE_CODENAME'. Supported: bookworm, trixie (or Devuan daedalus/excalibur)."
+            error "unsupported release '$SUITE_CODENAME'. Supported: bookworm, trixie, jammy, noble (or Devuan daedalus/excalibur)."
             ;;
     esac
 }
@@ -301,24 +289,59 @@ enable_and_start_tor() {
     warn "tor is installed, but you must start and enable it manually."
 }
 
-get_suite_codename
-detect_architecture
-ensure_base_dependencies
-choose_repo_transport
+main() {
+    if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+        error "This script must be run as root. Try: sudo $0"
+    fi
 
-log "Detected OS ID: ${OS_ID}"
-log "Detected OS codename: ${OS_CODENAME}"
-log "Using Tor repo suite codename: ${SUITE_CODENAME}"
-log "Using native APT architecture: ${ARCH_FILTER}"
+    require_cmd curl
+    require_cmd dpkg
+    require_cmd ps
 
-log "Importing Tor Project signing key..."
-install -d -m 0755 /usr/share/keyrings
-net_curl "https://deb.torproject.org/torproject.org/A3C4F0F979CAA22CDBA8F512EE8CBC9E886DDD89.asc" \
-    | gpg --dearmor -o /usr/share/keyrings/deb.torproject.org-keyring.gpg
+    if command -v apt-get >/dev/null 2>&1; then
+        APT_CMD="apt-get"
+    elif command -v apt >/dev/null 2>&1; then
+        APT_CMD="apt"
+    else
+        error "neither 'apt-get' nor 'apt' is available. This script supports only Debian-like/Ubuntu-like systems."
+    fi
 
-log "Writing APT deb822 sources file for Tor..."
-rm -f /etc/apt/sources.list.d/tor.list
-cat > /etc/apt/sources.list.d/tor.sources <<EOF
+    if [[ -r /etc/os-release ]]; then
+        # shellcheck disable=SC1091
+        . /etc/os-release
+    else
+        error "/etc/os-release not found. Cannot detect distribution."
+    fi
+
+    OS_ID="${ID:-}"
+
+    # Normalize Ubuntu-like derivatives to ubuntu for support checks
+    if [[ "$OS_ID" != "debian" && "$OS_ID" != "devuan" && "$OS_ID" != "raspbian" && "$OS_ID" != "ubuntu" && "${ID_LIKE:-}" == *"ubuntu"* ]]; then
+        OS_ID="ubuntu"
+    fi
+
+    if [[ "${ID_LIKE:-}" != *"debian"* && "${ID_LIKE:-}" != *"ubuntu"* && "$OS_ID" != "debian" && "$OS_ID" != "devuan" && "$OS_ID" != "raspbian" && "$OS_ID" != "ubuntu" ]]; then
+        error "this script is intended for Debian/Devuan/Ubuntu-based systems (bookworm or newer)."
+    fi
+
+    get_suite_codename
+    detect_architecture
+    ensure_base_dependencies
+    choose_repo_transport
+
+    log "Detected OS ID: ${OS_ID}"
+    log "Detected OS codename: ${OS_CODENAME}"
+    log "Using Tor repo suite codename: ${SUITE_CODENAME}"
+    log "Using native APT architecture: ${ARCH_FILTER}"
+
+    log "Importing Tor Project signing key..."
+    install -d -m 0755 /usr/share/keyrings
+    net_curl "https://deb.torproject.org/torproject.org/A3C4F0F979CAA22CDBA8F512EE8CBC9E886DDD89.asc" \
+        | gpg --dearmor -o /usr/share/keyrings/deb.torproject.org-keyring.gpg
+
+    log "Writing APT deb822 sources file for Tor..."
+    rm -f /etc/apt/sources.list.d/tor.list
+    cat > /etc/apt/sources.list.d/tor.sources <<EOF
 Types: deb deb-src
 URIs: ${REPO_URL}
 Suites: ${SUITE_CODENAME}
@@ -327,8 +350,7 @@ Architectures: ${ARCH_FILTER}
 Signed-By: /usr/share/keyrings/deb.torproject.org-keyring.gpg
 EOF
 
-# Optional nightly stanza, disabled by default. Set Enabled: yes to use.
-cat >> /etc/apt/sources.list.d/tor.sources <<EOF
+    cat >> /etc/apt/sources.list.d/tor.sources <<EOF
 
 Enabled: no
 Types: deb deb-src
@@ -339,13 +361,16 @@ Architectures: ${ARCH_FILTER}
 Signed-By: /usr/share/keyrings/deb.torproject.org-keyring.gpg
 EOF
 
-log "Updating APT index (including Tor repository)..."
-"$APT_CMD" update
+    log "Updating APT index (including Tor repository)..."
+    "$APT_CMD" update
 
-log "Installing tor, torsocks, obfs4proxy and deb.torproject.org-keyring..."
-"$APT_CMD" install -y tor torsocks obfs4proxy deb.torproject.org-keyring
+    log "Installing tor, torsocks, obfs4proxy and deb.torproject.org-keyring..."
+    "$APT_CMD" install -y tor torsocks obfs4proxy deb.torproject.org-keyring
 
-log "Enabling and starting tor service..."
-enable_and_start_tor
+    log "Enabling and starting tor service..."
+    enable_and_start_tor
 
-log "Done. Tor should now be installed and (where supported) enabled and running."
+    log "Done. Tor should now be installed and (where supported) enabled and running."
+}
+
+main "$@"

@@ -1,4 +1,9 @@
 #!/bin/bash
+
+if [[ -z "${ZSH_VERSION:-}" ]] && command -v zsh >/dev/null 2>&1; then
+    exec zsh "$0" "$@"
+fi
+
 set -uo pipefail
 
 # Synchronizes a deployed website directory with a GitHub repository:
@@ -16,14 +21,35 @@ PATH=/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/
 export PATH
 
 # Simple colors for messages
-GREEN="\e[32m"
-YELLOW="\e[33m"
-RED="\e[31m"
-RESET="\e[0m"
+if [ -t 1 ] && [ "${NO_COLOR:-0}" != "1" ]; then
+    GREEN="\033[32m"
+    YELLOW="\033[33m"
+    RED="\033[31m"
+    RESET="\033[0m"
+else
+    GREEN=""
+    YELLOW=""
+    RED=""
+    RESET=""
+fi
 
 log()    { printf '%s %b[INFO]%b ✅ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$GREEN" "$RESET" "$*"; }
 warn()   { printf '%s %b[WARN]%b ⚠️  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$YELLOW" "$RESET" "$*"; }
 error()  { printf '%s %b[ERROR]%b ❌ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$RED" "$RESET" "$*" >&2; }
+
+has_repo_content() {
+    local dir="$1"
+
+    [ -d "$dir" ] || return 1
+
+    if find "$dir" \
+        \( -path "$dir/.git" -o -path "$dir/.git/*" -o -path "$dir/.github" -o -path "$dir/.github/*" \) -prune \
+        -o -mindepth 1 -print -quit | grep -q .; then
+        return 0
+    fi
+
+    return 1
+}
 
 #######################################
 # GitHub CLI user / config resolution #
@@ -81,9 +107,10 @@ stage_from_source() {
             error "copy from staging to $WWW_DIR failed."
             return 1
         fi
-        # Remove CI metadata that should not ship
-        rm -rf "$WWW_DIR/.git" "$WWW_DIR/.github"
     fi
+
+    # Remove CI metadata that should not ship
+    rm -rf "$WWW_DIR/.git" "$WWW_DIR/.github"
 
     return 0
 }
@@ -102,26 +129,6 @@ OWNER_GROUP="www-data"
 # GitHub ZIP URL for fallback
 # Example: https://github.com/user/repo/archive/refs/heads/main.zip
 ZIP_URL="https://${GH_HOST}/${REPO_SLUG}/archive/refs/heads/${BRANCH}.zip"
-
-log "----------------------------------------"
-log "Sync started (using GitHub CLI config for user: $GH_USER, home: $GH_HOME)"
-
-# Ensure repository directory exists
-if [ ! -d "$WWW_DIR" ]; then
-    error "directory $WWW_DIR does not exist."
-    exit 1
-fi
-# Simple lock to avoid concurrent runs
-LOCKDIR="$WWW_DIR/.sync.lock"
-if ! mkdir "$LOCKDIR" 2>/dev/null; then
-    log "Another sync is already running (lock: $LOCKDIR). Exiting."
-    exit 0
-fi
-
-cleanup() {
-    rmdir "$LOCKDIR" 2>/dev/null || true
-}
-trap cleanup EXIT INT TERM
 
 ###################################
 # Function: Sync using GitHub CLI #
@@ -202,6 +209,12 @@ sync_with_gh_cli() {
         return 1
     fi
 
+    if ! has_repo_content "$stagedir"; then
+        warn "Staged repository appears empty; skipping sync."
+        rm -rf "$tmpdir"
+        return 1
+    fi
+
     if ! stage_from_source "$stagedir"; then
         rm -rf "$tmpdir"
         return 1
@@ -245,6 +258,12 @@ sync_with_git() {
     log "Cloning repository via git into staging directory..."
     if ! git clone --branch "$BRANCH" --single-branch "$origin_url" "$stagedir" >/dev/null 2>&1; then
         error "git clone failed from $origin_url."
+        rm -rf "$tmpdir"
+        return 1
+    fi
+
+    if ! has_repo_content "$stagedir"; then
+        warn "Staged repository appears empty; skipping sync."
         rm -rf "$tmpdir"
         return 1
     fi
@@ -317,6 +336,12 @@ sync_with_github_zip() {
         return 1
     fi
 
+    if ! has_repo_content "$srcdir"; then
+        warn "Downloaded repository appears empty; skipping sync."
+        rm -rf "$tmpdir"
+        return 1
+    fi
+
     if ! stage_from_source "$srcdir"; then
         rm -rf "$tmpdir"
         return 1
@@ -369,70 +394,88 @@ post_update_steps() {
     return 0
 }
 
-#############
-# MAIN FLOW #
-#############
+main() {
+    local LOCKDIR SYNC_OK
 
-SYNC_OK=0
+    log "----------------------------------------"
+    log "Sync started (using GitHub CLI config for user: $GH_USER, home: $GH_HOME)"
 
-# 1) Prefer GitHub CLI if available
-if sync_with_gh_cli; then
-    SYNC_OK=1
-else
-    log "GitHub CLI sync not available or failed. Falling back to plain git..."
-    if sync_with_git; then
+    if [ ! -d "$WWW_DIR" ]; then
+        error "directory $WWW_DIR does not exist."
+        exit 1
+    fi
+
+    LOCKDIR="$WWW_DIR/.sync.lock"
+    if ! mkdir "$LOCKDIR" 2>/dev/null; then
+        log "Another sync is already running (lock: $LOCKDIR). Exiting."
+        exit 0
+    fi
+
+    cleanup() {
+        rmdir "$LOCKDIR" 2>/dev/null || true
+    }
+    trap cleanup EXIT INT TERM
+
+    SYNC_OK=0
+
+    if sync_with_gh_cli; then
         SYNC_OK=1
     else
-        log "Git sync failed or was not possible. Trying GitHub ZIP fallback..."
-        if sync_with_github_zip; then
+        log "GitHub CLI sync not available or failed. Falling back to plain git..."
+        if sync_with_git; then
             SYNC_OK=1
         else
-            error "all sync methods (gh, git, ZIP) failed. Aborting."
-            exit 1
+            log "Git sync failed or was not possible. Trying GitHub ZIP fallback..."
+            if sync_with_github_zip; then
+                SYNC_OK=1
+            else
+                error "all sync methods (gh, git, ZIP) failed. Aborting."
+                exit 1
+            fi
         fi
     fi
-fi
 
-# 2) Permissions and service restart
-if ! post_update_steps; then
-    error "post-update steps failed."
-    exit 1
-fi
+    if ! post_update_steps; then
+        error "post-update steps failed."
+        exit 1
+    fi
 
-# 3) Renew certificate
-if command -v certbot >/dev/null 2>&1; then
-    case "$SERVICE_NAME" in
-        nginx)
-            log "Running certbot for ${WWW_HOST}..."
-            if certbot --nginx renew --non-interactive >/dev/null 2>&1; then
-                log "certbot completed for ${WWW_HOST}."
-                systemctl restart "${SERVICE_NAME}" >/dev/null 2>&1 || warn "service ${SERVICE_NAME} restart failed after certbot."
-            else
-                warn "certbot failed for ${WWW_HOST}."
-            fi
-            ;;
-        apache2|apache)
-            log "Running certbot for ${WWW_HOST}..."
-            if certbot --apache renew --non-interactive >/dev/null 2>&1; then
-                log "certbot completed for ${WWW_HOST}."
-                systemctl restart "${SERVICE_NAME}" >/dev/null 2>&1 || warn "service ${SERVICE_NAME} restart failed after certbot."
-            else
-                warn "certbot failed for ${WWW_HOST}."
-            fi
-            ;;
-        *)
-            log "Running certbot for ${WWW_HOST}..."
-            if certbot certonly --non-interactive -d "${WWW_HOST}" >/dev/null 2>&1; then
-                log "certbot completed for ${WWW_HOST}."
-                systemctl restart "${SERVICE_NAME}" >/dev/null 2>&1 || warn "service ${SERVICE_NAME} restart failed after certbot."
-            else
-                warn "certbot failed for ${WWW_HOST}."
-            fi
-            ;;
-    esac
-else
-    warn "certbot not found; skipping certificate renewal for ${WWW_HOST}."
-fi
+    if command -v certbot >/dev/null 2>&1; then
+        case "$SERVICE_NAME" in
+            nginx)
+                log "Running certbot for ${WWW_HOST}..."
+                if certbot --nginx renew --non-interactive >/dev/null 2>&1; then
+                    log "certbot completed for ${WWW_HOST}."
+                    systemctl restart "${SERVICE_NAME}" >/dev/null 2>&1 || warn "service ${SERVICE_NAME} restart failed after certbot."
+                else
+                    warn "certbot failed for ${WWW_HOST}."
+                fi
+                ;;
+            apache2|apache)
+                log "Running certbot for ${WWW_HOST}..."
+                if certbot --apache renew --non-interactive >/dev/null 2>&1; then
+                    log "certbot completed for ${WWW_HOST}."
+                    systemctl restart "${SERVICE_NAME}" >/dev/null 2>&1 || warn "service ${SERVICE_NAME} restart failed after certbot."
+                else
+                    warn "certbot failed for ${WWW_HOST}."
+                fi
+                ;;
+            *)
+                log "Running certbot for ${WWW_HOST}..."
+                if certbot certonly --non-interactive -d "${WWW_HOST}" >/dev/null 2>&1; then
+                    log "certbot completed for ${WWW_HOST}."
+                    systemctl restart "${SERVICE_NAME}" >/dev/null 2>&1 || warn "service ${SERVICE_NAME} restart failed after certbot."
+                else
+                    warn "certbot failed for ${WWW_HOST}."
+                fi
+                ;;
+        esac
+    else
+        warn "certbot not found; skipping certificate renewal for ${WWW_HOST}."
+    fi
 
-log "Sync completed"
-log "----------------------------------------"
+    log "Sync completed"
+    log "----------------------------------------"
+}
+
+main "$@"

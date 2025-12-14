@@ -1,4 +1,22 @@
 #!/bin/ksh
+
+# If we are NOT already running under ksh93, try to re-exec with ksh93.
+# If ksh93 is not available, fall back to the base ksh (OpenBSD /bin/ksh).
+case "${KSH_VERSION-}" in
+    *93*) : ;;  # already ksh93
+    *)
+        if command -v ksh93 >/dev/null 2>&1; then
+            exec ksh93 "$0" "$@"
+        elif [ -x /usr/local/bin/ksh93 ]; then
+            exec /usr/local/bin/ksh93 "$0" "$@"
+        elif command -v ksh >/dev/null 2>&1; then
+            exec ksh "$0" "$@"
+        elif [ -x /bin/ksh ]; then
+            exec /bin/ksh "$0" "$@"
+        fi
+    ;;
+esac
+
 set -u
 
 # Synchronizes a deployed website directory with a GitHub repository:
@@ -11,19 +29,35 @@ set -u
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
 
-# Prefer ksh93 when available; fallback to base ksh
-if [ -z "${_KSH93_EXECUTED:-}" ] && command -v ksh93 >/dev/null 2>&1; then
-    _KSH93_EXECUTED=1 exec ksh93 "$0" "$@"
-fi
-_KSH93_EXECUTED=1
-
 # Basic PATH (important when run from cron)
 PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin
 export PATH
 
-log()   { printf '%s [INFO]  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
-warn()  { printf '%s [WARN]  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
-error() { printf '%s [ERROR] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
+if [ -t 1 ] && [ "${NO_COLOR:-}" != "1" ]; then
+    GREEN="\033[32m"; YELLOW="\033[33m"; RED="\033[31m"; RESET="\033[0m"
+else
+    GREEN=""; YELLOW=""; RED=""; RESET=""
+fi
+
+log()   { print "$(date '+%Y-%m-%d %H:%M:%S') ${GREEN}[INFO]${RESET} ✅ $*"; }
+warn()  { print "$(date '+%Y-%m-%d %H:%M:%S') ${YELLOW}[WARN]${RESET} ⚠️ $*" >&2; }
+error() { print "$(date '+%Y-%m-%d %H:%M:%S') ${RED}[ERROR]${RESET} ❌ $*" >&2; }
+
+has_repo_content() {
+    typeset dir
+    dir="$1"
+
+    [ -d "$dir" ] || return 1
+
+    # Look for at least one entry that is not .git/.github
+    if find "$dir" \
+        \( -path "$dir/.git" -o -path "$dir/.git/*" -o -path "$dir/.github" -o -path "$dir/.github/*" \) -prune \
+        -o -mindepth 1 -print -quit | grep -q .; then
+        return 0
+    fi
+
+    return 1
+}
 
 #######################################
 # GitHub CLI user / config resolution #
@@ -53,7 +87,7 @@ run_as_gh_user() {
     if command -v doas >/dev/null 2>&1; then
         doas -u "$GH_USER" "$@"
     else
-        su - "$GH_USER" -c "$(printf '%q ' "$@")"
+        su - "$GH_USER" -c "$(print -f '%q ' "$@")"
     fi
 }
 
@@ -110,28 +144,6 @@ OWNER_GROUP="daemon"
 # Example: https://github.com/user/repo/archive/refs/heads/main.zip
 typeset ZIP_URL
 ZIP_URL="https://${GH_HOST}/${REPO_SLUG}/archive/refs/heads/${BRANCH}.zip"
-
-log "----------------------------------------"
-log "Sync started (using GitHub CLI config for user: $GH_USER, home: $GH_HOME)"
-
-# Ensure repository directory exists
-if [ ! -d "$WWW_DIR" ]; then
-    error "directory $WWW_DIR does not exist."
-    exit 1
-fi
-
-# Simple lock to avoid concurrent runs
-typeset LOCKDIR
-LOCKDIR="$WWW_DIR/.sync.lock"
-if ! mkdir "$LOCKDIR" 2>/dev/null; then
-    log "Another sync is already running (lock: $LOCKDIR). Exiting."
-    exit 0
-fi
-
-cleanup() {
-    rmdir "$LOCKDIR" 2>/dev/null || true
-}
-trap cleanup EXIT INT TERM
 
 ###################################
 # Function: Sync using GitHub CLI #
@@ -211,6 +223,12 @@ sync_with_gh_cli() {
         return 1
     fi
 
+    if ! has_repo_content "$stagedir"; then
+        warn "Staged repository appears empty; skipping sync."
+        rm -rf "$tmpdir"
+        return 1
+    fi
+
     if ! stage_from_source "$stagedir"; then
         rm -rf "$tmpdir"
         return 1
@@ -233,7 +251,7 @@ sync_with_git() {
     fi
 
     if git -C "$WWW_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-        origin_url=$(git -C "$WWW_DIR" remote get-url origin 2>/dev/null || printf '')
+        origin_url=$(git -C "$WWW_DIR" remote get-url origin 2>/dev/null || print '')
     fi
 
     if [ -z "$origin_url" ] && [ -n "$REPO_SLUG" ]; then
@@ -254,6 +272,12 @@ sync_with_git() {
     log "Cloning repository via git into staging directory..."
     if ! git clone --branch "$BRANCH" --single-branch "$origin_url" "$stagedir" >/dev/null 2>&1; then
         error "git clone failed from $origin_url."
+        rm -rf "$tmpdir"
+        return 1
+    fi
+
+    if ! has_repo_content "$stagedir"; then
+        warn "Staged repository appears empty; skipping sync."
         rm -rf "$tmpdir"
         return 1
     fi
@@ -325,6 +349,12 @@ sync_with_github_zip() {
         return 1
     fi
 
+    if ! has_repo_content "$srcdir"; then
+        warn "Downloaded repository appears empty; skipping sync."
+        rm -rf "$tmpdir"
+        return 1
+    fi
+
     log "Staging extracted files into $WWW_DIR ..."
 
     if ! stage_from_source "$srcdir"; then
@@ -380,51 +410,68 @@ post_update_steps() {
     return 0
 }
 
-#############
-# MAIN FLOW #
-#############
+main() {
+    typeset LOCKDIR SYNC_OK
 
-typeset SYNC_OK
-SYNC_OK=0
+    log "----------------------------------------"
+    log "Sync started (using GitHub CLI config for user: $GH_USER, home: $GH_HOME)"
 
-# 1) Prefer GitHub CLI if available
-if sync_with_gh_cli; then
-    SYNC_OK=1
-else
-    log "GitHub CLI sync not available or failed. Falling back to plain git..."
-    if sync_with_git; then
+    if [ ! -d "$WWW_DIR" ]; then
+        error "directory $WWW_DIR does not exist."
+        exit 1
+    fi
+
+    LOCKDIR="$WWW_DIR/.sync.lock"
+    if ! mkdir "$LOCKDIR" 2>/dev/null; then
+        log "Another sync is already running (lock: $LOCKDIR). Exiting."
+        exit 0
+    fi
+
+    cleanup() {
+        rmdir "$LOCKDIR" 2>/dev/null || true
+    }
+    trap cleanup EXIT INT TERM
+
+    SYNC_OK=0
+
+    if sync_with_gh_cli; then
         SYNC_OK=1
     else
-        log "Git sync failed or was not possible. Trying GitHub ZIP fallback..."
-        if sync_with_github_zip; then
+        log "GitHub CLI sync not available or failed. Falling back to plain git..."
+        if sync_with_git; then
             SYNC_OK=1
         else
-            error "all sync methods (gh, git, ZIP) failed. Aborting."
-            exit 1
+            log "Git sync failed or was not possible. Trying GitHub ZIP fallback..."
+            if sync_with_github_zip; then
+                SYNC_OK=1
+            else
+                error "all sync methods (gh, git, ZIP) failed. Aborting."
+                exit 1
+            fi
         fi
     fi
-fi
 
-# 2) Permissions and service restart
-if ! post_update_steps; then
-    error "post-update steps failed."
-    exit 1
-fi
+    if ! post_update_steps; then
+        error "post-update steps failed."
+        exit 1
+    fi
 
-# 3) Renew certificate
-if command -v acme-client >/dev/null 2>&1; then
-    log "Running acme-client for ${WWW_HOST}..."
-    if acme-client "${WWW_HOST}"; then
-        log "acme-client completed for ${WWW_HOST}."
-        if ! rcctl -q restart "$SERVICE_NAME" >/dev/null 2>&1; then
-            warn "service ${SERVICE_NAME} restart failed after acme-client."
+    if command -v acme-client >/dev/null 2>&1; then
+        log "Running acme-client for ${WWW_HOST}..."
+        if acme-client "${WWW_HOST}"; then
+            log "acme-client completed for ${WWW_HOST}."
+            if ! rcctl -q restart "$SERVICE_NAME" >/dev/null 2>&1; then
+                warn "service ${SERVICE_NAME} restart failed after acme-client."
+            fi
+        else
+            warn "acme-client failed for ${WWW_HOST}."
         fi
     else
-        warn "acme-client failed for ${WWW_HOST}."
+        warn "acme-client not found; skipping certificate renewal for ${WWW_HOST}."
     fi
-else
-    warn "acme-client not found; skipping certificate renewal for ${WWW_HOST}."
-fi
 
-log "Sync completed"
-log "----------------------------------------"
+    log "Sync completed"
+    log "----------------------------------------"
+}
+
+main "$@"

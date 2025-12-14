@@ -20,13 +20,12 @@ my $CYAN = "\e[36m";
 my $BOLD = "\e[1m";
 my $RESET = "\e[0m";
 
-
-sub info {
+sub log {
     my ($msg) = @_;
     print "${GREEN}✅ [INFO]${RESET} $msg\n";
 }
 
-sub warn_msg {
+sub warn {
     my ($msg) = @_;
     print STDERR "${YELLOW}⚠️  [WARN]${RESET} $msg\n";
 }
@@ -37,6 +36,10 @@ sub error {
     print STDERR "${RED}❌ [ERROR]${RESET} $msg\n";
     exit $code;
 }
+
+# Backward-compatible aliases
+sub info     { log(@_); }
+sub warn_msg { warn(@_); }
 
 my $known_hosts = $ENV{SSH_MENU_KNOWN_HOSTS} // "$ENV{HOME}/.ssh/known_hosts";
 
