@@ -49,14 +49,10 @@ has_repo_content() {
 
     [ -d "$dir" ] || return 1
 
-    # Look for at least one entry that is not .git/.github
-    if find "$dir" \
+    # Look for at least one entry that is not .git/.github (portable, no -quit)
+    find "$dir" \
         \( -path "$dir/.git" -o -path "$dir/.git/*" -o -path "$dir/.github" -o -path "$dir/.github/*" \) -prune \
-        -o -mindepth 1 -print -quit | grep -q .; then
-        return 0
-    fi
-
-    return 1
+        -o -mindepth 1 -print | head -n 1 | grep -q .
 }
 
 #######################################
