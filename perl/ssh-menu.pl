@@ -27,7 +27,7 @@ sub log {
 
 sub warn {
     my ($msg) = @_;
-    print STDERR "${YELLOW}⚠️  [WARN]${RESET} $msg\n";
+    print STDERR "${YELLOW}⚠️ [WARN]${RESET} $msg\n";
 }
 
 sub error {
