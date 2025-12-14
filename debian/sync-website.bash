@@ -42,9 +42,10 @@ has_repo_content() {
 
     [ -d "$dir" ] || return 1
 
-    if find "$dir" \
+    # Place global options before expressions; avoid GNU-specific -quit
+    if find "$dir" -mindepth 1 \
         \( -path "$dir/.git" -o -path "$dir/.git/*" -o -path "$dir/.github" -o -path "$dir/.github/*" \) -prune \
-        -o -mindepth 1 -print -quit | grep -q .; then
+        -o -print | head -n 1 | grep -q .; then
         return 0
     fi
 
@@ -394,8 +395,9 @@ post_update_steps() {
     return 0
 }
 
+LOCKDIR=""  # global to ensure cleanup sees it under zsh
 main() {
-    local LOCKDIR SYNC_OK
+    local SYNC_OK
 
     log "----------------------------------------"
     log "Sync started (using GitHub CLI config for user: $GH_USER, home: $GH_HOME)"
@@ -412,7 +414,9 @@ main() {
     fi
 
     cleanup() {
-        rmdir "$LOCKDIR" 2>/dev/null || true
+        if [ -n "${LOCKDIR:-}" ] && [ -d "$LOCKDIR" ]; then
+            rmdir "$LOCKDIR" 2>/dev/null || true
+        fi
     }
     trap cleanup EXIT INT TERM
 
