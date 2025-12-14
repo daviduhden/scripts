@@ -38,6 +38,7 @@ net_curl() {
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SERVICE_SRC="${SCRIPT_DIR}/systemd/arti.service"
+BRIDGE_SRC="${SCRIPT_DIR}/systemd/arti-socks-proxy.service"
 CONFIG_URL="https://gitlab.torproject.org/tpo/core/arti/-/raw/main/crates/arti/src/arti-example-config.toml"
 
 require_cmd systemctl
@@ -86,6 +87,37 @@ log "Enabling and starting arti.service..."
 if ! systemctl --user enable --now arti.service; then
   error "failed to enable/start arti.service (ensure user systemd is active)"
   exit 1
+fi
+
+# Optional: install a SOCKS bridge on 127.0.0.1:9050 using socat, if available
+if command -v socat >/dev/null 2>&1; then
+  BRIDGE_UNIT="${SYSTEMD_USER_DIR}/arti-socks-proxy.service"
+  if [[ -f "$BRIDGE_SRC" ]]; then
+    log "Detected socat; installing arti-socks-proxy.service from ${BRIDGE_SRC}"
+    install -m 0640 "$BRIDGE_SRC" "$BRIDGE_UNIT"
+  else
+    warn "Bridge unit template not found at ${BRIDGE_SRC}; skipping bridge install"
+  fi
+
+  log "Reloading systemd --user units (bridge)..."
+  if ! systemctl --user daemon-reload; then
+    warn "systemctl --user daemon-reload failed for bridge unit"
+  fi
+
+  log "Enabling and starting arti-socks-proxy.service..."
+  if ! systemctl --user enable --now arti-socks-proxy.service; then
+    warn "failed to enable/start arti-socks-proxy.service"
+  else
+    log "arti-socks-proxy.service enabled and running."
+  fi
+else
+  warn "socat not found; skipping installation of arti-socks-proxy.service"
+fi
+
+# Clean up bundled systemd templates after use to keep ${SCRIPT_DIR} tidy when installed under /usr/local/bin
+if [[ -d "${SCRIPT_DIR}/systemd" ]]; then
+  log "Removing bundled systemd templates from ${SCRIPT_DIR}/systemd"
+  rm -rf "${SCRIPT_DIR}/systemd" || warn "failed to remove ${SCRIPT_DIR}/systemd"
 fi
 
 log "arti.service installed, enabled, and running."

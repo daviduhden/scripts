@@ -1,6 +1,5 @@
 # Tor user service (Arti) — systemd unit file
 #
-# Copyright (c) 2024 David Uhden Collado <david@uhden.dev>
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
 
