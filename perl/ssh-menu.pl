@@ -20,12 +20,12 @@ my $CYAN = "\e[36m";
 my $BOLD = "\e[1m";
 my $RESET = "\e[0m";
 
-sub log {
+sub log_info {
     my ($msg) = @_;
     print "${GREEN}✅ [INFO]${RESET} $msg\n";
 }
 
-sub warn {
+sub warn_info {
     my ($msg) = @_;
     print STDERR "${YELLOW}⚠️ [WARN]${RESET} $msg\n";
 }
@@ -36,10 +36,6 @@ sub error {
     print STDERR "${RED}❌ [ERROR]${RESET} $msg\n";
     exit $code;
 }
-
-# Backward-compatible aliases
-sub info     { log(@_); }
-sub warn_msg { warn(@_); }
 
 my $known_hosts = $ENV{SSH_MENU_KNOWN_HOSTS} // "$ENV{HOME}/.ssh/known_hosts";
 
@@ -68,7 +64,7 @@ if ($ksshaskpass) {
     $ENV{SSH_ASKPASS}         = $ksshaskpass;
     $ENV{SSH_ASKPASS_REQUIRE} = 'prefer';  # or 'force' if you want always GUI
 } else {
-    warn_msg('ksshaskpass not found in PATH; continuing without SSH_ASKPASS');
+    warn_info('ksshaskpass not found in PATH; continuing without SSH_ASKPASS');
 }
 
 #######################################
@@ -154,7 +150,7 @@ if ( !@entries ) {
 
 @entries = sort { lc $a->{display} cmp lc $b->{display} } @entries;
 
-warn_msg("Skipped $hashed_count hashed known_hosts entries.") if $hashed_count > 0;
+warn_info("Skipped $hashed_count hashed known_hosts entries.") if $hashed_count > 0;
 
 ##########################################
 # 3. Interactive menu to choose a server #
@@ -174,7 +170,7 @@ while (1) {
     defined $input or error("Input closed.");
     chomp $input;
     if ( $input =~ /^[qQ]$/ ) {
-        info("Exiting.");
+        log_info("Exiting.");
         exit 0;
     }
 
@@ -183,7 +179,7 @@ while (1) {
     my $num = int($input);
 
     if ( $num == scalar(@entries) + 1 ) {
-        info("Exiting.");
+        log_info("Exiting.");
         exit 0;
     }
 
@@ -192,7 +188,7 @@ while (1) {
         last;
     }
 
-    warn_msg("Invalid option. Please try again.");
+    warn_info("Invalid option. Please try again.");
 }
 
 my $selected_host    = $entries[$selected_idx]{host};
@@ -230,10 +226,10 @@ if ( $ssh_user =~ /^\s+$/ ) {
 
 my @cmd;
 if ($selected_port) {
-    info("Connecting to $ssh_user\@$selected_host (port $selected_port)...");
+    log_info("Connecting to $ssh_user\@$selected_host (port $selected_port)...");
     @cmd = ('ssh', '-p', $selected_port, "$ssh_user\@$selected_host");
 } else {
-    info("Connecting to $ssh_user\@$selected_host ...");
+    log_info("Connecting to $ssh_user\@$selected_host ...");
     @cmd = ('ssh', "$ssh_user\@$selected_host");
 }
 

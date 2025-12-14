@@ -29,26 +29,22 @@ my $RESET = "\e[0m";
 # Error / log #
 ###############
 
-sub log {
+sub log_info {
     my ($msg) = @_;
-    printf "%s ✅ %s\n", "${GREEN}[INFO]${RESET}", $msg;
+    print "${GREEN}[INFO]${RESET} ✅ $msg\n";
 }
 
-sub warn {
+sub warn_info {
     my ($msg) = @_;
-    printf STDERR "%s ⚠️ %s\n", "${YELLOW}[WARN]${RESET}", $msg;
+    print STDERR "${YELLOW}[WARN]${RESET} ⚠️ $msg\n";
 }
 
 sub error {
     my ($msg, $code) = @_;
     $code //= 1;
-    printf STDERR "%s ❌ %s\n", "${RED}[ERROR]${RESET}", $msg;
+    print STDERR "${RED}[ERROR]${RESET} ❌ $msg\n";
     exit $code;
 }
-
-# Backward-compatible aliases
-sub warn_msg { warn(@_); }
-sub log_info { log(@_); }
 
 ########################
 # Global configuration #
@@ -180,11 +176,11 @@ sub run_cmd {
     my (@cmd) = @_;
     system(@cmd);
     if ($? == -1) {
-        warn_msg("Failed to execute '@cmd': $!");
+        warn_info("Failed to execute '@cmd': $!");
         return 0;
     } elsif ($? != 0) {
         my $code = $? >> 8;
-        warn_msg("Command '@cmd' exited with code $code");
+        warn_info("Command '@cmd' exited with code $code");
         return 0;
     }
     return 1;
@@ -213,7 +209,7 @@ sub install_gpg_conf_from_dir {
     my $src_dir = './gpg-conf';
     return 1 unless -d $src_dir;
 
-    print "\nFound $src_dir; installing config files into \$HOME/.gnupg ...\n";
+    log_info("Found $src_dir; installing config files into \$HOME/.gnupg ...");
 
     my $gnupg_dir = "$ENV{HOME}/.gnupg";
 
@@ -235,17 +231,17 @@ sub install_gpg_conf_from_dir {
                 my $ts = time;
                 $backup = "$dest.bak.$ts";
             }
-            print "Backing up existing $dest to $backup\n";
+            log_info("Backing up existing $dest to $backup");
             rename $dest, $backup or error("Cannot rename $dest to $backup: $!");
         }
 
-        print "Copying $src -> $dest\n";
+        log_info("Copying $src -> $dest");
         copy($src, $dest) or error("Cannot copy $src to $dest: $!");
         chmod 0600, $dest;
     }
     closedir($dh);
 
-    print "GnuPG configuration from $src_dir installed into $gnupg_dir.\n";
+    log_info("GnuPG configuration from $src_dir installed into $gnupg_dir.");
     return 1;
 }
 
@@ -295,7 +291,7 @@ sub install_gnupg_debian_like {
 
     # Only amd64/i386 supported by upstream repo
     if ($arch !~ /^(amd64|i386)$/) {
-        print "Architecture '$arch' not supported by official GnuPG repo; using distro gnupg instead.\n";
+        log_info("Architecture '$arch' not supported by official GnuPG repo; using distro gnupg instead.");
         run_pkg('apt-get', 'update') or error("apt-get update failed.");
         run_pkg('apt-get', 'install', '-y', 'gnupg') or error("Failed to install gnupg via apt-get.");
         return;
@@ -319,7 +315,7 @@ sub install_gnupg_debian_like {
         if ($codename =~ /^(bookworm|trixie)$/) {
             $base_suite = $codename;
         } else {
-            print "Debian codename '$codename' not covered by official GnuPG repo; using distro gnupg.\n";
+            log_info("Debian codename '$codename' not covered by official GnuPG repo; using distro gnupg.");
             run_pkg('apt-get', 'update') or error("apt-get update failed.");
             run_pkg('apt-get', 'install', '-y', 'gnupg') or error("Failed to install gnupg via apt-get.");
             return;
@@ -328,7 +324,7 @@ sub install_gnupg_debian_like {
         if ($codename =~ /^(jammy|noble|plucky)$/) {
             $base_suite = $codename;
         } else {
-            print "Ubuntu codename '$codename' not covered by official GnuPG repo; using distro gnupg.\n";
+            log_info("Ubuntu codename '$codename' not covered by official GnuPG repo; using distro gnupg.");
             run_pkg('apt-get', 'update') or error("apt-get update failed.");
             run_pkg('apt-get', 'install', '-y', 'gnupg') or error("Failed to install gnupg via apt-get.");
             return;
@@ -337,13 +333,13 @@ sub install_gnupg_debian_like {
         if ($codename eq 'daedalus') {
             $base_suite = $codename;
         } else {
-            print "Devuan codename '$codename' not covered by official GnuPG repo; using distro gnupg.\n";
+            log_info("Devuan codename '$codename' not covered by official GnuPG repo; using distro gnupg.");
             run_pkg('apt-get', 'update') or error("apt-get update failed.");
             run_pkg('apt-get', 'install', '-y', 'gnupg') or error("Failed to install gnupg via apt-get.");
             return;
         }
     } else {
-        print "ID '$id' is not a direct Debian/Ubuntu/Devuan system; using distro gnupg.\n";
+        log_info("ID '$id' is not a direct Debian/Ubuntu/Devuan system; using distro gnupg.");
         run_pkg('apt-get', 'update') or error("apt-get update failed.");
         run_pkg('apt-get', 'install', '-y', 'gnupg') or error("Failed to install gnupg via apt-get.");
         return;
@@ -354,12 +350,12 @@ sub install_gnupg_debian_like {
     # Branch selection (stable/devel)
     if ($gnupg_branch_cli ne '') {
         $chosen_branch = $gnupg_branch_cli;
-        print "Using GnuPG upstream $chosen_branch branch for $id (set via --gnupg-branch).\n";
+        log_info("Using GnuPG upstream $chosen_branch branch for $id (set via --gnupg-branch).");
     } else {
         if ($id eq 'debian') {
             # Default devel for Debian, non-interactive
             $chosen_branch = 'devel';
-            print "Using GnuPG upstream development repository for Debian (default): ${base_suite}-devel\n";
+            log_info("Using GnuPG upstream development repository for Debian (default): ${base_suite}-devel");
         } else {
             # Ubuntu/Devuan interactive prompt
             print "Select GnuPG upstream repository branch for $id ($codename):\n";
@@ -372,13 +368,13 @@ sub install_gnupg_debian_like {
 
             if ($ans =~ /^(d|devel|development)$/i) {
                 $chosen_branch = 'devel';
-                print "Using development repository branch: ${base_suite}-devel\n";
+                log_info("Using development repository branch: ${base_suite}-devel");
             } elsif ($ans =~ /^(s|stable)?$/i) {
                 $chosen_branch = 'stable';
-                print "Using stable repository branch: $base_suite\n";
+                log_info("Using stable repository branch: $base_suite");
             } else {
                 $chosen_branch = 'stable';
-                print "Unrecognized answer '$ans'; defaulting to stable branch: $base_suite\n";
+                warn_info("Unrecognized answer '$ans'; defaulting to stable branch: $base_suite");
             }
         }
     }
@@ -386,11 +382,11 @@ sub install_gnupg_debian_like {
     if    ($chosen_branch eq 'devel')  { $suite = "$base_suite-devel"; }
     elsif ($chosen_branch eq 'stable' || $chosen_branch eq '') { $suite = $base_suite; }
     else {
-        print "Internal warning: unknown chosen_branch '$chosen_branch'; defaulting to stable branch: $base_suite\n";
+        warn_info("Internal warning: unknown chosen_branch '$chosen_branch'; defaulting to stable branch: $base_suite");
         $suite = $base_suite;
     }
 
-    print "Using official GnuPG upstream repository for $id (suite: $suite) on $arch.\n";
+    log_info("Using official GnuPG upstream repository for $id (suite: $suite) on $arch.");
 
     # Ensure curl and gpg available
     unless (find_in_path('curl')) {
@@ -405,7 +401,7 @@ sub install_gnupg_debian_like {
     my $keyring = '/usr/share/keyrings/gnupg-keyring.gpg';
     my $key_url = "https://repos.gnupg.org/deb/gnupg/${suite}/gnupg-signing-key.gpg";
 
-    print "Fetching GnuPG signing key from ${key_url} ...\n";
+    log_info("Fetching GnuPG signing key from ${key_url} ...");
 
     my $sudo_prefix = '';
     if ($SUDO && $> != 0) {
@@ -420,13 +416,13 @@ sub install_gnupg_debian_like {
 
     # chmod a+r keyring
     if ($> == 0) {
-        chmod 0644, $keyring or warn_msg("Warning: chmod a+r $keyring failed: $!");
+        chmod 0644, $keyring or warn_info("Warning: chmod a+r $keyring failed: $!");
     } else {
         run_cmd($SUDO, 'chmod', 'a+r', $keyring)
-          or warn_msg("Warning: chmod a+r $keyring via $SUDO failed.");
+          or warn_info("Warning: chmod a+r $keyring via $SUDO failed.");
     }
 
-    print "Writing /etc/apt/sources.list.d/gnupg.sources ...\n";
+    log_info("Writing /etc/apt/sources.list.d/gnupg.sources ...");
 
     my $sources_content = <<"EOF";
 Types: deb
@@ -454,10 +450,10 @@ EOF
         unlink $tmp_sources;
     }
 
-    print "Updating APT index (including official GnuPG repo)...\n";
+    log_info("Updating APT index (including official GnuPG repo)...");
     run_pkg('apt-get', 'update') or error("apt-get update failed.");
 
-    print "Installing gnupg from official GnuPG repo (branch: $suite)...\n";
+    log_info("Installing gnupg from official GnuPG repo (branch: $suite)...");
     if (!run_pkg('apt-get', 'install', '-y', '-t', $suite, 'gnupg2')) {
         if (!run_pkg('apt-get', 'install', '-y', '-t', $suite, 'gnupg')) {
             run_pkg('apt-get', 'install', '-y', 'gnupg')
@@ -564,7 +560,7 @@ sub install_gnupg_linux {
 sub install_gnupg_macos {
     log_info("Detected macOS.");
     if ($> == 0) {
-        print "Warning: Homebrew is normally installed as a regular user, not root.\n";
+        warn_info("Homebrew is normally installed as a regular user, not root.");
     }
 
     my $brew = find_in_path('brew');
@@ -654,9 +650,9 @@ find_in_path('gpg') or error("gpg binary not found. Please ensure GnuPG is insta
 install_gpg_conf_from_dir();
 
 if ($install_only) {
-    print "Install-only mode: GnuPG is installed and available as 'gpg'.\n";
-    print "Config files from ./gpg-conf were installed into ~/.gnupg/ (if present).\n";
-    print "No keys were generated.\n";
+    log_info("Install-only mode: GnuPG is installed and available as 'gpg'.");
+    log_info("Config files from ./gpg-conf were installed into ~/.gnupg/ (if present).");
+    log_info("No keys were generated.");
     exit 0;
 }
 
@@ -664,7 +660,7 @@ if ($install_only) {
 # PQC / Kyber detection #
 #########################
 
-print "\nChecking for Kyber (post-quantum) support in this GnuPG build...\n";
+log_info("Checking for Kyber (post-quantum) support in this GnuPG build...");
 
 my $gpg_version = qx(gpg --version 2>/dev/null);
 my $kyber_supported = 0;
@@ -676,7 +672,7 @@ if ($gpg_version =~ /(Kyber(?:512|768|1024)|X25519\+Kyber|X448\+Kyber)/i) {
 }
 
 if ($force_no_pqc) {
-    print "PQC support explicitly disabled via --no-pqc.\n";
+    log_info("PQC support explicitly disabled via --no-pqc.");
     $kyber_supported = 0;
 }
 
@@ -685,9 +681,9 @@ if (!$kyber_supported && $force_pqc_only) {
 }
 
 if ($kyber_supported) {
-    print "Kyber/PQC algorithms detected in this GnuPG build.\n";
+    log_info("Kyber/PQC algorithms detected in this GnuPG build.");
 } else {
-    print "No Kyber/PQC algorithms detected in this GnuPG build.\n";
+    log_info("No Kyber/PQC algorithms detected in this GnuPG build.");
 }
 
 my $generate_pqc = 0;
@@ -704,11 +700,11 @@ if ($force_pqc_only) {
 
 print "\n";
 if ($generate_pqc && $generate_rsa) {
-    print "Key generation plan: ECC+Kyber (PQC) key + RSA 4096-bit compatibility key.\n";
+    log_info("Key generation plan: ECC+Kyber (PQC) key + RSA 4096-bit compatibility key.");
 } elsif ($generate_pqc) {
-    print "Key generation plan: ECC+Kyber (PQC) key only (no RSA compatibility key).\n";
+    log_info("Key generation plan: ECC+Kyber (PQC) key only (no RSA compatibility key).");
 } else {
-    print "Key generation plan: RSA 4096-bit key only.\n";
+    log_info("Key generation plan: RSA 4096-bit key only.");
 }
 
 ####################
@@ -729,7 +725,7 @@ my $user_email;
 
 if ($name_override) {
     $user_name = $name_override;
-    print "Using provided name: $user_name\n";
+    log_info("Using provided name: $user_name");
 } else {
     print "Real name [$default_user_name]: ";
     my $input = <STDIN>;
@@ -740,7 +736,7 @@ if ($name_override) {
 
 if ($email_override) {
     $user_email = $email_override;
-    print "Using provided email: $user_email\n";
+    log_info("Using provided email: $user_email");
 } else {
     print "Email address [$default_user_email]: ";
     my $input = <STDIN>;
@@ -784,7 +780,7 @@ sub key_fingerprint {
 
 # 1) PQC key
 if ($generate_pqc) {
-    print "\nGenerating a composite ECC+Kyber (PQC) key (no expiry, no passphrase)...\n";
+    log_info("Generating a composite ECC+Kyber (PQC) key (no expiry, no passphrase)...");
     my @cmd = (
         'gpg', '--batch', '--yes',
         '--pinentry-mode', 'loopback',
@@ -797,21 +793,21 @@ if ($generate_pqc) {
             $pqc_fpr = key_fingerprint($pqc_key_id);
         }
     } else {
-        print STDERR "Warning: GnuPG appears to support Kyber, but PQC key generation failed.\n";
+        warn_info("GnuPG appears to support Kyber, but PQC key generation failed.");
         $pqc_key_id   = '';
         $pqc_fpr      = '';
         $generate_pqc = 0;
         if ($force_pqc_only) {
             error("PQC key generation failed and --pqc-only was requested. No RSA fallback will be created.");
         } else {
-            print "Continuing with RSA key generation only.\n";
+            log_info("Continuing with RSA key generation only.");
         }
     }
 }
 
 # 2) RSA key
 if ($generate_rsa) {
-    print "\nGenerating an RSA 4096-bit key (no expiry, no passphrase) for compatibility...\n";
+    log_info("Generating an RSA 4096-bit key (no expiry, no passphrase) for compatibility...");
 
     my $tmpdir = $ENV{TMPDIR} || '/tmp';
     my $conf   = "$tmpdir/gpg-key-rsa-$$.conf";
@@ -852,20 +848,20 @@ $primary_key_id or error("Could not determine any key ID for usage examples; key
 
 print "\n";
 if ($generate_pqc && $pqc_key_id && $generate_rsa && $rsa_key_id) {
-    print "New composite ECC+Kyber (PQC) key created:\n";
-    print "  Key ID:       $pqc_key_id\n";
-    print "  Fingerprint:  $pqc_fpr\n" if $pqc_fpr;
-    print "\nAdditional RSA 4096-bit compatibility key created:\n";
-    print "  Key ID:       $rsa_key_id\n";
-    print "  Fingerprint:  $rsa_fpr\n" if $rsa_fpr;
+    log_info("New composite ECC+Kyber (PQC) key created:");
+    log_info("  Key ID:       $pqc_key_id");
+    log_info("  Fingerprint:  $pqc_fpr") if $pqc_fpr;
+    log_info("Additional RSA 4096-bit compatibility key created:");
+    log_info("  Key ID:       $rsa_key_id");
+    log_info("  Fingerprint:  $rsa_fpr") if $rsa_fpr;
 } elsif ($generate_pqc && $pqc_key_id) {
-    print "New composite ECC+Kyber (PQC) key created:\n";
-    print "  Key ID:       $pqc_key_id\n";
-    print "  Fingerprint:  $pqc_fpr\n" if $pqc_fpr;
+    log_info("New composite ECC+Kyber (PQC) key created:");
+    log_info("  Key ID:       $pqc_key_id");
+    log_info("  Fingerprint:  $pqc_fpr") if $pqc_fpr;
 } elsif ($generate_rsa && $rsa_key_id) {
-    print "New RSA 4096-bit key created:\n";
-    print "  Key ID:       $rsa_key_id\n";
-    print "  Fingerprint:  $rsa_fpr\n" if $rsa_fpr;
+    log_info("New RSA 4096-bit key created:");
+    log_info("  Key ID:       $rsa_key_id");
+    log_info("  Fingerprint:  $rsa_fpr") if $rsa_fpr;
 } else {
     error("Key generation did not produce any usable keys.");
 }
@@ -882,18 +878,20 @@ sub upload_keys_to_keyserver {
     push @keys, $rsa_fpr if $rsa_fpr;
 
     unless (@keys) {
-        print "\nNo fingerprints available to upload to $keyserver.\n";
+        print "\n";
+        log_info("No fingerprints available to upload to $keyserver.");
         return;
     }
 
-    print "\nUploading generated keys to $keyserver:\n";
-    print "  @keys\n";
+    print "\n";
+    log_info("Uploading generated keys to $keyserver:");
+    log_info("  @keys");
 
     if (!run_cmd('gpg', '--keyserver', $keyserver, '--send-keys', @keys)) {
-        print STDERR "Warning: failed to upload keys to $keyserver\n";
+        warn_info("Failed to upload keys to $keyserver");
     } else {
-        print "Keys successfully submitted to $keyserver.\n";
-        print "Note: keys.openpgp.org require email verification before your UID appears as 'published'.\n";
+        log_info("Keys successfully submitted to $keyserver.");
+        log_info("Note: keys.openpgp.org require email verification before your UID appears as 'published'.");
     }
 }
 
@@ -903,15 +901,16 @@ upload_keys_to_keyserver();
 # Final instructions #
 ######################
 
-print "\nIMPORTANT:\n";
+print "\n";
+log_info("IMPORTANT:");
 if ($generate_pqc && $pqc_key_id && $generate_rsa && $rsa_key_id) {
-    print "  Both the ECC+Kyber key and the RSA key currently have NO passphrase.\n";
+    log_info("  Both the ECC+Kyber key and the RSA key currently have NO passphrase.");
 } elsif ($generate_pqc && $pqc_key_id) {
-    print "  The ECC+Kyber key currently has NO passphrase.\n";
+    log_info("  The ECC+Kyber key currently has NO passphrase.");
 } elsif ($generate_rsa && $rsa_key_id) {
-    print "  This RSA key currently has NO passphrase.\n";
+    log_info("  This RSA key currently has NO passphrase.");
 }
-print "  For better security, you should set a passphrase on the key(s) you actually use:\n";
+log_info("  For better security, you should set a passphrase on the key(s) you actually use:");
 print "    gpg --edit-key $pqc_key_id\n    gpg> passwd\n" if $generate_pqc && $pqc_key_id;
 print "    gpg --edit-key $rsa_key_id\n    gpg> passwd\n" if $generate_rsa && $rsa_key_id;
 print "\n";
@@ -938,4 +937,4 @@ Otherwise they use your RSA 4096-bit key.)
 
 EOF
 
-print "Done.\n";
+log_info("Done.");
