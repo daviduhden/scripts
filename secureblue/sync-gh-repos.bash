@@ -20,10 +20,17 @@ OWNER="${OWNER:-daviduhden}"
 DEFAULT_BASE_DIR="/var/home/david/git"
 NON_INTERACTIVE=0
 
-GREEN="\e[32m"
-YELLOW="\e[33m"
-RED="\e[31m"
-RESET="\e[0m"
+if [ -t 1 ] && [ "${NO_COLOR:-0}" != "1" ]; then
+  GREEN="\033[32m"
+  YELLOW="\033[33m"
+  RED="\033[31m"
+  RESET="\033[0m"
+else
+  GREEN=""
+  YELLOW=""
+  RED=""
+  RESET=""
+fi
 
 log()    { printf '%s %b[INFO]%b ✅ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$GREEN" "$RESET" "$*"; }
 warn()   { printf '%s %b[WARN]%b ⚠️ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$YELLOW" "$RESET" "$*"; }
@@ -62,6 +69,20 @@ copy_from_backup_excluding_git() {
   # Copy everything (including dotfiles) except .git from backup into target.
   # Using tar keeps permissions reasonably intact and avoids requiring rsync.
   tar --exclude='./.git' -C "$backup_dir" -cf - . | tar -C "$target_dir" -xf -
+}
+
+repo_has_content() {
+  local dir="$1"
+
+  [ -d "$dir" ] || return 1
+
+  if find "$dir" \
+    \( -path "$dir/.git" -o -path "$dir/.git/*" -o -path "$dir/.github" -o -path "$dir/.github/*" \) -prune \
+    -o -mindepth 1 -print -quit | grep -q .; then
+    return 0
+  fi
+
+  return 1
 }
 
 main() {
@@ -144,6 +165,17 @@ EOF
     git clone "$ssh_url" "$target"
     if [ -n "${default_branch:-}" ]; then
       git -C "$target" checkout "$default_branch" || true
+    fi
+
+    if ! repo_has_content "$target"; then
+      warn "Repository $name appears empty; skipping sync."
+      rm -rf -- "$target"
+      if [ -n "${backup_dir:-}" ] && [ -d "$backup_dir" ]; then
+        warn "Restoring previous directory for $name from $backup_dir"
+        mv -- "$backup_dir" "$target" 2>/dev/null || true
+      fi
+      trap - ERR
+      continue
     fi
 
     if [ -n "${backup_dir:-}" ] && [ -d "$backup_dir" ]; then

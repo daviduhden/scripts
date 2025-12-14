@@ -29,22 +29,26 @@ my $RESET = "\e[0m";
 # Error / log #
 ###############
 
+sub log {
+    my ($msg) = @_;
+    printf "%s ✅ %s\n", "${GREEN}[INFO]${RESET}", $msg;
+}
+
+sub warn {
+    my ($msg) = @_;
+    printf STDERR "%s ⚠️  %s\n", "${YELLOW}[WARN]${RESET}", $msg;
+}
+
 sub error {
     my ($msg, $code) = @_;
     $code //= 1;
-    print STDERR "${RED}❌ [ERROR]${RESET} $msg\n";
+    printf STDERR "%s ❌ %s\n", "${RED}[ERROR]${RESET}", $msg;
     exit $code;
 }
 
-sub warn_msg {
-    my ($msg) = @_;
-    print STDERR "${YELLOW}⚠️  [WARN]${RESET} $msg\n";
-}
-
-sub log_info {
-    my ($msg) = @_;
-    print "${GREEN}✅ [INFO]${RESET} $msg\n";
-}
+# Backward-compatible aliases
+sub warn_msg { warn(@_); }
+sub log_info { log(@_); }
 
 ########################
 # Global configuration #

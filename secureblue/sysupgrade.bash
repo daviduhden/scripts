@@ -49,10 +49,17 @@ run_as_user() {
 }
 
 # Simple colors for messages
-GREEN="\e[32m"
-YELLOW="\e[33m"
-RED="\e[31m"
-RESET="\e[0m"
+if [ -t 1 ] && [ "${NO_COLOR:-0}" != "1" ]; then
+  GREEN="\033[32m"
+  YELLOW="\033[33m"
+  RED="\033[31m"
+  RESET="\033[0m"
+else
+  GREEN=""
+  YELLOW=""
+  RED=""
+  RESET=""
+fi
 
 log()    { printf '%s %b[INFO]%b ✅ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$GREEN" "$RESET" "$*"; }
 warn()   { printf '%s %b[WARN]%b ⚠️ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$YELLOW" "$RESET" "$*"; }
@@ -174,19 +181,18 @@ update_homebrew() {
   PREFIX_GID="$(stat -c '%g' "$BREW_PREFIX" 2>/dev/null || printf '')"
 
   if [[ -z "$PREFIX_UID" || -z "$PREFIX_GID" ]]; then
-    warn "Could not read UID/GID for '$BREW_PREFIX'; running brew as root (not ideal)."
-    brew update   || warn "brew update failed (continuing)."
-    brew upgrade  || warn "brew upgrade failed (continuing)."
-    brew cleanup  || warn "brew cleanup failed (continuing)."
+    warn "Could not read UID/GID for '$BREW_PREFIX'; skipping Homebrew update to avoid running as root."
     return
   fi
 
   BREW_USER="$(getent passwd "$PREFIX_UID" | cut -d: -f1 || true)"
   if [[ -z "${BREW_USER:-}" ]]; then
-    warn "Could not map UID=$PREFIX_UID to a username; running brew as root (not ideal)."
-    brew update   || warn "brew update failed (continuing)."
-    brew upgrade  || warn "brew upgrade failed (continuing)."
-    brew cleanup  || warn "brew cleanup failed (continuing)."
+    warn "Could not map UID=$PREFIX_UID to a username; skipping Homebrew update to avoid running as root."
+    return
+  fi
+
+  if [[ "$BREW_USER" == "root" ]]; then
+    warn "Homebrew prefix at '$BREW_PREFIX' is owned by root; skipping Homebrew update because running brew as root is unsafe."
     return
   fi
 
@@ -196,10 +202,7 @@ update_homebrew() {
     run_as_user "$BREW_USER" brew upgrade  || warn "brew upgrade failed (continuing)."
     run_as_user "$BREW_USER" brew cleanup  || warn "brew cleanup failed (continuing)."
   else
-    warn "'runuser' not available; running brew as root (not ideal)."
-    brew update   || warn "brew update failed (continuing)."
-    brew upgrade  || warn "brew upgrade failed (continuing)."
-    brew cleanup  || warn "brew cleanup failed (continuing)."
+    warn "'runuser' not available; skipping Homebrew update to avoid running as root."
   fi
 }
 
@@ -428,7 +431,7 @@ collect_system_info_and_upload() {
           # Run brew as the primary non-root user
           $run_user brew list --versions
         else
-          brew list --versions
+          warn "Skipping brew list --versions because running brew as root is unsafe."
         fi
       else
         printf 'brew not available.\n'
@@ -489,7 +492,7 @@ collect_system_info_and_upload() {
           # Run brew services as the primary non-root user
           $run_user brew services info --all
         else
-          brew services info --all
+          warn "Skipping brew services info --all because running brew as root is unsafe."
         fi
       else
         printf 'brew not available.\n'
@@ -537,8 +540,8 @@ main() {
   update_homebrew
   update_flatpak
   maintain_filesystems
-  collect_system_info_and_upload
   run_security_audit
+  collect_system_info_and_upload
 
   log "Update process completed."
 }

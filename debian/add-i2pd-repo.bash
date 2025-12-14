@@ -1,4 +1,9 @@
 #!/bin/bash
+
+if [[ -z "${ZSH_VERSION:-}" ]] && command -v zsh >/dev/null 2>&1; then
+    exec zsh "$0" "$@"
+fi
+
 set -euo pipefail
 
 # This script adds the Purple I2P APT repository,
@@ -11,6 +16,7 @@ set -euo pipefail
 #
 # Supported (based on current published repos):
 #   Debian/Raspbian: bookworm, trixie, sid (raspbian uses <release>-rpi)
+#   Ubuntu: jammy, noble
 #   Devuan:
 #     - daedalus  -> Debian bookworm
 #     - excalibur -> Debian trixie
@@ -18,15 +24,21 @@ set -euo pipefail
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
 
-# Basic PATH (important when run from cron)
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
 # Simple colors for messages
-GREEN="\e[32m"
-YELLOW="\e[33m"
-RED="\e[31m"
-RESET="\e[0m"
+if [ -t 1 ] && [ "${NO_COLOR:-0}" != "1" ]; then
+    GREEN="\033[32m"
+    YELLOW="\033[33m"
+    RED="\033[31m"
+    RESET="\033[0m"
+else
+    GREEN=""
+    YELLOW=""
+    RED=""
+    RESET=""
+fi
 
 log()    { printf '%s %b[INFO]%b ✅ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$GREEN" "$RESET" "$*"; }
 warn()   { printf '%s %b[WARN]%b ⚠️ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$YELLOW" "$RESET" "$*"; }
@@ -45,45 +57,101 @@ require_cmd() {
     fi
 }
 
-# Ensure we run as root
-if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
-    error "This script must be run as root. Try: sudo $0"
-fi
-
-require_cmd curl
-require_cmd dpkg
-require_cmd ps
-
 # Wrapper for curl
 net_curl() {
     curl -fLsS --retry 5 "$@"
 }
 
-# Detect apt/apt-get
-if command -v apt-get >/dev/null 2>&1; then
-    APT_CMD="apt-get"
-elif command -v apt >/dev/null 2>&1; then
-    APT_CMD="apt"
-else
-    error "neither 'apt-get' nor 'apt' is available. This script supports only Debian-like/Ubuntu-like systems."
-fi
+main() {
+    # Ensure we run as root
+    if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+        error "This script must be run as root. Try: sudo $0"
+    fi
 
-# Load system release information
-if [[ -r /etc/os-release ]]; then
-    # shellcheck disable=SC1091
-    . /etc/os-release
-else
-    error "/etc/os-release not found. Cannot detect distribution."
-fi
+    require_cmd curl
+    require_cmd dpkg
+    require_cmd ps
 
-DIST="${ID:-}"
+    # Detect apt/apt-get
+    if command -v apt-get >/dev/null 2>&1; then
+        APT_CMD="apt-get"
+    elif command -v apt >/dev/null 2>&1; then
+        APT_CMD="apt"
+    else
+        error "neither 'apt-get' nor 'apt' is available. This script supports only Debian-like/Ubuntu-like systems."
+    fi
 
-if [[ "$DIST" == "ubuntu" || "${ID_LIKE:-}" == *"ubuntu"* ]]; then
-    error "Ubuntu/Ubuntu-like distributions are not supported; use Debian/Devuan bookworm or newer."
-fi
-if [[ "${ID_LIKE:-}" != *"debian"* && "$DIST" != "debian" && "$DIST" != "devuan" && "$DIST" != "raspbian" ]]; then
-    error "This installer supports Debian/Devuan-based systems (bookworm or newer)."
-fi
+    # Load system release information
+    if [[ -r /etc/os-release ]]; then
+        # shellcheck disable=SC1091
+        . /etc/os-release
+    else
+        error "/etc/os-release not found. Cannot detect distribution."
+    fi
+
+    DIST="${ID:-}"
+
+    if [[ "$DIST" != "debian" && "$DIST" != "devuan" && "$DIST" != "raspbian" && "$DIST" != "ubuntu" && "${ID_LIKE:-}" == *"ubuntu"* ]]; then
+        DIST="ubuntu"
+    fi
+
+    if [[ "${ID_LIKE:-}" != *"debian"* && "${ID_LIKE:-}" != *"ubuntu"* && "$DIST" != "debian" && "$DIST" != "devuan" && "$DIST" != "raspbian" && "$DIST" != "ubuntu" ]]; then
+        error "This installer supports Debian/Devuan/Ubuntu-based systems (bookworm or newer)."
+    fi
+
+    get_release
+    detect_arch_filter
+    ensure_base_dependencies
+
+    # Compute repo release codename (Raspbian uses <release>-rpi)
+    REPO_RELEASE="$RELEASE"
+    if [[ "$DIST" == "raspbian" ]]; then
+        REPO_RELEASE="${RELEASE}-rpi"
+    fi
+
+    log "Detected distribution: ${DIST}"
+    log "Detected release codename: ${RELEASE}"
+    log "Using repo release codename: ${REPO_RELEASE}"
+    log "Using native APT architecture: ${ARCH_FILTER}"
+
+    log "Importing signing key..."
+    install -d -m 0755 /usr/share/keyrings
+    net_curl https://repo.i2pd.xyz/r4sas.gpg | gpg --dearmor -o /usr/share/keyrings/purplei2p.gpg
+
+    log "Writing APT deb822 sources file for Purple I2P..."
+    rm -f /etc/apt/sources.list.d/purplei2p.list
+    cat > /etc/apt/sources.list.d/purplei2p.sources <<EOF
+Types: deb
+URIs: https://repo.i2pd.xyz/${DIST}
+Suites: ${REPO_RELEASE}
+Components: main
+Architectures: ${ARCH_FILTER}
+Signed-By: /usr/share/keyrings/purplei2p.gpg
+EOF
+
+    # Optional deb-src stanza, disabled by default. Set Enabled: yes to use.
+    cat >> /etc/apt/sources.list.d/purplei2p.sources <<EOF
+
+Enabled: no
+Types: deb-src
+URIs: https://repo.i2pd.xyz/${DIST}
+Suites: ${REPO_RELEASE}
+Components: main
+Architectures: ${ARCH_FILTER}
+Signed-By: /usr/share/keyrings/purplei2p.gpg
+EOF
+
+    log "Updating APT index..."
+    "$APT_CMD" update
+
+    log "Installing i2pd..."
+    "$APT_CMD" install -y i2pd
+
+    log "Enabling and starting i2pd service..."
+    enable_and_start_i2pd
+
+    log "Done. i2pd should now be installed and (where supported) enabled and running."
+}
 
 get_release() {
     case "$ID" in
@@ -130,21 +198,45 @@ get_release() {
             # DIST remains actual ID: debian or raspbian
             DIST="$ID"
             ;;
+        ############################
+        # Ubuntu and derivatives   #
+        ############################
+        ubuntu)
+            if [[ -n "${UBUNTU_CODENAME:-}" ]]; then
+                RELEASE="$UBUNTU_CODENAME"
+            elif [[ -n "${VERSION_CODENAME:-}" ]]; then
+                RELEASE="$VERSION_CODENAME"
+            else
+                error "couldn't find UBUNTU_CODENAME or VERSION_CODENAME in /etc/os-release."
+            fi
+            DIST="ubuntu"
+            ;;
         ###################################################
         # Other Debian-like systems (derivatives)         #
         ###################################################
         *)
-            if [[ -z "${ID_LIKE:-}" || "$ID_LIKE" != *"debian"* ]]; then
-                error "your system is not supported. Only Debian-like systems are supported."
+            if [[ -z "${ID_LIKE:-}" || ( "$ID_LIKE" != *"debian"* && "$ID_LIKE" != *"ubuntu"* ) ]]; then
+                error "your system is not supported. Only Debian/Ubuntu-like systems are supported."
             fi
 
-            DIST="debian"
-            if [[ -n "${DEBIAN_CODENAME:-}" ]]; then
-                RELEASE="$DEBIAN_CODENAME"
-            elif [[ -n "${VERSION_CODENAME:-}" ]]; then
-                RELEASE="$VERSION_CODENAME"
+            if [[ "$ID_LIKE" == *"ubuntu"* ]]; then
+                DIST="ubuntu"
+                if [[ -n "${UBUNTU_CODENAME:-}" ]]; then
+                    RELEASE="$UBUNTU_CODENAME"
+                elif [[ -n "${VERSION_CODENAME:-}" ]]; then
+                    RELEASE="$VERSION_CODENAME"
+                else
+                    error "couldn't find UBUNTU_CODENAME or VERSION_CODENAME for Ubuntu-like system."
+                fi
             else
-                error "couldn't find DEBIAN_CODENAME or VERSION_CODENAME for Debian-like system."
+                DIST="debian"
+                if [[ -n "${DEBIAN_CODENAME:-}" ]]; then
+                    RELEASE="$DEBIAN_CODENAME"
+                elif [[ -n "${VERSION_CODENAME:-}" ]]; then
+                    RELEASE="$VERSION_CODENAME"
+                else
+                    error "couldn't find DEBIAN_CODENAME or VERSION_CODENAME for Debian-like system."
+                fi
             fi
             ;;
     esac
@@ -161,6 +253,15 @@ get_release() {
                     ;;
                 *)
                     error "unsupported ${DIST} release codename '$RELEASE'. Supported: bookworm, trixie, sid."
+                    ;;
+            esac
+            ;;
+        ubuntu)
+            case "$RELEASE" in
+                jammy|noble)
+                    ;;
+                *)
+                    error "unsupported ubuntu release codename '$RELEASE'. Supported: jammy, noble."
                     ;;
             esac
             ;;
@@ -309,6 +410,8 @@ enable_and_start_i2pd() {
     warn "could not detect a known service manager (systemd, SysV, OpenRC, runit, s6, shepherd)."
     warn "i2pd is installed, but you must start and enable it manually."
 }
+
+main "$@"
 
 get_release
 detect_arch_filter
