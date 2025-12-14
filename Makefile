@@ -6,6 +6,7 @@
 
 PREFIX?=/usr/local
 BINDIR?=${PREFIX}/bin
+INFO?===> 
 
 DEBIAN_SCRIPTS=\
 	debian/add-gh-cli-repo.bash \
@@ -48,53 +49,61 @@ PERL_SCRIPTS=\
 .PHONY: install-debian install-openbsd install-secureblue install-shell install-shell-openbsd install-perl
 
 install-debian:
+	@echo "${INFO} Installing Debian helpers"
 	@install -d ${BINDIR}
 	@for f in ${DEBIAN_SCRIPTS}; do \
 		base=$${f##*/}; name=$${base%.bash}; \
-		printf 'Installing %s -> %s\n' "$$f" "${BINDIR}/$$name"; \
+		printf '%s Installing %s -> %s\n' "${INFO}" "$$f" "${BINDIR}/$$name"; \
 		install -m 0755 "$$f" "${BINDIR}/$$name"; \
 	done
+	@echo "${INFO} Debian helpers installed"
 
 install-openbsd:
+	@echo "${INFO} Installing OpenBSD helpers"
 	@install -d ${BINDIR}
 	@for f in ${OPENBSD_SCRIPTS}; do \
 		base=$${f##*/}; name=$${base%.ksh}; \
-		printf 'Installing %s -> %s\n' "$$f" "${BINDIR}/$$name"; \
+		printf '%s Installing %s -> %s\n' "${INFO}" "$$f" "${BINDIR}/$$name"; \
 		install -m 0755 "$$f" "${BINDIR}/$$name"; \
 	done
 	@wrapper="${BINDIR}/sudo-wrapper"; \
 	if [ -x "$$wrapper" ]; then \
 		ln -sf "$$wrapper" "${BINDIR}/sudo"; \
 		for link in sudo visudo sudoedit; do \
-			printf 'Symlinking %s -> %s\n' "${BINDIR}/$$link" "$$wrapper"; \
+			printf '%s Symlinking %s -> %s\n' "${INFO}" "${BINDIR}/$$link" "$$wrapper"; \
 			ln -sf "$$wrapper" "${BINDIR}/$$link"; \
 		done; \
 	fi
-	@printf 'Installing openbsd/sysclean -> %s\n' "${BINDIR}/sysclean"; \
+	@printf '%s Installing openbsd/sysclean -> %s\n' "${INFO}" "${BINDIR}/sysclean"; \
 	rm -rf "${BINDIR}/sysclean"; \
 	cp -R openbsd/sysclean "${BINDIR}/sysclean"; \
 	chmod -R a+rX "${BINDIR}/sysclean"
+	@echo "${INFO} OpenBSD helpers installed"
 
 install-secureblue:
+	@echo "${INFO} Installing secureblue helpers"
 	@install -d ${BINDIR}
 	@for f in ${SECUREBLUE_SCRIPTS}; do \
 		base=$${f##*/}; name=$${base%.bash}; \
-		printf 'Installing %s -> %s\n' "$$f" "${BINDIR}/$$name"; \
+		printf '%s Installing %s -> %s\n' "${INFO}" "$$f" "${BINDIR}/$$name"; \
 		install -m 0755 "$$f" "${BINDIR}/$$name"; \
 	done
 	@wrapper="${BINDIR}/sudo-wrapper"; \
 	if [ -x "$$wrapper" ]; then \
 		ln -sf "$$wrapper" "${BINDIR}/sudo"; \
 		for link in sudo visudo sudoedit; do \
-			printf 'Symlinking %s -> %s\n' "${BINDIR}/$$link" "$$wrapper"; \
+			printf '%s Symlinking %s -> %s\n' "${INFO}" "${BINDIR}/$$link" "$$wrapper"; \
 			ln -sf "$$wrapper" "${BINDIR}/$$link"; \
 		done; \
 	fi
+	@echo "${INFO} secureblue helpers installed"
 
 install-shell:
+	@echo "${INFO} Installing shell helpers"
 	@# Install global-vi-mode into /etc/profile.d
 	@run0 install -d /etc/profile.d
 	@run0 install -m 0644 shell/global-vi-mode.sh /etc/profile.d/global-vi-mode.sh
+	@echo "${INFO} Shell helpers installed"
 
 # OpenBSD does not ship /etc/profile.d; provide guidance instead of editing /etc/profile automatically.
 install-shell-openbsd:
