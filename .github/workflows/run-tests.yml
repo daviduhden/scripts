@@ -1,0 +1,26 @@
+name: Run script tests
+
+on:
+  push:
+    paths:
+      - '**/*.sh'
+      - '**/*.bash'
+      - '**/*.pl'
+  pull_request:
+    paths:
+      - '**/*.sh'
+      - '**/*.bash'
+      - '**/*.pl'
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run tests
+        run: make test
+        # The workflow lives in the scripts repository; Makefile target runs tests
+        working-directory: .
