@@ -3,22 +3,34 @@
 # If we are NOT already running under ksh93, try to re-exec with ksh93.
 # If ksh93 is not available, fall back to the base ksh (OpenBSD /bin/ksh).
 case "${KSH_VERSION-}" in
-    *93*) : ;;  # already ksh93
-    *)
-        if command -v ksh93 >/dev/null 2>&1; then
-            exec ksh93 "$0" "$@"
-        elif [ -x /usr/local/bin/ksh93 ]; then
-            exec /usr/local/bin/ksh93 "$0" "$@"
-        elif command -v ksh >/dev/null 2>&1; then
-            exec ksh "$0" "$@"
-        elif [ -x /bin/ksh ]; then
-            exec /bin/ksh "$0" "$@"
-        fi
-    ;;
+*93*) : ;; # already ksh93
+*)
+	if command -v ksh93 >/dev/null 2>&1; then
+		exec ksh93 "$0" "$@"
+	elif [ -x /usr/local/bin/ksh93 ]; then
+		exec /usr/local/bin/ksh93 "$0" "$@"
+	elif command -v ksh >/dev/null 2>&1; then
+		exec ksh "$0" "$@"
+	elif [ -x /bin/ksh ]; then
+		exec /bin/ksh "$0" "$@"
+	fi
+	;;
 esac
 
 set -eu
 
+# Source silent helper if available (prefer silent.ksh, fallback to silent)
+if [ -f "$(dirname "$0")/../lib/silent.ksh" ]; then
+	# shellcheck source=/dev/null
+	. "$(dirname "$0")/../lib/silent.ksh"
+	start_silence
+elif [ -f "$(dirname "$0")/../lib/silent" ]; then
+	# shellcheck source=/dev/null
+	. "$(dirname "$0")/../lib/silent"
+	start_silence
+fi
+
+# OpenBSD sudo-wrapper script
 # Compatibility shim that redirects sudo calls to doas and wraps visudo/sudoedit
 # to be executed via doas as well.
 #
@@ -42,107 +54,112 @@ set -eu
 # and license details.
 
 if [ -t 1 ] && [ "${NO_COLOR:-}" != "1" ]; then
-    GREEN="\033[32m"; YELLOW="\033[33m"; RED="\033[31m"; RESET="\033[0m"
+	GREEN="\033[32m"
+	YELLOW="\033[33m"
+	RED="\033[31m"
+	RESET="\033[0m"
 else
-    GREEN=""; YELLOW=""; RED=""; RESET=""
+	GREEN=""
+	YELLOW=""
+	RED=""
+	RESET=""
 fi
 
-log()   { print "$(date '+%Y-%m-%d %H:%M:%S') ${GREEN}[INFO]${RESET} ✅ $*"; }
-warn()  { print "$(date '+%Y-%m-%d %H:%M:%S') ${YELLOW}[WARN]${RESET} ⚠️ $*" >&2; }
+log() { print "$(date '+%Y-%m-%d %H:%M:%S') ${GREEN}[INFO]${RESET} ✅ $*"; }
+warn() { print "$(date '+%Y-%m-%d %H:%M:%S') ${YELLOW}[WARN]${RESET} ⚠️ $*" >&2; }
 error() { print "$(date '+%Y-%m-%d %H:%M:%S') ${RED}[ERROR]${RESET} ❌ $*" >&2; }
 
 ensure_doas() {
-    typeset prog_name
-    prog_name="$1"
+	typeset prog_name
+	prog_name="$1"
 
-    if command -v doas >/dev/null 2>&1; then
-        return 0
-    fi
+	if command -v doas >/dev/null 2>&1; then
+		return 0
+	fi
 
-    error "${prog_name}-wrapper error: 'doas' is not installed or not in PATH."
-    error "Please install or enable doas before using this wrapper."
-    exit 1
+	error "${prog_name}-wrapper error: 'doas' is not installed or not in PATH."
+	error "Please install or enable doas before using this wrapper."
+	exit 1
 }
 
 handle_visudo() {
-    typeset real_visudo candidate
+	typeset real_visudo candidate
 
-    real_visudo="/usr/local/sbin/visudo"
+	real_visudo="/usr/local/sbin/visudo"
 
-    if [ ! -x "$real_visudo" ]; then
-        if command -v visudo >/dev/null 2>&1; then
-            candidate=$(command -v visudo)
-            if [ "$candidate" != "$0" ]; then
-                real_visudo="$candidate"
-            else
-                real_visudo=""
-            fi
-        else
-            real_visudo=""
-        fi
-    fi
+	if [ ! -x "$real_visudo" ]; then
+		if command -v visudo >/dev/null 2>&1; then
+			candidate=$(command -v visudo)
+			if [ "$candidate" != "$0" ]; then
+				real_visudo="$candidate"
+			else
+				real_visudo=""
+			fi
+		else
+			real_visudo=""
+		fi
+	fi
 
-    if [ -z "$real_visudo" ] || [ ! -x "$real_visudo" ]; then
-        error "sudo-wrapper error: could not locate the real 'visudo' binary."
-        error "Expected /usr/local/sbin/visudo or another executable visudo in PATH."
-        exit 1
-    fi
+	if [ -z "$real_visudo" ] || [ ! -x "$real_visudo" ]; then
+		error "sudo-wrapper error: could not locate the real 'visudo' binary."
+		error "Expected /usr/local/sbin/visudo or another executable visudo in PATH."
+		exit 1
+	fi
 
-    export VISUDO_VIA_DOAS=1
-    exec doas "$real_visudo" "$@"
+	export VISUDO_VIA_DOAS=1
+	exec doas "$real_visudo" "$@"
 }
 
 handle_sudoedit() {
-    typeset editor
-    typeset -a editor_cmd
+	typeset editor
+	typeset -a editor_cmd
 
-    if [ "$#" -lt 1 ]; then
-        error "Usage: sudoedit FILE..."
-        exit 1
-    fi
+	if [ "$#" -lt 1 ]; then
+		error "Usage: sudoedit FILE..."
+		exit 1
+	fi
 
-    editor="${SUDO_EDITOR:-${VISUAL:-${EDITOR:-vi}}}"
+	editor="${SUDO_EDITOR:-${VISUAL:-${EDITOR:-vi}}}"
 
-    # shellcheck disable=SC2086
-    set -A editor_cmd -- $editor
+	set -A editor_cmd -- "$editor"
 
-    if [ "${#editor_cmd[@]}" -eq 0 ] || [ -z "${editor_cmd[0]:-}" ]; then
-        error "sudo-wrapper error: editor is empty."
-        exit 1
-    fi
+	if [ "${#editor_cmd[@]}" -eq 0 ] || [ -z "${editor_cmd[0]:-}" ]; then
+		error "sudo-wrapper error: editor is empty."
+		exit 1
+	fi
 
-    if ! command -v "${editor_cmd[0]}" >/dev/null 2>&1; then
-        error "sudo-wrapper error: editor '${editor_cmd[0]}' not found in PATH."
-        exit 1
-    fi
+	if ! command -v "${editor_cmd[0]}" >/dev/null 2>&1; then
+		error "sudo-wrapper error: editor '${editor_cmd[0]}' not found in PATH."
+		exit 1
+	fi
 
-    export SUDOEDIT_VIA_DOAS=1
-    exec doas "${editor_cmd[@]}" "$@"
+	export SUDOEDIT_VIA_DOAS=1
+	exec doas "${editor_cmd[@]}" "$@"
 }
 
 handle_sudo() {
-    export SUDO_VIA_DOAS=1
-    export SUDO_PREFER_DOAS=1
-    exec doas "$@"
+	export SUDO_VIA_DOAS=1
+	export SUDO_PREFER_DOAS=1
+	exec doas "$@"
 }
 
 main() {
-    typeset prog_name
-    prog_name=$(basename -- "$0")
+	typeset prog_name
+	prog_name=$(basename -- "$0")
 
-    ensure_doas "$prog_name"
+	ensure_doas "$prog_name"
 
-    case "$prog_name" in
-        visudo)
-            handle_visudo "$@"
-            ;;
-        sudoedit)
-            handle_sudoedit "$@"
-            ;;
-        *)
-            handle_sudo "$@"
-            ;;
-    esac
+	case "$prog_name" in
+	visudo)
+		handle_visudo "$@"
+		;;
+	sudoedit)
+		handle_sudoedit "$@"
+		;;
+	*)
+		handle_sudo "$@"
+		;;
+	esac
 }
 
 main "$@"

@@ -1,10 +1,21 @@
 #!/bin/bash
 
-if [[ -z "${ZSH_VERSION:-}" ]] && command -v zsh >/dev/null 2>&1; then
-  exec zsh "$0" "$@"
+if [[ -z ${ZSH_VERSION:-} ]] && command -v zsh >/dev/null 2>&1; then
+	exec zsh "$0" "$@"
 fi
 
 set -euo pipefail
+
+# Source silent runner and start silent capture (prints output only on error)
+if [[ -f "$(dirname "$0")/../lib/silent.bash" ]]; then
+	# shellcheck source=/dev/null
+	source "$(dirname "$0")/../lib/silent.bash"
+	start_silence
+elif [[ -f "$(dirname "$0")/../lib/silent" ]]; then
+	# shellcheck source=/dev/null
+	source "$(dirname "$0")/../lib/silent"
+	start_silence
+fi
 
 # Argon One V3 maintenance script
 #  - Updates EEPROM (argon-eeprom.sh)
@@ -14,7 +25,7 @@ set -euo pipefail
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
 
-# Basic PATH (important when run from cron)
+# Basic PATH
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
@@ -28,7 +39,7 @@ CONTROL_URL="https://download.argon40.com/argon1.sh"
 AUTO_REBOOT="no"
 
 usage() {
-  cat <<EOF
+	cat <<EOF
 Usage: $0 [OPTIONS]
 
 Options:
@@ -49,46 +60,46 @@ EOF
 }
 
 parse_args() {
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      -r|--auto-reboot)
-        AUTO_REBOOT="yes"
-        shift
-        ;;
-      -N|--no-reboot)
-        AUTO_REBOOT="no"
-        shift
-        ;;
-      -h|--help)
-        usage
-        exit 0
-        ;;
-      *)
-        error "Unknown option: $1"
-        error "Try: $0 --help"
-        exit 1
-        ;;
-    esac
-  done
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+		-r | --auto-reboot)
+			AUTO_REBOOT="yes"
+			shift
+			;;
+		-N | --no-reboot)
+			AUTO_REBOOT="no"
+			shift
+			;;
+		-h | --help)
+			usage
+			exit 0
+			;;
+		*)
+			error "Unknown option: $1"
+			error "Try: $0 --help"
+			exit 1
+			;;
+		esac
+	done
 }
 
 parse_args "$@"
 
 # Simple colors for messages
 if [ -t 1 ] && [ "${NO_COLOR:-0}" != "1" ]; then
-  GREEN="\033[32m"
-  YELLOW="\033[33m"
-  RED="\033[31m"
-  RESET="\033[0m"
+	GREEN="\033[32m"
+	YELLOW="\033[33m"
+	RED="\033[31m"
+	RESET="\033[0m"
 else
-  GREEN=""
-  YELLOW=""
-  RED=""
-  RESET=""
+	GREEN=""
+	YELLOW=""
+	RED=""
+	RESET=""
 fi
 
-log()   { printf '%s %b[INFO]%b ✅ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$GREEN" "$RESET" "$*"; }
-warn()  { printf '%s %b[WARN]%b ⚠️ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$YELLOW" "$RESET" "$*"; }
+log() { printf '%s %b[INFO]%b ✅ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$GREEN" "$RESET" "$*"; }
+warn() { printf '%s %b[WARN]%b ⚠️ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$YELLOW" "$RESET" "$*"; }
 error() { printf '%s %b[ERROR]%b ❌ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$RED" "$RESET" "$*" >&2; }
 
 trap 'error "Execution interrupted."; exit 1' INT
@@ -96,83 +107,83 @@ trap 'error "Execution interrupted."; exit 1' INT
 # ---- Helpers ---------------------------------------------------------------
 
 require_root() {
-  if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
-    error "This script must be run as root (sudo)."
-    exit 1
-  fi
+	if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
+		error "This script must be run as root (sudo)."
+		exit 1
+	fi
 }
 
 net_curl() {
-  curl -fLsS --retry 5 "$@"
+	curl -fLsS --retry 5 "$@"
 }
 
 check_network() {
-  log "Checking network connectivity to download.argon40.com..."
-  if ! net_curl --head "$EEPROM_URL" >/dev/null 2>&1; then
-    error "Cannot reach download.argon40.com. Check your Internet connection."
-    exit 1
-  fi
-  log "Network looks OK."
+	log "Checking network connectivity to download.argon40.com..."
+	if ! net_curl --head "$EEPROM_URL" >/dev/null 2>&1; then
+		error "Cannot reach download.argon40.com. Check your Internet connection."
+		exit 1
+	fi
+	log "Network looks OK."
 }
 
 run_eeprom_update() {
-  log "Running EEPROM update script from Argon40..."
-  net_curl "$EEPROM_URL" | bash
-  log "EEPROM update script finished."
+	log "Running EEPROM update script from Argon40..."
+	net_curl "$EEPROM_URL" | bash
+	log "EEPROM update script finished."
 }
 
 run_control_update() {
-  log "Running Argon One V3 control script installer..."
-  net_curl "$CONTROL_URL" | bash
-  log "Argon One V3 control script finished."
+	log "Running Argon One V3 control script installer..."
+	net_curl "$CONTROL_URL" | bash
+	log "Argon One V3 control script finished."
 }
 
 ask_reboot() {
-  local answer
-  # Flags take precedence
-  case "$AUTO_REBOOT" in
-    yes)
-      log "Auto reboot enabled by flag; rebooting now..."
-      reboot
-      ;;
-    no)
-      log "Auto reboot disabled by flag. Please reboot manually."
-      return 0
-      ;;
-  esac
+	local answer
+	# Flags take precedence
+	case "$AUTO_REBOOT" in
+	yes)
+		log "Auto reboot enabled by flag; rebooting now..."
+		reboot
+		;;
+	no)
+		log "Auto reboot disabled by flag. Please reboot manually."
+		return 0
+		;;
+	esac
 
-  # Non-interactive (cron): never prompt
-  if [[ ! -t 0 ]]; then
-    log "Non-interactive session detected; skipping reboot. Please reboot manually."
-    return 0
-  fi
+	# Non-interactive (cron): never prompt
+	if [[ ! -t 0 ]]; then
+		log "Non-interactive session detected; skipping reboot. Please reboot manually."
+		return 0
+	fi
 
-  # Interactive: ask the user
-  read -r -p "Reboot now to apply all changes? [y/N] " answer
-  case "$answer" in
-    [yY][eE][sS]|[yY])
-      log "Rebooting..."
-      reboot
-      ;;
-    *)
-      log "Reboot skipped. Remember to reboot later to apply EEPROM and control changes."
-      ;;
-  esac
+	# Interactive: ask the user
+	read -r -p "Reboot now to apply all changes? [y/N] " answer
+	case "$answer" in
+	[yY][eE][sS] | [yY])
+		log "Rebooting..."
+		reboot
+		;;
+	*)
+		log "Reboot skipped. Remember to reboot later to apply EEPROM and control changes."
+		;;
+	esac
 }
 
 # ---- Main ------------------------------------------------------------------
 
 main() {
-  log "Argon One V3 maintenance: EEPROM + control script update"
+	log "Argon One V3 maintenance: EEPROM + control script update"
 
-  require_root
-  check_network
+	require_root
+	check_network
 
-  run_eeprom_update
-  run_control_update
+	run_eeprom_update
+	run_control_update
 
-  log "All Argon One V3 update steps completed."
-  ask_reboot
+	log "All Argon One V3 update steps completed."
+	ask_reboot
 }
 
 main "$@"

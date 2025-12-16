@@ -13,28 +13,28 @@
 use strict;
 use warnings;
 
-my $GREEN = "\e[32m";
-my $YELLOW = "\e[33m";
-my $RED = "\e[31m";
-my $CYAN = "\e[36m";
-my $BOLD = "\e[1m";
-my $RESET = "\e[0m";
+my $no_color  = 0;
+my $is_tty    = ( -t STDOUT )             ? 1 : 0;
+my $use_color = ( !$no_color && $is_tty ) ? 1 : 0;
 
-sub log_info {
-    my ($msg) = @_;
-    print "${GREEN}✅ [INFO]${RESET} $msg\n";
+my ( $GREEN, $YELLOW, $RED, $CYAN, $BOLD, $RESET ) = ( "", "", "", "", "", "" );
+if ($use_color) {
+    $GREEN  = "\e[32m";
+    $YELLOW = "\e[33m";
+    $RED    = "\e[31m";
+    $CYAN   = "\e[36m";
+    $BOLD   = "\e[1m";
+    $RESET  = "\e[0m";
 }
 
-sub warn_info {
-    my ($msg) = @_;
-    print STDERR "${YELLOW}⚠️ [WARN]${RESET} $msg\n";
-}
+sub logi { print "${GREEN}✅ [INFO]${RESET} $_[0]\n"; }
+sub logw { print STDERR "${YELLOW}⚠️ [WARN]${RESET} $_[0]\n"; }
+sub loge { print STDERR "${RED}❌ [ERROR]${RESET} $_[0]\n"; }
 
-sub error {
-    my ($msg, $code) = @_;
-    $code //= 1;
-    print STDERR "${RED}❌ [ERROR]${RESET} $msg\n";
-    exit $code;
+sub die_tool {
+    my ($msg) = @_;
+    loge($msg);
+    exit 1;
 }
 
 my $known_hosts = $ENV{SSH_MENU_KNOWN_HOSTS} // "$ENV{HOME}/.ssh/known_hosts";
@@ -50,7 +50,7 @@ if ( !-f $known_hosts ) {
 # Simple PATH search for ksshaskpass (no extra modules needed)
 sub find_in_path {
     my ($prog) = @_;
-    for my $dir (split /:/, $ENV{PATH} || '') {
+    for my $dir ( split /:/, $ENV{PATH} || '' ) {
         next unless length $dir;
         my $full = "$dir/$prog";
         return $full if -x $full;
@@ -62,9 +62,10 @@ my $ksshaskpass = find_in_path('ksshaskpass');
 
 if ($ksshaskpass) {
     $ENV{SSH_ASKPASS}         = $ksshaskpass;
-    $ENV{SSH_ASKPASS_REQUIRE} = 'prefer';  # or 'force' if you want always GUI
-} else {
-    warn_info('ksshaskpass not found in PATH; continuing without SSH_ASKPASS');
+    $ENV{SSH_ASKPASS_REQUIRE} = 'prefer';    # or 'force' if you want always GUI
+}
+else {
+    logw('ksshaskpass not found in PATH; continuing without SSH_ASKPASS');
 }
 
 #######################################
@@ -78,7 +79,7 @@ my $hashed_count = 0;
 open my $fh, '<', $known_hosts
   or error("cannot open $known_hosts: $!");
 
-while (my $line = <$fh>) {
+while ( my $line = <$fh> ) {
     chomp $line;
     next if $line =~ /^\s*$/;
     next if $line =~ /^\s*#/;
@@ -91,9 +92,9 @@ while (my $line = <$fh>) {
     my ($field) = split /\s+/, $line, 2;
     next unless defined $field && length $field;
 
-    my @parts = grep {
-        defined $_ && length $_ && $_ !~ /^\s*#/ && $_ !~ /^\s*\|/
-    } split /,/, $field;
+    my @parts =
+      grep { defined $_ && length $_ && $_ !~ /^\s*#/ && $_ !~ /^\s*\|/ }
+      split /,/, $field;
 
     next unless @parts;
 
@@ -106,60 +107,65 @@ while (my $line = <$fh>) {
         $port = $2;
     }
 
-    my $key = join ':', $host, ($port || 'default');
+    my $key = join ':', $host, ( $port || 'default' );
     next if $seen{$key}++;
 
     my $display;
-    if (@parts > 1) {
-        my @aliases   = @parts[1 .. $#parts];
+    if ( @parts > 1 ) {
+        my @aliases   = @parts[ 1 .. $#parts ];
         my $alias_str = join ', ', @aliases;
         if ($port) {
             $display = "$host (port $port; aliases: $alias_str)";
-        } else {
+        }
+        else {
             $display = "$host (aliases: $alias_str)";
         }
-    } else {
+    }
+    else {
         if ($port) {
             $display = "$host (port $port)";
-        } else {
+        }
+        else {
             $display = $host;
         }
     }
 
-    push @entries, {
+    push @entries,
+      {
         host    => $host,
         port    => $port,
         display => $display,
-    };
+      };
 }
 close $fh;
 
 if ( !@entries ) {
     if ( $hashed_count > 0 ) {
-        error(
-            "No valid plain hosts found in $known_hosts.\n"
-          . "It looks like your known_hosts file contains only hashed entries.\n"
-          . "This script cannot recover hostnames from hashed lines.\n"
-          . "Consider keeping a separate non-hashed file (e.g. ~/.ssh/known_hosts.menu)\n"
-          . "for use with this menu script."
-        );
-    } else {
+        error(  "No valid plain hosts found in $known_hosts.\n"
+              . "It looks like your known_hosts file contains only hashed entries.\n"
+              . "This script cannot recover hostnames from hashed lines.\n"
+              . "Consider keeping a separate non-hashed file (e.g. ~/.ssh/known_hosts.menu)\n"
+              . "for use with this menu script." );
+    }
+    else {
         error("No valid hosts found in $known_hosts.");
     }
 }
 
 @entries = sort { lc $a->{display} cmp lc $b->{display} } @entries;
 
-warn_info("Skipped $hashed_count hashed known_hosts entries.") if $hashed_count > 0;
+logw("Skipped $hashed_count hashed known_hosts entries.")
+  if $hashed_count > 0;
 
 ##########################################
 # 3. Interactive menu to choose a server #
 ##########################################
 
-log_info("Select a server to connect to:");
+logi("Select a server to connect to:");
 print "\n";
-for my $i (0 .. $#entries) {
-    printf "  ${CYAN}%2d)${RESET} ${BOLD}%s${RESET}\n", $i + 1, $entries[$i]{display};
+for my $i ( 0 .. $#entries ) {
+    printf "  ${CYAN}%2d)${RESET} ${BOLD}%s${RESET}\n", $i + 1,
+      $entries[$i]{display};
 }
 printf "  ${CYAN}%2d)${RESET} ${BOLD}Quit${RESET}\n\n", scalar(@entries) + 1;
 
@@ -170,7 +176,7 @@ while (1) {
     defined $input or error("Input closed.");
     chomp $input;
     if ( $input =~ /^[qQ]$/ ) {
-        log_info("Exiting.");
+        logi("Exiting.");
         exit 0;
     }
 
@@ -179,7 +185,7 @@ while (1) {
     my $num = int($input);
 
     if ( $num == scalar(@entries) + 1 ) {
-        log_info("Exiting.");
+        logi("Exiting.");
         exit 0;
     }
 
@@ -188,14 +194,14 @@ while (1) {
         last;
     }
 
-    warn_info("Invalid option. Please try again.");
+    logw("Invalid option. Please try again.");
 }
 
 my $selected_host    = $entries[$selected_idx]{host};
 my $selected_port    = $entries[$selected_idx]{port};
 my $selected_display = $entries[$selected_idx]{display};
 
-log_info("Selected server: $selected_display");
+logi("Selected server: $selected_display");
 
 #######################
 # 4. Ask for SSH user #
@@ -203,7 +209,8 @@ log_info("Selected server: $selected_display");
 
 my $default_user = $ENV{SSH_MENU_USER} // $ENV{USER} // '';
 
-print "${BOLD}SSH user${RESET}" . (length $default_user ? " [${CYAN}$default_user${RESET}]" : '') . ": ";
+print "${BOLD}SSH user${RESET}"
+  . ( length $default_user ? " [${CYAN}$default_user${RESET}]" : '' ) . ": ";
 my $ssh_user = <STDIN>;
 defined $ssh_user or error("Input closed.");
 chomp $ssh_user;
@@ -211,7 +218,8 @@ chomp $ssh_user;
 if ( !length $ssh_user ) {
     if ( length $default_user ) {
         $ssh_user = $default_user;
-    } else {
+    }
+    else {
         error("Empty user. Aborting.");
     }
 }
@@ -226,11 +234,12 @@ if ( $ssh_user =~ /^\s+$/ ) {
 
 my @cmd;
 if ($selected_port) {
-    log_info("Connecting to $ssh_user\@$selected_host (port $selected_port)...");
-    @cmd = ('ssh', '-p', $selected_port, "$ssh_user\@$selected_host");
-} else {
-    log_info("Connecting to $ssh_user\@$selected_host ...");
-    @cmd = ('ssh', "$ssh_user\@$selected_host");
+    logi("Connecting to $ssh_user\@$selected_host (port $selected_port)...");
+    @cmd = ( 'ssh', '-p', $selected_port, "$ssh_user\@$selected_host" );
+}
+else {
+    logi("Connecting to $ssh_user\@$selected_host ...");
+    @cmd = ( 'ssh', "$ssh_user\@$selected_host" );
 }
 
 exec @cmd or error("Failed to exec ssh: $!");

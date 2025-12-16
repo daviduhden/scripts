@@ -1,3 +1,5 @@
+#!/bin/sh
+
 # This script is intended to reside in /etc/profile.d/global-vi-mode.sh
 # so that it is sourced system-wide for login and interactive shells.
 # On OpenBSD (no /etc/profile.d), append or source it from /etc/profile
@@ -11,58 +13,59 @@
 
 # If this is not an interactive shell, do nothing
 case $- in
-    *i*) ;;
-    *)
-        # Use 'return' when sourced, fall back to 'exit' if executed directly
-        return 0 2>/dev/null || exit 0
-        ;;
+*i*) ;;
+*)
+	# Use 'return' when sourced, fall back to 'exit' if executed directly
+
+	(return 0 2>/dev/null) && return 0 || exit 0
+	;;
 esac
 
 ####################
 # bash integration #
 ####################
 if [ -n "${BASH_VERSION-}" ]; then
-    # Enable vi mode for bash readline
-    set -o vi
+	# Enable vi mode for bash readline
+	set -o vi
 fi
 
 ###################
 # zsh integration #
 ###################
 if [ -n "${ZSH_VERSION-}" ]; then
-    # Enable vi key bindings in zsh
-    # 'bindkey -v' switches to vi-style line editing
-    bindkey -v 2>/dev/null || true
+	# Enable vi key bindings in zsh
+	# 'bindkey -v' switches to vi-style line editing
+	bindkey -v 2>/dev/null || true
 fi
 
 ###################
 # ksh integration #
 ###################
 if [ -n "${KSH_VERSION-}" ]; then
-    if command -v ksh93 >/dev/null 2>&1; then
-        # Prefer ksh93 when available
-        alias ksh='ksh93'
-    fi
-    # Enable vi mode in ksh
-    set -o vi
+	if command -v ksh93 >/dev/null 2>&1; then
+		# Prefer ksh93 when available
+		alias ksh='ksh93'
+	fi
+	# Enable vi mode in ksh
+	set -o vi
 fi
 
 ########################################
 # Set global editor if not defined yet #
 ########################################
 if [ -z "${EDITOR-}" ]; then
-    if command -v vim >/dev/null 2>&1; then
-        export EDITOR=vim
-        alias vi='vim'
-    elif command -v nvi >/dev/null 2>&1; then
-        export EDITOR=vi
-        alias vi='nvi'
-    else
-        export EDITOR=vi
-        alias vi='vi'
-    fi
+	if command -v vim >/dev/null 2>&1; then
+		export EDITOR=vim
+		alias vi='vim'
+	elif command -v nvi >/dev/null 2>&1; then
+		export EDITOR=vi
+		alias vi='nvi'
+	else
+		export EDITOR=vi
+		alias vi='vi'
+	fi
 fi
 
 if [ -z "${VISUAL-}" ]; then
-    export VISUAL="$EDITOR"
+	export VISUAL="$EDITOR"
 fi

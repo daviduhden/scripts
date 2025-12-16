@@ -1,0 +1,109 @@
+#!/bin/sh
+set -eu
+
+# Save original stdout/stderr, create per-run log in TMPDIR and redirect
+exec 3>&1 4>&2
+TMPLOG="${TMPDIR:-/tmp}/validate-perl-$$.log"
+printf '[test] Logging to: %s\n' "$TMPLOG" >&3
+exec >"$TMPLOG" 2>&1
+
+# validate-perl.sh
+# - Recursively finds all Perl files under ROOT_DIR (default: current directory)
+#   and checks formatting with perltidy and Perl syntax.
+# - Usage: ./validate-perl.sh [ROOT_DIR]
+# - Requires: perltidy, perl in PATH
+#
+# See the LICENSE file at the top of the project tree for copyright
+# and license details.
+
+usage() {
+	printf '%s\n' "Usage: $0 [ROOT_DIR]" >&2
+	exit 2
+}
+
+ROOT_DIR=${1:-}
+[ "${ROOT_DIR#-}" = "$ROOT_DIR" ] || usage
+[ -n "$ROOT_DIR" ] || usage
+[ -d "$ROOT_DIR" ] || {
+	printf '%s\n' "ERROR: ROOT_DIR is not a directory: $ROOT_DIR" >&2
+	exit 2
+}
+
+TMPDIR_BASE="${TMPDIR:-/tmp}"
+TMP_FAILS="$TMPDIR_BASE/validate-perl-fails-$$.txt"
+trap 'rm -f "$TMP_FAILS"' EXIT
+
+note_fail() { printf '%s\n' "$1" >>"$TMP_FAILS"; }
+
+echo "[test] Formatting Perl files with perltidy..."
+if command -v perltidy >/dev/null 2>&1; then
+	UNFMT="$TMPDIR_BASE/unformatted-perl-$$.txt"
+
+	# Detect files that would change formatting
+
+	# shellcheck disable=SC3045
+	find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name '*.pl' -o -name '*.pm' -o -name '*.t' -o -name '*.psgi' \) -print0 |
+		while IFS= read -r -d '' f; do
+			if ! perltidy -ast -se -o /dev/null "$f" >/dev/null 2>&1; then
+				echo "$f"
+			fi
+		done >"$UNFMT" || true
+
+	if [ -s "$UNFMT" ]; then
+		echo "[test] perltidy will format the following files:"
+		sed -n '1,200p' "$UNFMT" | sed 's/^/  - /'
+
+		while IFS= read -r file; do
+			[ -n "$file" ] || continue
+			# Format in-place without backups (backup extension "/" disables backups)
+			if perltidy --backup-and-modify-in-place --backup-file-extension=/ -se "$file" >/dev/null 2>&1; then
+				note_fail "$file"
+			else
+				echo "[WARN] perltidy failed for: $file" 1>&2
+				note_fail "$file"
+			fi
+		done <"$UNFMT"
+	else
+		echo "[test] All Perl files already formatted"
+	fi
+
+	rm -f "$UNFMT"
+else
+	echo "[test] perltidy not installed; skipping Perl formatting"
+fi
+
+echo "[test] Running Perl syntax checks..."
+if perl -MOpenBSD::PackageInfo -e1 >/dev/null 2>&1; then
+
+	# shellcheck disable=SC3045
+	find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name '*.pl' -o -name '*.pm' -o -name '*.t' -o -name '*.psgi' \) -print0 |
+		while IFS= read -r -d '' f; do
+			perlc_out=$(perl -c "$f" 2>&1) || true
+			perlc_rc=$?
+			if [ "${perlc_rc:-0}" -ne 0 ]; then
+				if printf '%s' "$perlc_out" | grep -qi "Can't locate"; then
+					echo "[WARN] Perl module missing for: $f" 1>&2
+				else
+					echo "[ERROR] Perl syntax error in: $f" 1>&2
+					note_fail "$f"
+				fi
+			fi
+		done
+else
+	echo "[test] Skipping Perl syntax checks (OpenBSD-specific modules not available)"
+fi
+
+issues=0
+if [ -f "$TMP_FAILS" ]; then
+	issues=$(sort -u "$TMP_FAILS" | wc -l | tr -d ' ')
+fi
+
+if [ "${issues:-0}" -ne 0 ]; then
+	echo "[test] Completed with $issues issue(s) (format changes and/or errors)"
+	echo "[test] Affected files (unique, first 200):"
+	sort -u "$TMP_FAILS" | sed -n '1,200p' | sed 's/^/  - /'
+	exit 2
+fi
+
+echo "[test] Perl checks passed"
+exit 0
