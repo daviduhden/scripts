@@ -1,6 +1,17 @@
 #!/bin/bash
 set -euo pipefail
 
+# Source silent helper if available (prefer silent.bash, fallback to silent)
+if [[ -f "$(dirname "$0")/../lib/silent.bash" ]]; then
+	# shellcheck source=/dev/null
+	source "$(dirname "$0")/../lib/silent.bash"
+	start_silence
+elif [[ -f "$(dirname "$0")/../lib/silent" ]]; then
+	# shellcheck source=/dev/null
+	source "$(dirname "$0")/../lib/silent"
+	start_silence
+fi
+
 # Fedora Atomic ClamAV setup:
 # - Layers packages (rpm-ostree) if missing
 # - Configures: freshclam updates, clamd@scan, clamonacc on-access, and a periodic scan timer
@@ -12,10 +23,10 @@ set -euo pipefail
 
 APPLY_LIVE=0
 for arg in "${@:-}"; do
-  case "$arg" in
-    --apply-live) APPLY_LIVE=1 ;;
-    -h|--help)
-      cat <<'USAGE'
+	case "$arg" in
+	--apply-live) APPLY_LIVE=1 ;;
+	-h | --help)
+		cat <<'USAGE'
 Usage:
   sudo ./setup-clamav.bash [--apply-live]
 
@@ -24,167 +35,178 @@ Notes:
   - If a reboot is needed, this script schedules an automatic post-install that runs
     after the reboot.
 USAGE
-      exit 0
-      ;;
-    *)
-      echo "Unknown argument: $arg" >&2
-      exit 2
-      ;;
-  esac
+		exit 0
+		;;
+	*)
+		echo "Unknown argument: $arg" >&2
+		exit 2
+		;;
+	esac
 done
 
 require_root() {
-  if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
-    echo "Run as root (use sudo)." >&2
-    exit 1
-  fi
+	if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
+		echo "Run as root (use run0)." >&2
+		exit 1
+	fi
 }
 
 have_cmd() { command -v "$1" >/dev/null 2>&1; }
 
 backup_once() {
-  local f="$1"
-  [[ -f "$f" ]] || return 0
-  local b="${f}.bak"
-  [[ -e "$b" ]] && return 0
-  cp -a "$f" "$b"
+	local f="$1"
+	[[ -f $f ]] || return 0
+	local b="${f}.bak"
+	[[ -e $b ]] && return 0
+	cp -a "$f" "$b"
 }
 
 ensure_kv_line() {
-  # Ensures a single "Key Value" line exists (replaces commented/old)
-  local file="$1" key="$2" value="$3"
-  if grep -Eq "^[[:space:]]*#?[[:space:]]*${key}\b" "$file"; then
-    sed -ri "s|^[[:space:]]*#?[[:space:]]*${key}\b.*|${key} ${value}|g" "$file"
-  else
-    printf "\n%s %s\n" "$key" "$value" >>"$file"
-  fi
+	# Ensures a single "Key Value" line exists (replaces commented/old)
+	local file="$1" key="$2" value="$3"
+	if grep -Eq "^[[:space:]]*#?[[:space:]]*${key}\b" "$file"; then
+		sed -ri "s|^[[:space:]]*#?[[:space:]]*${key}\b.*|${key} ${value}|g" "$file"
+	else
+		printf "\n%s %s\n" "$key" "$value" >>"$file"
+	fi
 }
 
 ensure_multi_line() {
-  # Ensures an exact "Key Value" line exists (can repeat key multiple times)
-  local file="$1" key="$2" value="$3"
-  if ! grep -Fxq "${key} ${value}" "$file"; then
-    printf "%s %s\n" "$key" "$value" >>"$file"
-  fi
+	# Ensures an exact "Key Value" line exists (can repeat key multiple times)
+	local file="$1" key="$2" value="$3"
+	if ! grep -Fxq "${key} ${value}" "$file"; then
+		printf "%s %s\n" "$key" "$value" >>"$file"
+	fi
 }
 
 comment_out_example() {
-  local file="$1"
-  # Many ClamAV sample configs contain "Example" which must be removed/commented for services to start.
-  sed -ri 's|^[[:space:]]*Example[[:space:]]*$|# Example|g' "$file" || true
+	local file="$1"
+	# Many ClamAV sample configs contain "Example" which must be removed/commented for services to start.
+	sed -ri 's|^[[:space:]]*Example[[:space:]]*$|# Example|g' "$file" || true
 }
 
 write_file_if_missing() {
-  local path="$1"
-  local content="$2"
-  if [[ ! -f "$path" ]]; then
-    install -d -m 0755 "$(dirname "$path")"
-    printf "%s\n" "$content" >"$path"
-  fi
+	local path="$1"
+	local content="$2"
+	if [[ ! -f $path ]]; then
+		install -d -m 0755 "$(dirname "$path")"
+		printf "%s\n" "$content" >"$path"
+	fi
 }
 
 configure_sysctl_inotify() {
-  # ClamAV on-access uses inotify for directory determination; large trees can exhaust watches.
-  # ClamAV docs recommend increasing max_user_watches (example 524288). :contentReference[oaicite:1]{index=1}
-  local sysctl_file="/etc/sysctl.d/99-clamav-inotify.conf"
-  cat >"$sysctl_file" <<'EOF'
+	# ClamAV on-access uses inotify for directory determination; large trees can exhaust watches.
+	# ClamAV docs recommend increasing max_user_watches (example 524288). :contentReference[oaicite:1]{index=1}
+	local sysctl_file="/etc/sysctl.d/99-clamav-inotify.conf"
+	cat >"$sysctl_file" <<'EOF'
 # Increase inotify watches for ClamAV On-Access scanning (clamonacc)
 fs.inotify.max_user_watches = 524288
 EOF
-  sysctl --system >/dev/null 2>&1 || true
+	sysctl --system >/dev/null 2>&1 || true
 }
 
 configure_freshclam() {
-  install -d -m 0755 /var/log/clamav
-  local f="/etc/freshclam.conf"
-  backup_once "$f"
+	install -d -m 0755 /var/log/clamav
+	# Ensure freshclam log exists and has the correct owner/permissions
+	touch /var/log/freshclam.log || true
+	chown clamscan:clamscan /var/log/freshclam.log /var/log/clamav || true
+	chmod 0644 /var/log/freshclam.log || true
+	chmod 0755 /var/log/clamav || true
+	local f="/etc/freshclam.conf"
+	backup_once "$f"
 
-  # Minimal safe config (Fedora package provides the service, but we ensure sane defaults).
-  write_file_if_missing "$f" "#
+	# Minimal safe config (Fedora package provides the service, but we ensure sane defaults).
+	write_file_if_missing "$f" "#
 # freshclam.conf - generated by clamav-atomic-setup
 #"
 
-  comment_out_example "$f"
-  ensure_kv_line "$f" "DatabaseDirectory" "/var/lib/clamav"
-  ensure_kv_line "$f" "UpdateLogFile" "/var/log/freshclam.log"
-  ensure_kv_line "$f" "LogTime" "yes"
-  ensure_kv_line "$f" "LogVerbose" "no"
-  ensure_kv_line "$f" "DatabaseOwner" "clamscan"
-  # Notify clamd to reload DB after updates
-  ensure_kv_line "$f" "NotifyClamd" "/etc/clamd.d/scan.conf"
+	comment_out_example "$f"
+	ensure_kv_line "$f" "DatabaseDirectory" "/var/lib/clamav"
+	ensure_kv_line "$f" "UpdateLogFile" "/var/log/freshclam.log"
+	ensure_kv_line "$f" "LogTime" "yes"
+	ensure_kv_line "$f" "LogVerbose" "no"
+	ensure_kv_line "$f" "DatabaseOwner" "clamscan"
+	# Notify clamd to reload DB after updates
+	ensure_kv_line "$f" "NotifyClamd" "/etc/clamd.d/scan.conf"
 }
 
 configure_clamd_scanconf() {
-  install -d -m 0755 /etc/clamd.d
+	install -d -m 0755 /etc/clamd.d
 
-  local conf="/etc/clamd.d/scan.conf"
-  if [[ ! -f "$conf" ]]; then
-    # Fedora clamd package includes a sample in /usr/share/doc/clamd/clamd.conf :contentReference[oaicite:2]{index=2}
-    if [[ -f /usr/share/doc/clamd/clamd.conf ]]; then
-      cp -a /usr/share/doc/clamd/clamd.conf "$conf"
-    else
-      cat >"$conf" <<'EOF'
+	local conf="/etc/clamd.d/scan.conf"
+	if [[ ! -f $conf ]]; then
+		# Fedora clamd package includes a sample in /usr/share/doc/clamd/clamd.conf :contentReference[oaicite:2]{index=2}
+		if [[ -f /usr/share/doc/clamd/clamd.conf ]]; then
+			cp -a /usr/share/doc/clamd/clamd.conf "$conf"
+		else
+			cat >"$conf" <<'EOF'
 # scan.conf - generated by clamav-atomic-setup
 EOF
-    fi
-  fi
+		fi
+	fi
 
-  backup_once "$conf"
-  comment_out_example "$conf"
+	backup_once "$conf"
+	comment_out_example "$conf"
 
-  # Base settings
-  ensure_kv_line "$conf" "LogSyslog" "yes"
-  ensure_kv_line "$conf" "DatabaseDirectory" "/var/lib/clamav"
-  ensure_kv_line "$conf" "LocalSocket" "/run/clamd.scan/clamd.sock"
-  ensure_kv_line "$conf" "FixStaleSocket" "yes"
-  ensure_kv_line "$conf" "User" "clamscan"
+	# Base settings
+	ensure_kv_line "$conf" "LogSyslog" "yes"
+	ensure_kv_line "$conf" "DatabaseDirectory" "/var/lib/clamav"
+	ensure_kv_line "$conf" "LocalSocket" "/run/clamd.scan/clamd.sock"
+	ensure_kv_line "$conf" "FixStaleSocket" "yes"
+	ensure_kv_line "$conf" "User" "clamscan"
 
-  # On-access settings (ClamAV On-Access guide) :contentReference[oaicite:3]{index=3}
-  # Paths requested + common mount roots:
-  local include_paths=(
-    "/var/home"
-    "/tmp"
-    "/run/media"
-    "/mnt"
-    "/var/mnt"
-  )
-  for p in "${include_paths[@]}"; do
-    ensure_multi_line "$conf" "OnAccessIncludePath" "$p"
-  done
+	# On-access settings (ClamAV On-Access guide) :contentReference[oaicite:3]{index=3}
+	# Paths requested + common mount roots:
+	local include_paths=(
+		"/var/home"
+		"/tmp"
+		"/run/media"
+		"/mnt"
+		"/var/mnt"
+	)
+	for p in "${include_paths[@]}"; do
+		ensure_multi_line "$conf" "OnAccessIncludePath" "$p"
+	done
 
-  # Avoid loops and reduce risk:
-  ensure_kv_line "$conf" "OnAccessExcludeUname" "clamscan"
-  ensure_kv_line "$conf" "OnAccessExcludeRootUID" "yes"
+	# Avoid loops and reduce risk:
+	ensure_kv_line "$conf" "OnAccessExcludeUname" "clamscan"
+	ensure_kv_line "$conf" "OnAccessExcludeRootUID" "yes"
 
-  # Block access to infected files (prevention). :contentReference[oaicite:4]{index=4}
-  ensure_kv_line "$conf" "OnAccessPrevention" "yes"
+	# Block access to infected files (prevention). :contentReference[oaicite:4]{index=4}
+	ensure_kv_line "$conf" "OnAccessPrevention" "yes"
 }
 
 setup_onaccess_service_override() {
-  # Fedora ships service units for clamonacc in the clamav package. :contentReference[oaicite:5]{index=5}
-  local unit=""
-  if systemctl list-unit-files --no-legend --type=service 2>/dev/null | awk '{print $1}' | grep -qx "clamav-clamonacc.service"; then
-    unit="clamav-clamonacc.service"
-  elif systemctl list-unit-files --no-legend --type=service 2>/dev/null | awk '{print $1}' | grep -qx "clamonacc.service"; then
-    unit="clamonacc.service"
-  else
-    unit=""
-  fi
+	# Fedora ships service units for clamonacc in the clamav package. :contentReference[oaicite:5]{index=5}
+	local unit=""
+	if systemctl list-unit-files --no-legend --type=service 2>/dev/null | awk '{print $1}' | grep -qx "clamav-clamonacc.service"; then
+		unit="clamav-clamonacc.service"
+	elif systemctl list-unit-files --no-legend --type=service 2>/dev/null | awk '{print $1}' | grep -qx "clamonacc.service"; then
+		unit="clamonacc.service"
+	else
+		unit=""
+	fi
 
-  if [[ -z "$unit" ]]; then
-    echo "Warning: no systemd unit found for clamonacc; skipping on-access scanning."
-    return 0
-  fi
+	if [[ -z $unit ]]; then
+		echo "Warning: no systemd unit found for clamonacc; skipping on-access scanning."
+		return 0
+	fi
 
-  local dropin_dir="/etc/systemd/system/${unit}.d"
-  install -d -m 0755 "$dropin_dir"
+	local dropin_dir="/etc/systemd/system/${unit}.d"
+	install -d -m 0755 "$dropin_dir"
 
-  # Override ExecStart to enforce:
-  # - foreground (systemd)
-  # - fdpass (better for LocalSocket permissions)
-  # - log + quarantine
-  # Note: /var/spool/quarantine ships with the clamav package. :contentReference[oaicite:6]{index=6}
-  cat >"${dropin_dir}/override.conf" <<'EOF'
+	# Ensure quarantine and log paths exist with correct permissions
+	install -d -m 0700 /var/spool/quarantine || true
+	touch /var/log/clamonacc.log || true
+	chown clamscan:clamscan /var/log/clamonacc.log /var/spool/quarantine || true
+	chmod 0644 /var/log/clamonacc.log || true
+
+	# Override ExecStart to enforce:
+	# - foreground (systemd)
+	# - fdpass (better for LocalSocket permissions)
+	# - log + quarantine
+	# Note: /var/spool/quarantine ships with the clamav package. :contentReference[oaicite:6]{index=6}
+	cat >"${dropin_dir}/override.conf" <<'EOF'
 [Service]
 ExecStart=
 ExecStart=/usr/bin/clamonacc --foreground --fdpass --log=/var/log/clamonacc.log --move=/var/spool/quarantine
@@ -194,11 +216,16 @@ EOF
 }
 
 setup_periodic_scan() {
-  install -d -m 0755 /usr/local/sbin
-  install -d -m 0755 /var/log/clamav
-  install -d -m 0700 /var/spool/quarantine
+	install -d -m 0755 /usr/local/sbin
+	install -d -m 0755 /var/log/clamav
+	install -d -m 0700 /var/spool/quarantine
 
-  cat >/usr/local/sbin/clamav-scan-targets.bash <<'EOF'
+	# Ensure log/quarantine ownership and permissions
+	chown -R clamscan:clamscan /var/log/clamav /var/spool/quarantine || true
+	chmod 0755 /var/log/clamav || true
+	chmod 0700 /var/spool/quarantine || true
+
+	cat >/usr/local/sbin/clamav-scan-targets.bash <<'EOF'
 #!/bin/bash
 set -euo pipefail
 
@@ -230,9 +257,9 @@ mapfile -t uniq_targets < <(printf "%s\n" "${targets[@]}" | awk 'NF' | sort -u)
 # Use clamd (faster) and pass FDs so clamd user can scan user files.
 exec /usr/bin/clamdscan --multiscan --fdpass --infected --log="$log" --move="$QUAR" "${uniq_targets[@]}"
 EOF
-  chmod 0755 /usr/local/sbin/clamav-scan-targets.bash
+	chmod 0755 /usr/local/sbin/clamav-scan-targets.bash
 
-  cat >/etc/systemd/system/clamav-target-scan.service <<'EOF'
+	cat >/etc/systemd/system/clamav-target-scan.service <<'EOF'
 [Unit]
 Description=ClamAV: periodic scan of /var/home, /tmp, and mounted volumes
 Wants=clamd@scan.service
@@ -243,7 +270,7 @@ Type=oneshot
 ExecStart=/usr/local/sbin/clamav-scan-targets.bash
 EOF
 
-  cat >/etc/systemd/system/clamav-target-scan.timer <<'EOF'
+	cat >/etc/systemd/system/clamav-target-scan.timer <<'EOF'
 [Unit]
 Description=ClamAV: scheduler for periodic scans
 
@@ -258,42 +285,42 @@ EOF
 }
 
 enable_services() {
-  systemctl daemon-reload
+	systemctl daemon-reload
 
-  # Update signatures first (clamd needs DB). :contentReference[oaicite:7]{index=7}
-  systemctl enable --now clamav-freshclam.service || true
-  freshclam || true
+	# Update signatures first (clamd needs DB). :contentReference[oaicite:7]{index=7}
+	systemctl enable --now clamav-freshclam.service || true
+	freshclam || true
 
-  systemctl enable --now clamd@scan.service || true
+	systemctl enable --now clamd@scan.service || true
 
-  if systemctl list-unit-files --no-legend --type=service 2>/dev/null | awk '{print $1}' | grep -qx "clamav-clamonacc.service"; then
-    systemctl enable --now clamav-clamonacc.service || true
-  elif systemctl list-unit-files --no-legend --type=service 2>/dev/null | awk '{print $1}' | grep -qx "clamonacc.service"; then
-    systemctl enable --now clamonacc.service || true
-  fi
+	if systemctl list-unit-files --no-legend --type=service 2>/dev/null | awk '{print $1}' | grep -qx "clamav-clamonacc.service"; then
+		systemctl enable --now clamav-clamonacc.service || true
+	elif systemctl list-unit-files --no-legend --type=service 2>/dev/null | awk '{print $1}' | grep -qx "clamonacc.service"; then
+		systemctl enable --now clamonacc.service || true
+	fi
 
-  systemctl enable --now clamav-target-scan.timer || true
+	systemctl enable --now clamav-target-scan.timer || true
 }
 
 configure_all() {
-  configure_sysctl_inotify
-  configure_freshclam
-  configure_clamd_scanconf
-  setup_onaccess_service_override
-  setup_periodic_scan
+	configure_sysctl_inotify
+	configure_freshclam
+	configure_clamd_scanconf
+	setup_onaccess_service_override
+	setup_periodic_scan
 
-  # Restore SELinux contexts if available
-  if command -v restorecon >/dev/null 2>&1; then
-    restorecon -Rv /etc/clamd.d /etc/freshclam.conf /var/log/clamav /var/spool/quarantine >/dev/null 2>&1 || true
-  fi
+	# Restore SELinux contexts if available
+	if command -v restorecon >/dev/null 2>&1; then
+		restorecon -Rv /etc/clamd.d /etc/freshclam.conf /var/log/clamav /var/spool/quarantine >/dev/null 2>&1 || true
+	fi
 
-  enable_services
+	enable_services
 }
 
 schedule_postinstall() {
-  # If packages were layered but not live-applied, run config automatically after reboot.
-  install -d -m 0755 /var/lib/clamav-atomic
-  cat >/var/lib/clamav-atomic/postinstall.sh <<'EOF'
+	# If packages were layered but not live-applied, run config automatically after reboot.
+	install -d -m 0755 /var/lib/clamav-atomic
+	cat >/var/lib/clamav-atomic/postinstall.sh <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 # Runs the same configuration steps once the layered packages are available after reboot.
@@ -318,6 +345,10 @@ EOT
 
 configure_freshclam() {
   install -d -m 0755 /var/log/clamav
+  touch /var/log/freshclam.log || true
+  chown clamscan:clamscan /var/log/freshclam.log /var/log/clamav || true
+  chmod 0644 /var/log/freshclam.log || true
+  chmod 0755 /var/log/clamav || true
   local f="/etc/freshclam.conf"
   backup_once "$f"
   write_file_if_missing "$f" "# freshclam.conf - generated by clamav-atomic-setup"
@@ -381,6 +412,9 @@ setup_periodic_scan() {
   install -d -m 0755 /usr/local/sbin
   install -d -m 0755 /var/log/clamav
   install -d -m 0700 /var/spool/quarantine
+  chown -R clamscan:clamscan /var/log/clamav /var/spool/quarantine || true
+  chmod 0755 /var/log/clamav || true
+  chmod 0700 /var/spool/quarantine || true
 
   cat >/usr/local/sbin/clamav-scan-targets.bash <<'EOT'
 #!/usr/bin/env bash
@@ -462,9 +496,9 @@ main() {
 }
 main
 EOF
-  chmod 0755 /var/lib/clamav-atomic/postinstall.sh
+	chmod 0755 /var/lib/clamav-atomic/postinstall.sh
 
-  cat >/etc/systemd/system/clamav-atomic-postinstall.service <<'EOF'
+	cat >/etc/systemd/system/clamav-atomic-postinstall.service <<'EOF'
 [Unit]
 Description=ClamAV Atomic: post-install (configuration after reboot)
 Wants=network-online.target
@@ -478,60 +512,60 @@ ExecStart=/usr/bin/bash /var/lib/clamav-atomic/postinstall.sh
 WantedBy=multi-user.target
 EOF
 
-  systemctl daemon-reload
-  systemctl enable clamav-atomic-postinstall.service >/dev/null 2>&1 || true
+	systemctl daemon-reload
+	systemctl enable clamav-atomic-postinstall.service >/dev/null 2>&1 || true
 }
 
 install_if_needed_atomic() {
-  if ! have_cmd rpm-ostree; then
-    echo "rpm-ostree not found. This script is intended for Fedora Atomic (rpm-ostree)." >&2
-    exit 1
-  fi
+	if ! have_cmd rpm-ostree; then
+		echo "rpm-ostree not found. This script is intended for Fedora Atomic (rpm-ostree)." >&2
+		exit 1
+	fi
 
-  local missing=()
-  for p in clamav clamd clamav-freshclam; do
-    rpm -q "$p" >/dev/null 2>&1 || missing+=( "$p" )
-  done
+	local missing=()
+	for p in clamav clamd clamav-freshclam; do
+		rpm -q "$p" >/dev/null 2>&1 || missing+=("$p")
+	done
 
-  if ((${#missing[@]})); then
-    echo "Layering missing packages: ${missing[*]}"
-    local cmd=( rpm-ostree install --assumeyes )
-    if [[ "$APPLY_LIVE" -eq 1 ]] && rpm-ostree install --help 2>/dev/null | grep -q -- '--apply-live'; then
-      cmd+=( --apply-live )
-      echo "Using --apply-live (if supported)."
-    fi
-    "${cmd[@]}" "${missing[@]}"
-  fi
+	if ((${#missing[@]})); then
+		echo "Layering missing packages: ${missing[*]}"
+		local cmd=(rpm-ostree install --assumeyes)
+		if [[ $APPLY_LIVE -eq 1 ]] && rpm-ostree install --help 2>/dev/null | grep -q -- '--apply-live'; then
+			cmd+=(--apply-live)
+			echo "Using --apply-live (if supported)."
+		fi
+		"${cmd[@]}" "${missing[@]}"
+	fi
 }
 
 main() {
-  require_root
+	require_root
 
-  install_if_needed_atomic
+	install_if_needed_atomic
 
-  # If packages were just layered and not live-applied, clamscan/clamonacc may not exist yet.
-  if ! have_cmd clamscan || ! have_cmd clamdscan || ! have_cmd clamonacc; then
-    echo "Packages appear pending application (common on Atomic)."
-    echo "Scheduling automatic configuration for the next boot."
-    schedule_postinstall
-    echo "Reboot to complete installation and configuration."
-    exit 0
-  fi
+	# If packages were just layered and not live-applied, clamscan/clamonacc may not exist yet.
+	if ! have_cmd clamscan || ! have_cmd clamdscan || ! have_cmd clamonacc; then
+		echo "Packages appear pending application (common on Atomic)."
+		echo "Scheduling automatic configuration for the next boot."
+		schedule_postinstall
+		echo "Reboot to complete installation and configuration."
+		exit 0
+	fi
 
-  configure_all
+	configure_all
 
-  echo "Done. Services/timer configured:"
-  echo "  - clamav-freshclam (signature updates)"
-  echo "  - clamd@scan (daemon)"
-  echo "  - clamonacc (on-access, if the unit exists)"
-  echo "  - clamav-target-scan.timer (daily scan with quarantine)"
-  echo ""
-  echo "Logs:"
-  echo "  - /var/log/freshclam.log"
-  echo "  - /var/log/clamonacc.log"
-  echo "  - /var/log/clamav/clamdscan-*.log"
-  echo "Quarantine:"
-  echo "  - /var/spool/quarantine"
+	echo "Done. Services/timer configured:"
+	echo "  - clamav-freshclam (signature updates)"
+	echo "  - clamd@scan (daemon)"
+	echo "  - clamonacc (on-access, if the unit exists)"
+	echo "  - clamav-target-scan.timer (daily scan with quarantine)"
+	echo ""
+	echo "Logs:"
+	echo "  - /var/log/freshclam.log"
+	echo "  - /var/log/clamonacc.log"
+	echo "  - /var/log/clamav/clamdscan-*.log"
+	echo "Quarantine:"
+	echo "  - /var/spool/quarantine"
 }
 
 main

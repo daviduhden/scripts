@@ -7,10 +7,12 @@ Shell and Perl utilities for system administration and maintenance across multip
 ```
 .
 ├── debian/        # Scripts for Debian-based distributions
-├── shell/         # Shell helpers for interactive shells
+├── lib/           # Shared libraries for scripts
 ├── openbsd/       # Scripts for OpenBSD systems
 ├── perl/          # Perl scripts (portable)
-└── secureblue/    # Scripts for Secureblue (Fedora Atomic/rpm-ostree)
+├── secureblue/    # Scripts for Secureblue (Fedora Atomic/rpm-ostree)
+├── shell/         # Shell helpers for interactive shells
+└── tests-format/  # Test scripts for validating formatting
 ```
 
 ## Installation
@@ -32,6 +34,9 @@ make install-shell
 
 # Perl
 make install-perl
+
+# Tests/formatting scripts (for developers)
+make install-tests-format
 ```
 
-Recipes use `install(1)` and strip `.pl`/`.bash`/`.zsh`/`.ksh` when placing shell scripts in `${BINDIR}`.
+Recipes use `install(1)` and strip `.pl`/`.bash`/`.zsh`/`.ksh`/`.sh` when placing shell scripts in `${BINDIR}`.

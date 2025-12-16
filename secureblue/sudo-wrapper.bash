@@ -1,6 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Source silent helper if available (prefer silent.bash, fallback to silent)
+if [[ -f "$(dirname "$0")/../lib/silent.bash" ]]; then
+	# shellcheck source=/dev/null
+	source "$(dirname "$0")/../lib/silent.bash"
+	start_silence
+elif [[ -f "$(dirname "$0")/../lib/silent" ]]; then
+	# shellcheck source=/dev/null
+	source "$(dirname "$0")/../lib/silent"
+	start_silence
+fi
+
+# SecureBlue sudo-wrapper script
 # Compatibility shim that redirects sudo calls to run0
 # and wraps visudo via run0, and sudoedit via run0edit (safe graphical/root editor).
 #
@@ -25,89 +37,92 @@ set -euo pipefail
 
 # Simple colors for messages
 if [ -t 1 ] && [ "${NO_COLOR:-0}" != "1" ]; then
-    GREEN="\033[32m"
-    YELLOW="\033[33m"
-    RED="\033[31m"
-    RESET="\033[0m"
+	GREEN="\033[32m"
+	YELLOW="\033[33m"
+	RED="\033[31m"
+	RESET="\033[0m"
 else
-    GREEN=""
-    YELLOW=""
-    RED=""
-    RESET=""
+	GREEN=""
+	YELLOW=""
+	RED=""
+	RESET=""
 fi
 
-log()    { printf '%s %b[INFO]%b ✅ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$GREEN" "$RESET" "$*"; }
-warn()   { printf '%s %b[WARN]%b ⚠️ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$YELLOW" "$RESET" "$*"; }
-error()  { printf '%s %b[ERROR]%b ❌ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$RED" "$RESET" "$*" >&2; exit 1; }
+log() { printf '%s %b[INFO]%b ✅ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$GREEN" "$RESET" "$*"; }
+warn() { printf '%s %b[WARN]%b ⚠️ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$YELLOW" "$RESET" "$*"; }
+error() {
+	printf '%s %b[ERROR]%b ❌ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$RED" "$RESET" "$*" >&2
+	exit 1
+}
 
 # Detect how this script was called (sudo vs visudo vs sudoedit, etc.)
 prog_name="$(basename -- "$0")"
 
 # Optional: fail fast if run0 is not available in PATH.
 if ! command -v run0 >/dev/null 2>&1; then
-    error "${prog_name}-wrapper error: 'run0' is not installed or not in PATH. Please install or enable run0 before using this wrapper."
+	error "${prog_name}-wrapper error: 'run0' is not installed or not in PATH. Please install or enable run0 before using this wrapper."
 fi
 
 ##########################################
 # Special handling when called as visudo #
 ##########################################
-if [[ "$prog_name" == "visudo" ]]; then
-    #
-    # We want to execute the real visudo binary with elevated privileges
-    # using run0, while avoiding recursive calls back into this wrapper.
-    #
+if [[ $prog_name == "visudo" ]]; then
+	#
+	# We want to execute the real visudo binary with elevated privileges
+	# using run0, while avoiding recursive calls back into this wrapper.
+	#
 
-    # Preferred hard-coded path to the real visudo
-    real_visudo="/usr/sbin/visudo"
+	# Preferred hard-coded path to the real visudo
+	real_visudo="/usr/sbin/visudo"
 
-    # If for some reason that path doesn't exist, fall back to command -v,
-    # but try to avoid picking up /usr/local/bin/visudo (this wrapper).
-    if [[ ! -x "$real_visudo" ]]; then
-        # Look up visudo in PATH
-        real_visudo_found="$(command -v visudo 2>/dev/null || true)"
+	# If for some reason that path doesn't exist, fall back to command -v,
+	# but try to avoid picking up /usr/local/bin/visudo (this wrapper).
+	if [[ ! -x $real_visudo ]]; then
+		# Look up visudo in PATH
+		real_visudo_found="$(command -v visudo 2>/dev/null || true)"
 
-        # If command -v returned our own path, we still have a problem,
-        # so double-check that it is not this script.
-        if [[ -n "$real_visudo_found" && "$real_visudo_found" != "$0" ]]; then
-            real_visudo="$real_visudo_found"
-        fi
-    fi
+		# If command -v returned our own path, we still have a problem,
+		# so double-check that it is not this script.
+		if [[ -n $real_visudo_found && $real_visudo_found != "$0" ]]; then
+			real_visudo="$real_visudo_found"
+		fi
+	fi
 
-    # Final sanity check
-    if [[ ! -x "$real_visudo" ]]; then
-        error "sudo-wrapper error: could not locate the real 'visudo' binary. Expected /usr/sbin/visudo or another executable visudo in PATH."
-    fi
+	# Final sanity check
+	if [[ ! -x $real_visudo ]]; then
+		error "sudo-wrapper error: could not locate the real 'visudo' binary. Expected /usr/sbin/visudo or another executable visudo in PATH."
+	fi
 
-    # Optional hint variable
-    export VISUDO_VIA_RUN0=1
+	# Optional hint variable
+	export VISUDO_VIA_RUN0=1
 
-    # Execute real visudo via run0 as root
-    exec run0 "$real_visudo" "$@"
-    # We should never reach here
-    exit 1
+	# Execute real visudo via run0 as root
+	exec run0 "$real_visudo" "$@"
+	# We should never reach here
+	exit 1
 fi
 
 ############################################
 # Special handling when called as sudoedit #
 ############################################
-if [[ "$prog_name" == "sudoedit" ]]; then
-    #
-    # Use run0edit for graphical/safe editing as root.
-    #
-    if [[ "$#" -lt 1 ]]; then
-        error "Usage: sudoedit FILE..."
-    fi
+if [[ $prog_name == "sudoedit" ]]; then
+	#
+	# Use run0edit for graphical/safe editing as root.
+	#
+	if [[ $# -lt 1 ]]; then
+		error "Usage: sudoedit FILE..."
+	fi
 
-    # Determine preferred editor (pass to run0edit)
-    editor="${SUDO_EDITOR:-${VISUAL:-${EDITOR:-}}}"
-    run0edit_args=()
-    if [[ -n "$editor" ]]; then
-        run0edit_args+=(--editor "$editor")
-    fi
+	# Determine preferred editor (pass to run0edit)
+	editor="${SUDO_EDITOR:-${VISUAL:-${EDITOR:-}}}"
+	run0edit_args=()
+	if [[ -n $editor ]]; then
+		run0edit_args+=(--editor "$editor")
+	fi
 
-    export SUDOEDIT_VIA_RUN0=1
-    exec run0edit "${run0edit_args[@]}" "$@"
-    exit 1
+	export SUDOEDIT_VIA_RUN0=1
+	exec run0edit "${run0edit_args[@]}" "$@"
+	exit 1
 fi
 
 ################################

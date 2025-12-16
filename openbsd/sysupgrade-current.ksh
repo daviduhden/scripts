@@ -3,22 +3,34 @@
 # If we are NOT already running under ksh93, try to re-exec with ksh93.
 # If ksh93 is not available, fall back to the base ksh (OpenBSD /bin/ksh).
 case "${KSH_VERSION-}" in
-    *93*) : ;;  # already ksh93
-    *)
-        if command -v ksh93 >/dev/null 2>&1; then
-            exec ksh93 "$0" "$@"
-        elif [ -x /usr/local/bin/ksh93 ]; then
-            exec /usr/local/bin/ksh93 "$0" "$@"
-        elif command -v ksh >/dev/null 2>&1; then
-            exec ksh "$0" "$@"
-        elif [ -x /bin/ksh ]; then
-            exec /bin/ksh "$0" "$@"
-        fi
-    ;;
+*93*) : ;; # already ksh93
+*)
+	if command -v ksh93 >/dev/null 2>&1; then
+		exec ksh93 "$0" "$@"
+	elif [ -x /usr/local/bin/ksh93 ]; then
+		exec /usr/local/bin/ksh93 "$0" "$@"
+	elif command -v ksh >/dev/null 2>&1; then
+		exec ksh "$0" "$@"
+	elif [ -x /bin/ksh ]; then
+		exec /bin/ksh "$0" "$@"
+	fi
+	;;
 esac
 
 set -eu
 
+# Source silent helper if available (prefer silent.ksh, fallback to silent)
+if [ -f "$(dirname "$0")/../lib/silent.ksh" ]; then
+	# shellcheck source=/dev/null
+	. "$(dirname "$0")/../lib/silent.ksh"
+	start_silence
+elif [ -f "$(dirname "$0")/../lib/silent" ]; then
+	# shellcheck source=/dev/null
+	. "$(dirname "$0")/../lib/silent"
+	start_silence
+fi
+
+# OpenBSD sysupgrade-current script
 # Upgrade to snapshot (-current) and schedule post-upgrade actions
 # to run on first boot via rc.firsttime(8).
 #
@@ -31,31 +43,37 @@ set -eu
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
 
-# Basic PATH (important when run from cron)
+# Basic PATH
 PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin
 export PATH
 
 if [ -t 1 ] && [ "${NO_COLOR:-}" != "1" ]; then
-    GREEN="\033[32m"; YELLOW="\033[33m"; RED="\033[31m"; RESET="\033[0m"
+	GREEN="\033[32m"
+	YELLOW="\033[33m"
+	RED="\033[31m"
+	RESET="\033[0m"
 else
-    GREEN=""; YELLOW=""; RED=""; RESET=""
+	GREEN=""
+	YELLOW=""
+	RED=""
+	RESET=""
 fi
 
-log()   { print "$(date '+%Y-%m-%d %H:%M:%S') ${GREEN}[INFO]${RESET} ✅ $*"; }
-warn()  { print "$(date '+%Y-%m-%d %H:%M:%S') ${YELLOW}[WARN]${RESET} ⚠️ $*" >&2; }
+log() { print "$(date '+%Y-%m-%d %H:%M:%S') ${GREEN}[INFO]${RESET} ✅ $*"; }
+warn() { print "$(date '+%Y-%m-%d %H:%M:%S') ${YELLOW}[WARN]${RESET} ⚠️ $*" >&2; }
 error() { print "$(date '+%Y-%m-%d %H:%M:%S') ${RED}[ERROR]${RESET} ❌ $*" >&2; }
 
 cleanup_previous_artifacts() {
-    if [ -f /upgrade.site ]; then
-        rm -f /upgrade.site
-    fi
-    if ls /tmp/openbsd-info.* >/dev/null 2>&1; then
-        rm -f /tmp/openbsd-info.*
-    fi
+	if [ -f /upgrade.site ]; then
+		rm -f /upgrade.site
+	fi
+	if ls /tmp/openbsd-info.* >/dev/null 2>&1; then
+		rm -f /tmp/openbsd-info.*
+	fi
 }
 
 write_upgrade_site() {
-    cat << 'EOF' > /upgrade.site
+	cat <<'EOF' >/upgrade.site
 #!/bin/ksh
 
 case "${KSH_VERSION-}" in
@@ -165,7 +183,7 @@ run_apply_sysclean() {
 }
 
 run_lynis_audit() {
-    print "Running Lynis security audit (if available)..."
+    print "Running Lynis security audit..."
     # Prefer explicit absolute shell path for Lynis (ksh93 -> ksh fallback).
     if [ -x /usr/local/bin/ksh93 ]; then
         shell_bin="/usr/local/bin/ksh93"
@@ -277,17 +295,17 @@ EOF
 }
 
 run_sysupgrade() {
-    log "Running sysupgrade -sf..."
-    /usr/sbin/sysupgrade -sf
+	log "Running sysupgrade -sf..."
+	/usr/sbin/sysupgrade -sf
 }
 
 main() {
-    log "Preparing /upgrade.site for post-upgrade tasks..."
-    cleanup_previous_artifacts
-    write_upgrade_site
-    chmod +x /upgrade.site
-    run_sysupgrade
-    log "sysupgrade completed; system info collection will run on first boot via /etc/rc.firsttime."
+	log "Preparing /upgrade.site for post-upgrade tasks..."
+	cleanup_previous_artifacts
+	write_upgrade_site
+	chmod +x /upgrade.site
+	run_sysupgrade
+	log "sysupgrade completed; system info collection will run on first boot via /etc/rc.firsttime."
 }
 
 main "$@"

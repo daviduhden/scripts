@@ -6,7 +6,7 @@
 
 PREFIX?=/usr/local
 BINDIR?=${PREFIX}/bin
-INFO?===> 
+INFO ?= ==>
 
 DEBIAN_SCRIPTS=\
 	debian/add-gh-cli-repo.bash \
@@ -40,6 +40,13 @@ SECUREBLUE_SCRIPTS=\
 	secureblue/sysupgrade.bash \
 	secureblue/update-arti-oniux.bash
 
+TESTS_FORMAT_SCRIPTS=\
+	tests-format/clang-format-all.sh \
+	tests-format/validate-manpages.sh \
+	tests-format/validate-make.sh \
+	tests-format/validate-perl.sh \
+	tests-format/validate-shell.sh
+
 SHELL_SCRIPTS=\
 	shell/global-vi-mode.sh
 
@@ -56,6 +63,9 @@ install-debian:
 		printf '%s Installing %s -> %s\n' "${INFO}" "$$f" "${BINDIR}/$$name"; \
 		install -m 0755 "$$f" "${BINDIR}/$$name"; \
 	done
+	@# Install shared library for scripts (optional)
+	@install -d ${PREFIX}/lib
+	@install -m 0644 lib/silent.bash ${PREFIX}/lib/silent || true
 	@echo "${INFO} Debian helpers installed"
 
 install-openbsd:
@@ -78,6 +88,9 @@ install-openbsd:
 	rm -rf "${BINDIR}/sysclean"; \
 	cp -R openbsd/sysclean "${BINDIR}/sysclean"; \
 	chmod -R a+rX "${BINDIR}/sysclean"
+	@# Install shared library for scripts (optional)
+	@install -d ${PREFIX}/lib
+	@install -m 0644 lib/silent.ksh ${PREFIX}/lib/silent || true
 	@echo "${INFO} OpenBSD helpers installed"
 
 install-secureblue:
@@ -103,13 +116,17 @@ install-secureblue:
 			ln -sf "$$wrapper" "${BINDIR}/$$link"; \
 		done; \
 	fi
-	@echo "${INFO} secureblue helpers installed"
+	@# Install shared library for scripts (optional)
+	@install -d ${PREFIX}/lib
+	@install -m 0644 lib/silent.bash ${PREFIX}/lib/silent || true
+	@echo "${INFO} SecureBlue helpers installed"
 
 install-shell:
 	@echo "${INFO} Installing shell helpers"
 	@# Install global-vi-mode into /etc/profile.d
-	@run0 install -d /etc/profile.d
-	@run0 install -m 0644 shell/global-vi-mode.sh /etc/profile.d/global-vi-mode.sh
+	@printf '%s Installing %s -> %s\n' "${INFO}" "shell/global-vi-mode.sh" "/etc/profile.d/global-vi-mode.sh"
+	@install -d /etc/profile.d
+	@install -m 0644 shell/global-vi-mode.sh /etc/profile.d/global-vi-mode.sh
 	@echo "${INFO} Shell helpers installed"
 
 # OpenBSD does not ship /etc/profile.d; provide guidance instead of editing /etc/profile automatically.
@@ -127,3 +144,36 @@ install-perl:
 		printf 'Installing %s -> %s\n' "$$f" "${BINDIR}/$$name"; \
 		install -m 0755 "$$f" "${BINDIR}/$$name"; \
 	done
+
+.PHONY: install-tests-format
+install-tests-format:
+	@echo "${INFO} Installing tests-format scripts"
+	@install -d ${BINDIR}/tests-format
+	@for f in ${TESTS_FORMAT_SCRIPTS}; do \
+		base=$${f##*/}; name=$${base%.sh}; \
+		printf '%s Installing %s -> %s\n' "${INFO}" "$$f" "${BINDIR}/$$name"; \
+		install -m 0755 "$$f" "${BINDIR}/$$name"; \
+	done
+
+.PHONY: test
+test:
+	@echo "Running shell script validation..."
+	@/bin/sh tests-format/validate-shell.sh .
+	@echo "Running perl script validation..."
+	@/bin/sh tests-format/validate-perl.sh .
+	@echo "Running make validation..."
+	@/bin/sh tests-format/validate-make.sh .
+.PHONY: help
+help:
+	@echo "Usage: make [target]"
+	@echo ""
+	@echo "Targets:"
+	@echo "  install-debian        Install Debian helper scripts into $(BINDIR)"
+	@echo "  install-openbsd       Install OpenBSD helper scripts into $(BINDIR)"
+	@echo "  install-secureblue    Install secureblue helper scripts into $(BINDIR)"
+	@echo "  install-shell         Install shell helpers (global-vi-mode)"
+	@echo "  install-shell-openbsd Guidance for installing shell helpers on OpenBSD"
+	@echo "  install-perl          Install perl helper scripts into $(BINDIR)"
+	@echo "  test                  Run script and make validation tests"
+	@echo "  install-tests-format  Install tests-format helper scripts into $(BINDIR)/tests-format"
+	@echo "  help                  Show this help"
