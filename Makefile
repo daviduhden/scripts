@@ -65,7 +65,7 @@ install-debian:
 	done
 	@# Install shared library for scripts (optional)
 	@install -d ${PREFIX}/lib
-	@install -m 0644 lib/silent.bash ${PREFIX}/lib/silent || true
+	# silent helper removed; no shared lib to install
 	@echo "${INFO} Debian helpers installed"
 
 install-openbsd:
@@ -90,7 +90,7 @@ install-openbsd:
 	chmod -R a+rX "${BINDIR}/sysclean"
 	@# Install shared library for scripts (optional)
 	@install -d ${PREFIX}/lib
-	@install -m 0644 lib/silent.ksh ${PREFIX}/lib/silent || true
+	# silent helper removed; no shared lib to install
 	@echo "${INFO} OpenBSD helpers installed"
 
 install-secureblue:
@@ -118,7 +118,7 @@ install-secureblue:
 	fi
 	@# Install shared library for scripts (optional)
 	@install -d ${PREFIX}/lib
-	@install -m 0644 lib/silent.bash ${PREFIX}/lib/silent || true
+	# silent helper removed; no shared lib to install
 	@echo "${INFO} SecureBlue helpers installed"
 
 install-shell:

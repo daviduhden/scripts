@@ -6,17 +6,6 @@ fi
 
 set -euo pipefail
 
-# Source silent runner and start silent capture (prints output only on error)
-if [[ -f "$(dirname "$0")/../lib/silent.bash" ]]; then
-	# shellcheck source=/dev/null
-	source "$(dirname "$0")/../lib/silent.bash"
-	start_silence
-elif [[ -f "$(dirname "$0")/../lib/silent" ]]; then
-	# shellcheck source=/dev/null
-	source "$(dirname "$0")/../lib/silent"
-	start_silence
-fi
-
 # Argon One V3 maintenance script
 #  - Updates EEPROM (argon-eeprom.sh)
 #  - Updates power button & fan control script (argon1.sh)

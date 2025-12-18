@@ -3,24 +3,76 @@ name: Run script tests
 on:
   push:
     paths:
-      - '**/*.sh'
-      - '**/*.bash'
-      - '**/*.pl'
+      - "**/*.sh"
+      - "**/*.ksh"
+      - "**/*.bash"
+      - "**/*.pl"
+      - "Makefile"
+      - ".github/workflows/run-tests.yml"
   pull_request:
     paths:
-      - '**/*.sh'
-      - '**/*.bash'
-      - '**/*.pl'
+      - "**/*.sh"
+      - "**/*.ksh"
+      - "**/*.bash"
+      - "**/*.pl"
+      - "Makefile"
+      - ".github/workflows/run-tests.yml"
   workflow_dispatch:
 
 jobs:
   test:
     runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        shell: bash
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Go (for checkmake)
+        uses: actions/setup-go@v5
+        with:
+          go-version: "stable"
+
+      - name: Setup Python (for mbake)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install apt dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            perltidy \
+            shfmt \
+            shellcheck \
+            ksh
+
+          perltidy --version | head -n 1 || true
+          shfmt --version || true
+          shellcheck --version | head -n 2 || true
+          ksh --version || true
+
+      - name: Install checkmake (go install) and mbake (pip)
+        run: |
+          set -euo pipefail
+
+          # Ensure user-level bins are on PATH
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          echo "$HOME/go/bin" >> "$GITHUB_PATH"
+
+          # checkmake (Go)
+          go install github.com/checkmake/checkmake/cmd/checkmake@latest
+          checkmake --version || true
+
+          # mbake (Python)
+          python -m pip install --upgrade pip
+          python -m pip install --user mbake
+          mbake --version || true
+
       - name: Run tests
         run: make test
-        # The workflow lives in the scripts repository; Makefile target runs tests
         working-directory: .

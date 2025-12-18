@@ -19,17 +19,6 @@ esac
 
 set -eu
 
-# Source silent helper if available (prefer silent.ksh, fallback to silent)
-if [ -f "$(dirname "$0")/../lib/silent.ksh" ]; then
-	# shellcheck source=/dev/null
-	. "$(dirname "$0")/../lib/silent.ksh"
-	start_silence
-elif [ -f "$(dirname "$0")/../lib/silent" ]; then
-	# shellcheck source=/dev/null
-	. "$(dirname "$0")/../lib/silent"
-	start_silence
-fi
-
 # OpenBSD sudo-wrapper script
 # Compatibility shim that redirects sudo calls to doas and wraps visudo/sudoedit
 # to be executed via doas as well.

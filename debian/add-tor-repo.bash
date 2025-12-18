@@ -6,13 +6,6 @@ fi
 
 set -euo pipefail
 
-# Source silent runner and start silent capture (prints output only on error)
-if [[ -f "$(dirname "$0")/../lib/silent.bash" ]]; then
-	# shellcheck source=/dev/null
-	source "$(dirname "$0")/../lib/silent.bash"
-	start_silence
-fi
-
 # Debian add Tor APT repository script
 # This script adds the Tor Project APT repository,
 # installs tor automatically and enables/starts the service

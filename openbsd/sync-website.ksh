@@ -19,17 +19,6 @@ esac
 
 set -u
 
-# Source silent helper if available (prefer silent.ksh, fallback to silent)
-if [ -f "$(dirname "$0")/../lib/silent.ksh" ]; then
-	# shellcheck source=/dev/null
-	. "$(dirname "$0")/../lib/silent.ksh"
-	start_silence
-elif [ -f "$(dirname "$0")/../lib/silent" ]; then
-	# shellcheck source=/dev/null
-	. "$(dirname "$0")/../lib/silent"
-	start_silence
-fi
-
 # OpenBSD website synchronization script
 # Synchronizes a deployed website directory with a GitHub repository:
 #  - Prefers GitHub CLI (gh repo sync) if available
