@@ -1,17 +1,6 @@
 #!/bin/bash
 set -euo pipefail
 
-# Source silent helper if available (prefer silent.bash, fallback to silent)
-if [[ -f "$(dirname "$0")/../lib/silent.bash" ]]; then
-	# shellcheck source=/dev/null
-	source "$(dirname "$0")/../lib/silent.bash"
-	start_silence
-elif [[ -f "$(dirname "$0")/../lib/silent" ]]; then
-	# shellcheck source=/dev/null
-	source "$(dirname "$0")/../lib/silent"
-	start_silence
-fi
-
 # SecureBlue LUKS ext4 to Btrfs converter script
 # Interactive helper to convert an ext4 filesystem inside a LUKS-encrypted device
 # to Btrfs in-place using run0 for privilege escalation.

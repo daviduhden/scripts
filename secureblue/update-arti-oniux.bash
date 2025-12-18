@@ -1,17 +1,6 @@
 #!/bin/bash
 set -euo pipefail
 
-# Source silent helper if available (prefer silent.bash, fallback to silent)
-if [[ -f "$(dirname "$0")/../lib/silent.bash" ]]; then
-	# shellcheck source=/dev/null
-	source "$(dirname "$0")/../lib/silent.bash"
-	start_silence
-elif [[ -f "$(dirname "$0")/../lib/silent" ]]; then
-	# shellcheck source=/dev/null
-	source "$(dirname "$0")/../lib/silent"
-	start_silence
-fi
-
 # SecureBlue arti and oniux update/install script
 # Automated script to install or update Rust-based Tor software (arti and oniux)
 # - Ensures Rust and cargo are installed (via rustup or Homebrew)

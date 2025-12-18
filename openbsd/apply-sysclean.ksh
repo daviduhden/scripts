@@ -19,20 +19,6 @@ esac
 
 set -eu
 
-# Source silent helper if available (prefer silent.ksh, fallback to silent)
-if [ -f "$(dirname "$0")/../lib/silent.ksh" ]; then
-	# shellcheck source=/dev/null
-	. "$(dirname "$0")/../lib/silent.ksh"
-	start_silence
-elif [ -f "$(dirname "$0")/../lib/silent" ]; then
-	# shellcheck source=/dev/null
-	. "$(dirname "$0")/../lib/silent"
-	start_silence
-fi
-
-# Ensure common tools are available (attempt auto-install when possible)
-printf '[WARN] automatic package install removed; please ensure the following are installed: curl git ca-certificates\n' >&2
-
 # OpenBSD apply-sysclean script
 #
 # This script runs sysclean(8), parses its report, and applies the suggested

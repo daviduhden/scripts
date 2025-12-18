@@ -1,17 +1,6 @@
 #!/bin/bash
 set -euo pipefail
 
-# Source silent helper if available (prefer silent.bash, fallback to silent)
-if [[ -f "$(dirname "$0")/../lib/silent.bash" ]]; then
-	# shellcheck source=/dev/null
-	source "$(dirname "$0")/../lib/silent.bash"
-	start_silence
-elif [[ -f "$(dirname "$0")/../lib/silent" ]]; then
-	# shellcheck source=/dev/null
-	source "$(dirname "$0")/../lib/silent"
-	start_silence
-fi
-
 # SecureBlue arti.service installation script
 # Automated script to install and enable arti.service for user systemd
 # - Installs arti.service systemd user unit from bundled template

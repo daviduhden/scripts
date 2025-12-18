@@ -1,17 +1,6 @@
 #!/bin/bash
 set -euo pipefail
 
-# Source silent helper if available (prefer silent.bash, fallback to silent)
-if [[ -f "$(dirname "$0")/../lib/silent.bash" ]]; then
-	# shellcheck source=/dev/null
-	source "$(dirname "$0")/../lib/silent.bash"
-	start_silence
-elif [[ -f "$(dirname "$0")/../lib/silent" ]]; then
-	# shellcheck source=/dev/null
-	source "$(dirname "$0")/../lib/silent"
-	start_silence
-fi
-
 # Fedora Atomic ClamAV setup:
 # - Layers packages (rpm-ostree) if missing
 # - Configures: freshclam updates, clamd@scan, clamonacc on-access, and a periodic scan timer
@@ -28,7 +17,7 @@ for arg in "${@:-}"; do
 	-h | --help)
 		cat <<'USAGE'
 Usage:
-  sudo ./setup-clamav.bash [--apply-live]
+  run0 ./setup-clamav.bash [--apply-live]
 
 Notes:
   - On Fedora Atomic, rpm-ostree typically needs a reboot to apply layered packages.

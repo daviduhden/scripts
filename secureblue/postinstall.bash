@@ -1,17 +1,6 @@
 #!/bin/bash
 set -uo pipefail
 
-# Source silent helper if available (prefer silent.ksh/silent.bash, fallback to silent)
-if [[ -f "$(dirname "$0")/../lib/silent.bash" ]]; then
-	# shellcheck source=/dev/null
-	source "$(dirname "$0")/../lib/silent.bash"
-	start_silence
-elif [[ -f "$(dirname "$0")/../lib/silent" ]]; then
-	# shellcheck source=/dev/null
-	source "$(dirname "$0")/../lib/silent"
-	start_silence
-fi
-
 # Secureblue post-install interactive runner for ujust commands
 # - Runs non-reboot steps first
 # - Queues reboot-likely steps to run at the end, then offers reboot
@@ -205,7 +194,7 @@ say "📋 Plan de ejecución"
 if ((${#QUEUE_NOW[@]})); then
 	say "🚀 Pasos SIN reinicio (se ejecutan ahora):"
 	for item in "${QUEUE_NOW[@]}"; do
-		say "  • ${item%%||*}"
+		say "  - ${item%%||*}"
 	done
 else
 	say "🚀 Pasos SIN reinicio (se ejecutan ahora): ninguno"
@@ -214,7 +203,7 @@ fi
 if ((${#QUEUE_LATE[@]})); then
 	say "♻️  Pasos que PROBABLEMENTE requieren reinicio (al final):"
 	for item in "${QUEUE_LATE[@]}"; do
-		say "  • ${item%%||*}"
+		say "  - ${item%%||*}"
 	done
 else
 	say "♻️  Pasos que PROBABLEMENTE requieren reinicio (al final): ninguno"
@@ -263,7 +252,7 @@ say "📝 Log: $LOG_FILE"
 if ((${#FAILURES[@]})); then
 	say "⚠️  Fallos encontrados:"
 	for f in "${FAILURES[@]}"; do
-		say "  • $f"
+		say "  - $f"
 	done
 	exit 1
 else

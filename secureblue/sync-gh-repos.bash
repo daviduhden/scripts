@@ -1,17 +1,6 @@
 #!/bin/bash
 set -euo pipefail
 
-# Source silent helper if available (prefer silent.bash, fallback to silent)
-if [[ -f "$(dirname "$0")/../lib/silent.bash" ]]; then
-	# shellcheck source=/dev/null
-	source "$(dirname "$0")/../lib/silent.bash"
-	start_silence
-elif [[ -f "$(dirname "$0")/../lib/silent" ]]; then
-	# shellcheck source=/dev/null
-	source "$(dirname "$0")/../lib/silent"
-	start_silence
-fi
-
 # GitHub repository sync script
 # Sync or clone all repositories for a GitHub user into a local base directory.
 # - Uses GitHub CLI for authenticated API access

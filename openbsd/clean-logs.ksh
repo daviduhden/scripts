@@ -19,17 +19,6 @@ esac
 
 set -eu
 
-# Source silent helper if available (prefer silent.ksh, fallback to silent)
-if [ -f "$(dirname "$0")/../lib/silent.ksh" ]; then
-	# shellcheck source=/dev/null
-	. "$(dirname "$0")/../lib/silent.ksh"
-	start_silence
-elif [ -f "$(dirname "$0")/../lib/silent" ]; then
-	# shellcheck source=/dev/null
-	. "$(dirname "$0")/../lib/silent"
-	start_silence
-fi
-
 # Log cleanup script
 # - Removes *.gz files under /var/log and *.old files under / (root filesystem only).
 # - Supports a dry-run mode via DRY_RUN=1 or the --dry-run / -n option to only list files.

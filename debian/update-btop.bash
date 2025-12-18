@@ -6,17 +6,6 @@ fi
 
 set -euo pipefail
 
-# Source silent runner and start silent capture (prints output only on error)
-if [[ -f "$(dirname "$0")/../lib/silent.bash" ]]; then
-	# shellcheck source=/dev/null
-	source "$(dirname "$0")/../lib/silent.bash"
-	start_silence
-elif [[ -f "$(dirname "$0")/../lib/silent" ]]; then
-	# shellcheck source=/dev/null
-	source "$(dirname "$0")/../lib/silent"
-	start_silence
-fi
-
 # Debian btop++ update script
 # Build and install the latest btop++ from source on Debian-based systems.
 # - Fetches the latest release tag from GitHub

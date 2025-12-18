@@ -6,17 +6,6 @@ fi
 
 set -euo pipefail
 
-# Source silent runner and start silent capture (prints output only on error)
-if [[ -f "$(dirname "$0")/../lib/silent.bash" ]]; then
-	# shellcheck source=/dev/null
-	source "$(dirname "$0")/../lib/silent.bash"
-	start_silence
-elif [[ -f "$(dirname "$0")/../lib/silent" ]]; then
-	# shellcheck source=/dev/null
-	source "$(dirname "$0")/../lib/silent"
-	start_silence
-fi
-
 # Debian enable Tor transport for APT repositories script
 # Enable tor+https/tor+http transports for all APT repositories on Debian-based systems.
 # Converts existing sources.list and *.list/.sources entries to use tor+https (or tor+http for plain HTTP),
