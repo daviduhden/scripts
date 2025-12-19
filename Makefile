@@ -85,9 +85,6 @@ install-openbsd:
 	rm -rf "${BINDIR}/sysclean"; \
 	cp -R openbsd/sysclean "${BINDIR}/sysclean"; \
 	chmod -R a+rX "${BINDIR}/sysclean"
-	@# Install shared library for scripts (optional)
-	@install -d ${PREFIX}/lib
-	# silent helper removed; no shared lib to install
 	@echo "${INFO} OpenBSD helpers installed"
 
 install-secureblue:
