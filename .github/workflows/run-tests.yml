@@ -63,6 +63,8 @@ jobs:
           # Ensure user-level bins are on PATH
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           echo "$HOME/go/bin" >> "$GITHUB_PATH"
+          # Make these paths available in this step as well
+          export PATH="$HOME/.local/bin:$HOME/go/bin:$PATH"
 
           # checkmake (Go)
           go install github.com/checkmake/checkmake/cmd/checkmake@latest
