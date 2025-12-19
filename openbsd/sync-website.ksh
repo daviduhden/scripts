@@ -72,7 +72,7 @@ has_repo_content() {
 typeset GH_USER GH_HOST REPO_SLUG
 GH_USER="${GH_USER:-root}"
 GH_HOST="${GH_HOST:-github.com}"
-REPO_SLUG="${REPO_SLUG:-daviduhden/cyberpunk-handbook}"
+REPO_SLUG="${REPO_SLUG:-daviduhden/cypherpunk-handbook}"
 
 # Try to resolve the home directory of GH_USER in a portable way.
 typeset GH_HOME GH_CONFIG_DIR
@@ -136,7 +136,7 @@ stage_from_source() {
 ###############################
 
 typeset WWW_DIR BRANCH SERVICE_NAME OWNER_USER OWNER_GROUP WWW_HOST
-WWW_DIR="/var/www/htdocs/cyberpunk-handbook"
+WWW_DIR="/var/www/htdocs/cypherpunk-handbook"
 WWW_HOST="handbook.uhden.dev"
 BRANCH="main"
 SERVICE_NAME="httpd"
