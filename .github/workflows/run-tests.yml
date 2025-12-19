@@ -67,7 +67,7 @@ jobs:
           export PATH="$HOME/.local/bin:$HOME/go/bin:$PATH"
 
           # checkmake (Go)
-          go install github.com/checkmake/checkmake/cmd/checkmake@latest
+          go install github.com/mrtazz/checkmake/cmd/checkmake@latest
           checkmake --version || true
 
           # mbake (Python)
