@@ -63,9 +63,6 @@ install-debian:
 		printf '%s Installing %s -> %s\n' "${INFO}" "$$f" "${BINDIR}/$$name"; \
 		install -m 0755 "$$f" "${BINDIR}/$$name"; \
 	done
-	@# Install shared library for scripts (optional)
-	@install -d ${PREFIX}/lib
-	# silent helper removed; no shared lib to install
 	@echo "${INFO} Debian helpers installed"
 
 install-openbsd:
@@ -94,7 +91,7 @@ install-openbsd:
 	@echo "${INFO} OpenBSD helpers installed"
 
 install-secureblue:
-	@echo "${INFO} Installing secureblue helpers"
+	@echo "${INFO} Installing SecureBlue helpers"
 	@install -d ${BINDIR}
 	@for f in ${SECUREBLUE_SCRIPTS}; do \
 		base=$${f##*/}; name=$${base%.bash}; \
@@ -116,9 +113,6 @@ install-secureblue:
 			ln -sf "$$wrapper" "${BINDIR}/$$link"; \
 		done; \
 	fi
-	@# Install shared library for scripts (optional)
-	@install -d ${PREFIX}/lib
-	# silent helper removed; no shared lib to install
 	@echo "${INFO} SecureBlue helpers installed"
 
 install-shell:
@@ -160,7 +154,7 @@ test:
 	@echo "Running shell script validation..."
 	@/bin/sh tests-format/validate-shell.sh .
 	@echo "Running perl script validation..."
-	@/bin/sh tests-format/validate-perl.sh .
+	@/bin/sh tests-format/validate-perl.sh ./perl
 	@echo "Running make validation..."
 	@/bin/sh tests-format/validate-make.sh .
 .PHONY: help

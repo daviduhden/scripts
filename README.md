@@ -10,7 +10,7 @@ Shell and Perl utilities for system administration and maintenance across multip
 ├── lib/           # Shared libraries for scripts
 ├── openbsd/       # Scripts for OpenBSD systems
 ├── perl/          # Perl scripts (portable)
-├── secureblue/    # Scripts for Secureblue (Fedora Atomic/rpm-ostree)
+├── secureblue/    # Scripts for SecureBlue (Fedora Atomic/rpm-ostree)
 ├── shell/         # Shell helpers for interactive shells
 └── tests-format/  # Test scripts for validating formatting
 ```
@@ -26,7 +26,7 @@ make install-debian
 # OpenBSD
 make install-openbsd
 
-# Secureblue
+# SecureBlue
 make install-secureblue
 
 # Shell helpers (install to /etc/profile.d)

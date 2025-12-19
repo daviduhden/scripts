@@ -6,9 +6,6 @@ fi
 
 set -euo pipefail
 
-# Source silent runner and start silent capture (prints output only on error)
-
-
 # Debian Monero CLI update script
 # Automatically install/update Monero CLI to the latest stable version
 # on Linux systems using official tarballs.
