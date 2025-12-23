@@ -13,7 +13,7 @@ set -euo pipefail
 #   3. Homebrew packages (brew)
 #   4. Flatpak runtimes and applications (system + per-user)
 #   5. Storage maintenance (ext4/btrfs filesystems)
-#   6. Secureblue debug information (uploaded to 0x0.st)
+#   6. Secureblue debug information collection
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
@@ -164,16 +164,30 @@ update_firmware() {
 update_homebrew() {
 	log "Updating Homebrew applications..."
 
-	if ! require_cmd --check brew; then
-		warn "brew not found; skipping Homebrew update."
+	# Never run "brew" as root. Determine a primary non-root user and
+	# execute brew via that user's context using "runuser"/"run_as_user".
+	local primary_user BREW_PREFIX PREFIX_UID PREFIX_GID BREW_USER
+
+	primary_user="$(get_primary_user || true)"
+	if [[ -z ${primary_user:-} ]]; then
+		warn "No primary non-root user detected; skipping Homebrew update to avoid running brew as root."
 		return
 	fi
 
-	local BREW_PREFIX PREFIX_UID PREFIX_GID BREW_USER
+	if ! require_cmd --check runuser; then
+		warn "'runuser' not available; skipping Homebrew update to avoid running brew as root."
+		return
+	fi
 
-	BREW_PREFIX="$(brew --prefix 2>/dev/null || true)"
+	# Check that the user actually has brew available and query its prefix
+	if ! runuser -u "$primary_user" -- bash -lc 'command -v brew >/dev/null 2>&1'; then
+		warn "brew not available for user '$primary_user'; skipping Homebrew update."
+		return
+	fi
+
+	BREW_PREFIX="$(runuser -u "$primary_user" -- brew --prefix 2>/dev/null || true)"
 	if [[ -z ${BREW_PREFIX:-} || ! -d $BREW_PREFIX ]]; then
-		warn "Could not determine a valid Homebrew prefix; skipping Homebrew update."
+		warn "Could not determine a valid Homebrew prefix for user '$primary_user'; skipping Homebrew update."
 		return
 	fi
 
@@ -196,14 +210,10 @@ update_homebrew() {
 		return
 	fi
 
-	if require_cmd --check runuser; then
-		log "Running brew as Homebrew owner: $BREW_USER"
-		run_as_user "$BREW_USER" brew update || warn "brew update failed (continuing)."
-		run_as_user "$BREW_USER" brew upgrade || warn "brew upgrade failed (continuing)."
-		run_as_user "$BREW_USER" brew cleanup || warn "brew cleanup failed (continuing)."
-	else
-		warn "'runuser' not available; skipping Homebrew update to avoid running as root."
-	fi
+	log "Running brew as Homebrew owner: $BREW_USER"
+	run_as_user "$BREW_USER" brew update || warn "brew update failed (continuing)."
+	run_as_user "$BREW_USER" brew upgrade || warn "brew upgrade failed (continuing)."
+	run_as_user "$BREW_USER" brew cleanup || warn "brew cleanup failed (continuing)."
 }
 
 update_flatpak() {
@@ -369,13 +379,13 @@ collect_system_info_and_upload() {
 	if [[ -n ${primary_user:-} ]] && require_cmd --check runuser; then
 		# We'll prefix ujust/flatpak/brew with: runuser -u "$primary_user" --
 		run_user="runuser -u ${primary_user} --"
-		log "Running ujust, flatpak and brew as user: ${primary_user}"
+		log "Running ujust and flatpak as user: ${primary_user} (brew will run as that user)"
 	else
 		run_user=""
 		if [[ -z ${primary_user:-} ]]; then
-			warn "Could not detect a primary non-root user; running ujust/flatpak/brew as root (not ideal)."
+			warn "Could not detect a primary non-root user; ujust/flatpak will run as root; brew info will be skipped."
 		else
-			warn "'runuser' not available; running ujust/flatpak/brew as root (not ideal)."
+			warn "'runuser' not available; ujust/flatpak will run as root; brew info will be skipped."
 		fi
 	fi
 
