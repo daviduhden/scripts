@@ -53,7 +53,7 @@ SHELL_SCRIPTS=\
 PERL_SCRIPTS=\
 	perl/ssh-menu.pl
 
-.PHONY: install-debian install-openbsd install-secureblue install-shell install-shell-openbsd install-perl
+.PHONY: install-debian install-openbsd install-secureblue install-shell install-shell-openbsd install-perl install-tests-format test help
 
 install-debian:
 	@echo "${INFO} Installing Debian helpers"
@@ -129,14 +129,15 @@ install-shell-openbsd:
 	 echo "  . /etc/shinit.d/global-vi-mode.sh"
 
 install-perl:
+	@echo "${INFO} Installing perl helpers"
 	@install -d ${BINDIR}
 	@for f in ${PERL_SCRIPTS}; do \
 		base=$${f##*/}; name=$${base%.pl}; \
 		printf 'Installing %s -> %s\n' "$$f" "${BINDIR}/$$name"; \
 		install -m 0755 "$$f" "${BINDIR}/$$name"; \
 	done
+	@echo "${INFO} Perl helpers installed"
 
-.PHONY: install-tests-format
 install-tests-format:
 	@echo "${INFO} Installing tests-format scripts"
 	@install -d ${BINDIR}/tests-format
@@ -145,8 +146,8 @@ install-tests-format:
 		printf '%s Installing %s -> %s\n' "${INFO}" "$$f" "${BINDIR}/$$name"; \
 		install -m 0755 "$$f" "${BINDIR}/$$name"; \
 	done
+	@echo 
 
-.PHONY: test
 test:
 	@echo "Running shell script validation..."
 	@/bin/sh tests-format/validate-shell.sh .
@@ -154,7 +155,6 @@ test:
 	@/bin/sh tests-format/validate-perl.sh ./perl
 	@echo "Running make validation..."
 	@/bin/sh tests-format/validate-make.sh .
-.PHONY: help
 help:
 	@echo "Usage: make [target]"
 	@echo ""
