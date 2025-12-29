@@ -75,7 +75,7 @@ fetch_lfs_files() {
 	fi
 	if [ -d "$dir/.git" ]; then
 		log "Fetching Git LFS files in $dir..."
-		git -C "$dir" lfs pull --quiet || warn "git lfs pull failed in $dir"
+		git -C "$dir" lfs pull >/dev/null 2>&1 || warn "git lfs pull failed in $dir"
 	fi
 }
 
@@ -269,10 +269,10 @@ post_update_steps() {
 # Main #
 ########
 main() {
-	typeset LOCKDIR SYNC_OK
+	typeset LOCKDIR
 
 	log "----------------------------------------"
-	log "Sync started (GH_USER=$GH_USER, home=$GH_HOME)"
+	log "Sync started (user: $GH_USER)"
 
 	[ -d "$WWW_DIR" ] || {
 		error "$WWW_DIR does not exist"
@@ -287,19 +287,10 @@ main() {
 
 	trap 'rmdir "$LOCKDIR" 2>/dev/null || true' EXIT INT TERM
 
-	SYNC_OK=0
-	if sync_with_gh_cli; then
-		SYNC_OK=1
-	elif sync_with_git; then
-		SYNC_OK=1
-	elif sync_with_github_zip; then
-		SYNC_OK=1
-	else
-		error "all sync methods failed. Aborting."
+	if ! sync_with_gh_cli && ! sync_with_git && ! sync_with_github_zip; then
+		error "all sync methods failed."
 		exit 1
 	fi
-
-	: "${SYNC_OK:-}"
 
 	if ! post_update_steps; then
 		error "post-update steps failed."
