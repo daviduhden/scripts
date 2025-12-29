@@ -107,6 +107,7 @@ stage_from_source() {
 	typeset srcdir="$1"
 	if [ -d "$WWW_DIR/.git" ]; then rm -rf "$WWW_DIR/.git"; fi
 	if [ -d "$WWW_DIR/.github" ]; then rm -rf "$WWW_DIR/.github"; fi
+	if [ -d "$WWW_DIR/.gitattributes" ]; then rm -rf "$WWW_DIR/.gitattributes"; fi
 
 	if command -v rsync >/dev/null 2>&1; then
 		rsync -a --delete --exclude=".git" --exclude=".github" --exclude=".gitattributes" "$srcdir"/ "$WWW_DIR"/
@@ -115,7 +116,7 @@ stage_from_source() {
 		cp -a "$srcdir"/. "$WWW_DIR"/
 	fi
 
-	rm -rf "$WWW_DIR/.git" "$WWW_DIR/.github"
+	rm -rf "$WWW_DIR/.git" "$WWW_DIR/.github" "$WWW_DIR/.gitattributes"
 	return 0
 }
 
@@ -239,13 +240,11 @@ post_update_steps() {
 	log "Setting ownership to ${OWNER_USER}:${OWNER_GROUP}..."
 	chown -R "$OWNER_USER":"$OWNER_GROUP" "$WWW_DIR" || warn "ownership failed"
 
-	log "Setting file permissions (excluding .git)..."
-	find . -path "./.git" -prune -o -type d -exec chmod 755 {} +
-	find . -path "./.git" -prune -o -type f -exec chmod 644 {} +
+	log "Setting file permissions..."
+	find . -type d -exec chmod 755 {} +
+	find . -type f -exec chmod 644 {} +
 
-	if [ -d .git ]; then chmod -R 700 .git || warn "could not restrict .git permissions"; fi
-
-	log "Restarting web service ($SERVICE_NAME) via rcctl..."
+	log "Restarting web service ($SERVICE_NAME)..."
 	if ! rcctl -q restart "$SERVICE_NAME"; then
 		error "Error restarting $SERVICE_NAME"
 		return 1
