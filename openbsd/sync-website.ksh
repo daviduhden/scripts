@@ -109,9 +109,9 @@ stage_from_source() {
 	if [ -d "$WWW_DIR/.github" ]; then rm -rf "$WWW_DIR/.github"; fi
 
 	if command -v rsync >/dev/null 2>&1; then
-		rsync -a --delete --exclude=".git" --exclude=".github" "$srcdir"/ "$WWW_DIR"/
+		rsync -a --delete --exclude=".git" --exclude=".github" --exclude=".gitattributes" "$srcdir"/ "$WWW_DIR"/
 	else
-		find "$WWW_DIR" -mindepth 1 -maxdepth 1 ! -name ".git" ! -name ".github" -exec rm -rf {} +
+		find "$WWW_DIR" -mindepth 1 -maxdepth 1 ! -name ".git" ! -name ".github" ! -name ".gitattributes" -exec rm -rf {} +
 		cp -a "$srcdir"/. "$WWW_DIR"/
 	fi
 
