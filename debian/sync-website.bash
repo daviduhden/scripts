@@ -65,7 +65,7 @@ fetch_lfs_files() {
 	fi
 	if [ -d "$dir/.git" ]; then
 		log "Fetching Git LFS files in $dir..."
-		git -C "$dir" lfs pull --quiet || warn "git lfs pull failed in $dir"
+		git -C "$dir" lfs pull >/dev/null 2>&1 || warn "git lfs pull failed in $dir"
 	fi
 }
 
@@ -230,7 +230,11 @@ post_update_steps() {
 	log "Setting permissions..."
 	find . -path "./.git" -prune -o -type d -exec chmod 755 {} + || warn "dir perms failed"
 	find . -path "./.git" -prune -o -type f -exec chmod 644 {} + || warn "file perms failed"
-	[ -d .git ] && chmod -R 700 .git || warn "git perms failed"
+	if [ -d .git ]; then
+		if ! chmod -R 700 .git; then
+			warn "git perms failed"
+		fi
+	fi
 
 	log "Restarting web service ($SERVICE_NAME)..."
 	systemctl restart "$SERVICE_NAME" || error "service restart failed"
@@ -272,14 +276,7 @@ main() {
 	fi
 	trap 'rm -rf "$LOCKDIR"' EXIT INT TERM
 
-	local SYNC_OK=0
-	if sync_with_gh_cli; then
-		SYNC_OK=1
-	elif sync_with_git; then
-		SYNC_OK=1
-	elif sync_with_github_zip; then
-		SYNC_OK=1
-	else
+	if ! sync_with_gh_cli && ! sync_with_git && ! sync_with_github_zip; then
 		error "all sync methods failed."
 		exit 1
 	fi
