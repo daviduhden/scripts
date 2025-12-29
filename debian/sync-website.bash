@@ -98,9 +98,9 @@ stage_from_source() {
 	[ -d "$WWW_DIR/.github" ] && rm -rf "$WWW_DIR/.github"
 
 	if command -v rsync >/dev/null 2>&1; then
-		rsync -a --delete --exclude=".git" --exclude=".github" "$srcdir"/ "$WWW_DIR"/
+		rsync -a --delete --exclude=".git" --exclude=".github" --exclude=".gitattributes" "$srcdir"/ "$WWW_DIR"/
 	else
-		find "$WWW_DIR" -mindepth 1 -maxdepth 1 ! -name ".git" ! -name ".github" -exec rm -rf {} +
+		find "$WWW_DIR" -mindepth 1 -maxdepth 1 ! -name ".git" ! -name ".github" ! -name ".gitattributes" -exec rm -rf {} +
 		cp -a "$srcdir"/. "$WWW_DIR"/
 	fi
 
@@ -241,6 +241,7 @@ post_update_steps() {
 
 	# Certbot renewal
 	if command -v certbot >/dev/null 2>&1; then
+		log "Running certbot..."
 		case "$SERVICE_NAME" in
 		nginx)
 			if certbot --nginx renew --non-interactive >/dev/null 2>&1; then systemctl restart "$SERVICE_NAME"; fi
@@ -252,6 +253,8 @@ post_update_steps() {
 			if certbot certonly --non-interactive -d "$WWW_HOST" >/dev/null 2>&1; then systemctl restart "$SERVICE_NAME"; fi
 			;;
 		esac
+	else
+		warn "certbot not installed; skipping certificate renewal"
 	fi
 	return 0
 }
