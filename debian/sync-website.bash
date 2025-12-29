@@ -94,8 +94,9 @@ run_as_gh_user() {
 
 stage_from_source() {
 	local srcdir="$1"
-	[ -d "$WWW_DIR/.git" ] && rm -rf "$WWW_DIR/.git"
-	[ -d "$WWW_DIR/.github" ] && rm -rf "$WWW_DIR/.github"
+	if [ -d "$WWW_DIR/.git" ]; then rm -rf "$WWW_DIR/.git"; fi
+	if [ -d "$WWW_DIR/.github" ]; then rm -rf "$WWW_DIR/.github"; fi
+	if [ -d "$WWW_DIR/.gitattributes" ]; then rm -rf "$WWW_DIR/.gitattributes"; fi
 
 	if command -v rsync >/dev/null 2>&1; then
 		rsync -a --delete --exclude=".git" --exclude=".github" --exclude=".gitattributes" "$srcdir"/ "$WWW_DIR"/
@@ -104,7 +105,7 @@ stage_from_source() {
 		cp -a "$srcdir"/. "$WWW_DIR"/
 	fi
 
-	rm -rf "$WWW_DIR/.git" "$WWW_DIR/.github"
+	rm -rf "$WWW_DIR/.git" "$WWW_DIR/.github" "$WWW_DIR/.gitattributes"
 	return 0
 }
 
@@ -227,17 +228,15 @@ post_update_steps() {
 	log "Setting ownership to $OWNER_USER:$OWNER_GROUP..."
 	chown -R "$OWNER_USER":"$OWNER_GROUP" "$WWW_DIR" || warn "failed ownership"
 
-	log "Setting permissions..."
-	find . -path "./.git" -prune -o -type d -exec chmod 755 {} + || warn "dir perms failed"
-	find . -path "./.git" -prune -o -type f -exec chmod 644 {} + || warn "file perms failed"
-	if [ -d .git ]; then
-		if ! chmod -R 700 .git; then
-			warn "git perms failed"
-		fi
-	fi
+	log "Setting file permissions..."
+	find . -type d -exec chmod 755 {} +
+	find . -type f -exec chmod 644 {} +
 
 	log "Restarting web service ($SERVICE_NAME)..."
-	systemctl restart "$SERVICE_NAME" || error "service restart failed"
+	if ! systemctl restart "$SERVICE_NAME"; then
+		error "Error restarting $SERVICE_NAME"
+		return 1
+	fi
 
 	# Certbot renewal
 	if command -v certbot >/dev/null 2>&1; then
