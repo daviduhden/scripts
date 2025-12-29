@@ -125,6 +125,42 @@ get_primary_user() {
 	awk -F: '$3>=1000 && $3<60000 && $7 !~ /(false|nologin)$/ {print $1; exit}' /etc/passwd || true
 }
 
+# Print usage and exit
+usage() {
+	cat <<'USAGE'
+Usage: sysupgrade.bash [OPTIONS]
+
+Options:
+  --skip-audit       Skip running the Lynis security audit phase
+  --skip-collect     Skip collecting Secureblue system information
+  --help             Show this help message
+USAGE
+	exit 0
+}
+
+# Parse CLI arguments (set SKIP_AUDIT and SKIP_COLLECT)
+parse_args() {
+	while [[ ${1:-} != "" ]]; do
+		case "$1" in
+		--skip-audit)
+			SKIP_AUDIT=1
+			shift
+			;;
+		--skip-collect)
+			SKIP_COLLECT=1
+			shift
+			;;
+		--help | -h)
+			usage
+			;;
+		*)
+			# Unknown or positional arg — stop parsing
+			break
+			;;
+		esac
+	done
+}
+
 # ---- Maintenance phases ----------------------------------------------------
 
 update_system_image() {
@@ -360,7 +396,7 @@ run_security_audit() {
 	fi
 }
 
-collect_system_info_and_upload() {
+collect_system_info() {
 	if ! require_cmd --check ujust fpaste; then
 		warn "ujust or fpaste not found; skipping Secureblue information collection."
 		return
@@ -550,14 +586,25 @@ main() {
 	update_homebrew
 	update_flatpak
 	maintain_filesystems
-	run_security_audit
-	collect_system_info_and_upload
+	if [[ -z ${SKIP_AUDIT:-} ]]; then
+		run_security_audit
+	else
+		log "Skipping security audit (flag set)."
+	fi
+
+	if [[ -z ${SKIP_COLLECT:-} ]]; then
+		collect_system_info
+	else
+		log "Skipping Secureblue information collection (flag set)."
+	fi
 
 	log "Update process completed."
 }
 
 # Entry point
 ensure_root "$@"
+# Parse CLI args (may set SKIP_AUDIT or SKIP_COLLECT)
+parse_args "$@"
 # Base tools we use without extra checks
 require_cmd awk getent stat journalctl systemctl
 main "$@"
