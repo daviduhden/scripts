@@ -52,16 +52,12 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y \
+            perl \
             perltidy \
             shfmt \
             shellcheck \
             ksh \
             bmake
-
-          perltidy --version | head -n 1 || true
-          shfmt --version || true
-          shellcheck --version | head -n 2 || true
-          ksh --version || true
 
       - name: Install checkmake and mbake
         run: |
