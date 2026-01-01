@@ -17,11 +17,10 @@ on:
       - "**/*.pl"
       - "Makefile"
       - ".github/workflows/run-tests.yml"
-  # Allow manual runs from the Actions tab
   workflow_dispatch: {}
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   test:
@@ -35,10 +34,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Go is only used to install checkmake, so disable module caching
       - name: Setup Go (for checkmake)
         uses: actions/setup-go@v5
         with:
           go-version: "stable"
+          cache: false
 
       - name: Setup Python (for mbake)
         uses: actions/setup-python@v5
@@ -60,40 +61,34 @@ jobs:
           shellcheck --version | head -n 2 || true
           ksh --version || true
 
-      - name: Install checkmake (go install) and mbake (pip)
+      - name: Install checkmake and mbake
         run: |
           set -euo pipefail
 
-          # Ensure user-level bins are on PATH
+          # Persist user bins across steps
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           echo "$HOME/go/bin" >> "$GITHUB_PATH"
-          # Make these paths available in this step as well
-          export PATH="$HOME/.local/bin:$HOME/go/bin:$PATH"
 
           # checkmake (Go)
           go install github.com/mrtazz/checkmake/cmd/checkmake@latest
-          checkmake --version || true
+          checkmake --version
 
           # mbake (Python)
           python -m pip install --upgrade pip
           python -m pip install --user mbake
-          mbake --version || true
+          mbake --version
 
       - name: Run tests
-        run: make test
-        working-directory: .
+        run: |
+          set -euo pipefail
+          make test
 
       - name: Print validate logs
         if: always()
         run: |
           echo "Listing /tmp/validate-*.log"
-          files=(/tmp/validate-*.log)
-          if [ -e "${files[0]}" ]; then
-            ls -l /tmp/validate-*.log || true
-            for f in /tmp/validate-*.log; do
-              echo "=== $f ==="
-              sed -n '1,400p' "$f" || true
-            done
-          else
-            echo "No matching log files"
-          fi
+          shopt -s nullglob
+          for f in /tmp/validate-*.log; do
+            echo "=== $f ==="
+            sed -n '1,400p' "$f"
+          done
