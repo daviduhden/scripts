@@ -1,6 +1,7 @@
+---
 name: Run script tests
 
-on:
+'on':
   push:
     paths:
       - "**/*.sh"
@@ -39,6 +40,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: "stable"
+          cache: false
 
       - name: Setup Python (for mbake)
         uses: actions/setup-python@v5
@@ -53,7 +55,8 @@ jobs:
             perltidy \
             shfmt \
             shellcheck \
-            ksh
+            ksh \
+            bmake
 
           perltidy --version | head -n 1 || true
           shfmt --version || true

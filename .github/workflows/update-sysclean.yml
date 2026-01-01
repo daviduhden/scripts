@@ -1,9 +1,10 @@
+---
 name: Update sysclean from Codeberg
 
-on:
-#  schedule:
-    # Check for updates once a day at 00:00 UTC
-#    - cron: '0 0 * * *'
+'on':
+  # schedule:
+  #   Check for updates once a day at 00:00 UTC
+  #   - cron: '0 0 * * *'
   # Allow manual runs from the Actions tab
   workflow_dispatch: {}
 
@@ -38,21 +39,25 @@ jobs:
         run: |
           set -e
 
+          REPO_GIT="https://codeberg.org/semarie/sysclean.git"
+          REPO_ZIP="https://codeberg.org/semarie/sysclean/archive/main.zip"
+
           rm -rf /tmp/sysclean /tmp/sysclean.zip /tmp/sysclean-extracted
           mkdir -p /tmp/sysclean
 
           echo "Trying to clone sysclean via git..."
-          if git clone --depth=1 https://codeberg.org/semarie/sysclean.git /tmp/sysclean; then
+          if git clone --depth=1 "$REPO_GIT" /tmp/sysclean; then
             echo "Git clone succeeded."
           else
             echo "Git clone failed, falling back to ZIP download..."
-            curl -fLsS --retry 5 "https://codeberg.org/semarie/sysclean/archive/main.zip" -o /tmp/sysclean.zip
+            curl -fLsS --retry 5 "$REPO_ZIP" -o /tmp/sysclean.zip
 
             mkdir -p /tmp/sysclean-extracted
             unzip -q /tmp/sysclean.zip -d /tmp/sysclean-extracted
 
-            # Find the extracted directory (usually something like sysclean-main)
-            SRC_DIR="$(find /tmp/sysclean-extracted -maxdepth 1 -mindepth 1 -type d | head -n1)"
+            # Find extracted directory (e.g. sysclean-main)
+            SRC_DIR="$(find /tmp/sysclean-extracted -mindepth 1 -type d \
+              | head -n1)"
             if [ -z "$SRC_DIR" ]; then
               echo "ERROR: Could not find extracted sysclean directory." >&2
               exit 1
