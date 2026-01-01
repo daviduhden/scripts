@@ -150,11 +150,11 @@ install-tests-format:
 
 test:
 	@echo "Running shell script validation..."
-	@/bin/sh tests-format/validate-shell.sh .
+	@/bin/bash tests-format/validate-shell.sh .
 	@echo "Running perl script validation..."
-	@/bin/sh tests-format/validate-perl.sh ./perl
+	@/bin/bash tests-format/validate-perl.sh ./perl
 	@echo "Running make validation..."
-	@/bin/sh tests-format/validate-make.sh .
+	@/bin/bash tests-format/validate-make.sh .
 help:
 	@echo "Usage: make [target]"
 	@echo ""
