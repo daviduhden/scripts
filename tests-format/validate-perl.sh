@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 set -eu
 
 # Save original stdout/stderr, create per-run log in TMPDIR and redirect
@@ -40,8 +40,6 @@ if command -v perltidy >/dev/null 2>&1; then
 	UNFMT="$TMPDIR_BASE/unformatted-perl-$$.txt"
 
 	# Detect files that would change formatting
-
-	# shellcheck disable=SC3045
 	find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name '*.pl' -o -name '*.pm' -o -name '*.t' -o -name '*.psgi' \) -print0 |
 		while IFS= read -r -d '' f; do
 			if ! perltidy -ast -se -o /dev/null "$f" >/dev/null 2>&1; then
@@ -74,8 +72,6 @@ fi
 
 echo "[test] Running Perl syntax checks..."
 if perl -MOpenBSD::PackageInfo -e1 >/dev/null 2>&1; then
-
-	# shellcheck disable=SC3045
 	find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name '*.pl' -o -name '*.pm' -o -name '*.t' -o -name '*.psgi' \) -print0 |
 		while IFS= read -r -d '' f; do
 			perlc_out=$(perl -c "$f" 2>&1) || true

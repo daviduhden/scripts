@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 set -eu
 
 # Save original stdout/stderr, create per-run log in TMPDIR and redirect
@@ -68,7 +68,6 @@ fi
 
 echo "[test] Running shell syntax checks..."
 
-# shellcheck disable=SC3045
 find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f -name '*.sh' -print0 |
 	while IFS= read -r -d '' f; do
 		if ! sh -n "$f" 2>/dev/null; then
@@ -82,7 +81,6 @@ find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune
 
 echo "[test] Running bash syntax checks..."
 
-# shellcheck disable=SC3045
 find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f -name '*.bash' -print0 |
 	while IFS= read -r -d '' f; do
 		if ! bash -n "$f" 2>/dev/null; then
@@ -96,8 +94,6 @@ find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune
 
 if command -v ksh >/dev/null 2>&1; then
 	echo "[test] Running ksh syntax checks..."
-
-	# shellcheck disable=SC3045
 	find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f -name '*.ksh' -print0 |
 		while IFS= read -r -d '' f; do
 			if ! ksh -n "$f" 2>/dev/null; then
@@ -114,7 +110,6 @@ fi
 
 if command -v shellcheck >/dev/null 2>&1; then
 	echo "[test] Running shellcheck..."
-	# shellcheck disable=SC3045
 	find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name '*.bash' -o -name '*.ksh' -o -name '*.sh' \) -print0 |
 		while IFS= read -r -d '' f; do
 			if ! shellcheck -x "$f"; then

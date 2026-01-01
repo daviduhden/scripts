@@ -14,7 +14,7 @@ set -euo pipefail
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
 
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 
 ###################
@@ -261,7 +261,7 @@ configure_periodic_scan() {
 	chmod 0700 /var/spool/quarantine
 
 	cat >/usr/local/sbin/clamav-scan-targets.bash <<'EOF'
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 LOG_DIR="/var/log/clamav"
 QUAR="/var/spool/quarantine"
@@ -304,9 +304,9 @@ EOF
 schedule_postinstall() {
 	install -d -m 0755 /var/lib/clamav-atomic
 	cat >/var/lib/clamav-atomic/postinstall.sh <<'EOF'
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
-exec /usr/bin/bash /usr/local/sbin/setup-clamav-final.sh --apply-live
+exec /bin/bash /usr/local/sbin/setup-clamav-final.sh --apply-live
 EOF
 	chmod 0755 /var/lib/clamav-atomic/postinstall.sh
 

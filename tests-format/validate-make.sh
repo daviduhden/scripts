@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 set -eu
 
 # Save original stdout/stderr, create per-run log in TMPDIR and redirect
@@ -39,7 +39,6 @@ echo "[test] Formatting Makefiles with mbake..."
 if command -v mbake >/dev/null 2>&1; then
 	UNFMT="$TMPDIR_BASE/unformatted-make-$$.txt"
 
-	# shellcheck disable=SC3045
 	find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name 'Makefile' -o -name 'makefile' -o -name 'GNUmakefile' -o -name '*.mk' \) -print0 |
 		while IFS= read -r -d '' f; do
 			if ! mbake format --check "$f" >/dev/null 2>&1; then
@@ -71,8 +70,6 @@ fi
 
 if command -v checkmake >/dev/null 2>&1; then
 	echo "[test] Running checkmake (Makefile linter)..."
-
-	# shellcheck disable=SC3045
 	find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name 'Makefile' -o -name 'makefile' -o -name 'GNUmakefile' -o -name '*.mk' \) -print0 |
 		while IFS= read -r -d '' f; do
 			if ! checkmake "$f" >/dev/null 2>&1; then
