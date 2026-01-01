@@ -4,11 +4,11 @@
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
 
-PREFIX?=/usr/local
-BINDIR?=${PREFIX}/bin
+PREFIX ?= /usr/local
+BINDIR ?= ${PREFIX}/bin
 INFO ?= ==>
 
-DEBIAN_SCRIPTS=\
+DEBIAN_SCRIPTS = \
 	debian/add-gh-cli-repo.bash \
 	debian/add-i2pd-repo.bash \
 	debian/add-lynis-repo.bash \
@@ -23,14 +23,14 @@ DEBIAN_SCRIPTS=\
 	debian/update-golang.bash \
 	debian/update-monero.bash
 
-OPENBSD_SCRIPTS=\
+OPENBSD_SCRIPTS = \
 	openbsd/apply-sysclean.ksh \
 	openbsd/clean-logs.ksh \
 	openbsd/sudo-wrapper.ksh \
 	openbsd/sync-website.ksh \
 	openbsd/sysupgrade-current.ksh
 
-SECUREBLUE_SCRIPTS=\
+SECUREBLUE_SCRIPTS = \
 	secureblue/install-arti-service.bash \
 	secureblue/luks-ext4-to-btrfs.bash \
 	secureblue/postinstall.bash \
@@ -40,17 +40,17 @@ SECUREBLUE_SCRIPTS=\
 	secureblue/sysupgrade.bash \
 	secureblue/update-arti-oniux.bash
 
-TESTS_FORMAT_SCRIPTS=\
+TESTS_FORMAT_SCRIPTS = \
 	tests-format/clang-format-all.sh \
 	tests-format/validate-manpages.sh \
 	tests-format/validate-make.sh \
 	tests-format/validate-perl.sh \
 	tests-format/validate-shell.sh
 
-SHELL_SCRIPTS=\
+SHELL_SCRIPTS = \
 	shell/global-vi-mode.sh
 
-PERL_SCRIPTS=\
+PERL_SCRIPTS = \
 	perl/ssh-menu.pl
 
 .PHONY: install-debian install-openbsd install-secureblue install-shell install-shell-openbsd install-perl install-tests-format test help
@@ -146,13 +146,13 @@ install-tests-format:
 		printf '%s Installing %s -> %s\n' "${INFO}" "$$f" "${BINDIR}/$$name"; \
 		install -m 0755 "$$f" "${BINDIR}/$$name"; \
 	done
-	@echo 
+	@echo
 
 test:
 	@echo "Running shell script validation..."
 	@/bin/bash tests-format/validate-shell.sh .
 	@echo "Running perl script validation..."
-	@/bin/bash tests-format/validate-perl.sh ./perl
+	@/bin/bash tests-format/validate-perl.sh .
 	@echo "Running make validation..."
 	@/bin/bash tests-format/validate-make.sh .
 help:

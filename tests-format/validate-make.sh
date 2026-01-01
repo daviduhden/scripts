@@ -80,6 +80,20 @@ else
 	echo "[test] checkmake not installed; skipping Makefile lint"
 fi
 
+# Run bmake dry-run to ensure BSD make compatibility
+if command -v bmake >/dev/null 2>&1; then
+	echo "[test] Running bmake -n -f (bsdmake dry-run)..."
+	find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name 'Makefile' -o -name 'makefile' -o -name 'GNUmakefile' -o -name '*.mk' \) -print0 |
+		while IFS= read -r -d '' f; do
+			if ! bmake -n -f "$f" >/dev/null 2>&1; then
+				echo "[WARN] bmake -n -f failed on: $f" 1>&2
+				note_fail "$f"
+			fi
+		done || true
+else
+	echo "[test] bmake not installed; skipping bmake dry-run"
+fi
+
 issues=0
 if [ -f "$TMP_FAILS" ]; then
 	issues=$(sort -u "$TMP_FAILS" | wc -l | tr -d ' ')
