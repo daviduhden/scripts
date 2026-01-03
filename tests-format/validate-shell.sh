@@ -4,7 +4,7 @@ set -eu
 # Save original stdout/stderr, create per-run log in TMPDIR and redirect
 exec 3>&1 4>&2
 TMPLOG="${TMPDIR:-/tmp}/validate-shell-$$.log"
-printf '[test] Logging to: %s\n' "$TMPLOG" >&3
+printf '[INFO] Logging to: %s\n' "$TMPLOG" >&3
 exec >"$TMPLOG" 2>&1
 
 # validate-shell.sh
@@ -27,7 +27,7 @@ ROOT_DIR=${1:-}
 [ "${ROOT_DIR#-}" = "$ROOT_DIR" ] || usage
 [ -n "$ROOT_DIR" ] || usage
 [ -d "$ROOT_DIR" ] || {
-	printf '%s\n' "ERROR: ROOT_DIR is not a directory: $ROOT_DIR" >&2
+	printf '%s\n' "[ERROR] ROOT_DIR is not a directory: $ROOT_DIR" >&2
 	exit 2
 }
 
@@ -37,7 +37,7 @@ trap 'rm -f "$TMP_FAILS"' EXIT
 
 note_fail() { printf '%s\n' "$1" >>"$TMP_FAILS"; }
 
-echo "[test] Formatting shell scripts with shfmt..."
+echo "[INFO] Formatting shell scripts with shfmt..."
 if command -v shfmt >/dev/null 2>&1; then
 	UNFMT_SH="$TMPDIR_BASE/unformatted-sh-$$.txt"
 
@@ -45,7 +45,7 @@ if command -v shfmt >/dev/null 2>&1; then
 		xargs -0 --no-run-if-empty shfmt -l 2>/dev/null >"$UNFMT_SH" || true
 
 	if [ -s "$UNFMT_SH" ]; then
-		echo "[test] shfmt will format the following files:"
+		echo "[INFO] shfmt will format the following files:"
 		sed -n '1,200p' "$UNFMT_SH" | sed 's/^/  - /'
 
 		while IFS= read -r file; do
@@ -58,15 +58,15 @@ if command -v shfmt >/dev/null 2>&1; then
 			fi
 		done <"$UNFMT_SH"
 	else
-		echo "[test] All shell scripts already formatted"
+		echo "[INFO] All shell scripts already formatted"
 	fi
 
 	rm -f "$UNFMT_SH"
 else
-	echo "[test] shfmt not installed; skipping shell formatting"
+	echo "[INFO] shfmt not installed; skipping shell formatting"
 fi
 
-echo "[test] Running shell syntax checks..."
+echo "[INFO] Running shell syntax checks..."
 
 find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f -name '*.sh' -print0 |
 	while IFS= read -r -d '' f; do
@@ -79,7 +79,7 @@ find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune
 		[ -n "$bad" ] && note_fail "$bad"
 	done
 
-echo "[test] Running bash syntax checks..."
+echo "[INFO] Running bash syntax checks..."
 
 find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f -name '*.bash' -print0 |
 	while IFS= read -r -d '' f; do
@@ -93,7 +93,7 @@ find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune
 	done
 
 if command -v ksh >/dev/null 2>&1; then
-	echo "[test] Running ksh syntax checks..."
+	echo "[INFO] Running ksh syntax checks..."
 	find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f -name '*.ksh' -print0 |
 		while IFS= read -r -d '' f; do
 			if ! ksh -n "$f" 2>/dev/null; then
@@ -105,11 +105,11 @@ if command -v ksh >/dev/null 2>&1; then
 			[ -n "$bad" ] && note_fail "$bad"
 		done
 else
-	echo "[test] ksh not found; skipping ksh syntax checks"
+	echo "[INFO] ksh not found; skipping ksh syntax checks"
 fi
 
 if command -v shellcheck >/dev/null 2>&1; then
-	echo "[test] Running shellcheck..."
+	echo "[INFO] Running shellcheck..."
 	find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name '*.bash' -o -name '*.ksh' -o -name '*.sh' \) -print0 |
 		while IFS= read -r -d '' f; do
 			if ! shellcheck -x "$f"; then
@@ -121,7 +121,7 @@ if command -v shellcheck >/dev/null 2>&1; then
 			[ -n "$bad" ] && note_fail "$bad"
 		done
 else
-	echo "[test] shellcheck not installed; skipping shellcheck"
+	echo "[INFO] shellcheck not installed; skipping shellcheck"
 fi
 
 issues=0
@@ -130,11 +130,11 @@ if [ -f "$TMP_FAILS" ]; then
 fi
 
 if [ "${issues:-0}" -ne 0 ]; then
-	echo "[test] Completed with $issues issue(s) (format changes and/or errors)"
-	echo "[test] Affected files (unique, first 200):"
+	echo "[INFO] Completed with $issues issue(s) (format changes and/or errors)"
+	echo "[INFO] Affected files (unique, first 200):"
 	sort -u "$TMP_FAILS" | sed -n '1,200p' | sed 's/^/  - /'
 	exit 2
 fi
 
-echo "[test] Shell checks passed"
+echo "[INFO] Shell checks passed"
 exit 0

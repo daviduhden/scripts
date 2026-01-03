@@ -4,7 +4,7 @@ set -eu
 # Save original stdout/stderr, create per-run log in TMPDIR and redirect
 exec 3>&1 4>&2
 TMPLOG="${TMPDIR:-/tmp}/validate-make-$$.log"
-printf '[test] Logging to: %s\n' "$TMPLOG" >&3
+printf '[INFO] Logging to: %s\n' "$TMPLOG" >&3
 exec >"$TMPLOG" 2>&1
 
 # validate-make.sh
@@ -25,7 +25,7 @@ ROOT_DIR=${1:-}
 [ "${ROOT_DIR#-}" = "$ROOT_DIR" ] || usage
 [ -n "$ROOT_DIR" ] || usage
 [ -d "$ROOT_DIR" ] || {
-	printf '%s\n' "ERROR: ROOT_DIR is not a directory: $ROOT_DIR" >&2
+	printf '%s\n' "[ERROR] ROOT_DIR is not a directory: $ROOT_DIR" >&2
 	exit 2
 }
 
@@ -35,7 +35,7 @@ trap 'rm -f "$TMP_FAILS"' EXIT
 
 note_fail() { printf '%s\n' "$1" >>"$TMP_FAILS"; }
 
-echo "[test] Formatting Makefiles with mbake..."
+echo "[INFO] Formatting Makefiles with mbake..."
 if command -v mbake >/dev/null 2>&1; then
 	UNFMT="$TMPDIR_BASE/unformatted-make-$$.txt"
 
@@ -47,7 +47,7 @@ if command -v mbake >/dev/null 2>&1; then
 		done >"$UNFMT" || true
 
 	if [ -s "$UNFMT" ]; then
-		echo "[test] mbake will format the following files:"
+		echo "[INFO] mbake will format the following files:"
 		sed -n '1,200p' "$UNFMT" | sed 's/^/  - /'
 
 		while IFS= read -r file; do
@@ -60,16 +60,16 @@ if command -v mbake >/dev/null 2>&1; then
 			fi
 		done <"$UNFMT"
 	else
-		echo "[test] All Makefiles already formatted"
+		echo "[INFO] All Makefiles already formatted"
 	fi
 
 	rm -f "$UNFMT"
 else
-	echo "[test] mbake not installed; skipping Makefile formatting"
+	echo "[INFO] mbake not installed; skipping Makefile formatting"
 fi
 
 if command -v checkmake >/dev/null 2>&1; then
-	echo "[test] Running checkmake (Makefile linter)..."
+	echo "[INFO] Running checkmake (Makefile linter)..."
 	find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name 'Makefile' -o -name 'makefile' -o -name 'GNUmakefile' -o -name '*.mk' \) -print0 |
 		while IFS= read -r -d '' f; do
 			if ! checkmake "$f" >/dev/null 2>&1; then
@@ -77,12 +77,12 @@ if command -v checkmake >/dev/null 2>&1; then
 			fi
 		done || true
 else
-	echo "[test] checkmake not installed; skipping Makefile lint"
+	echo "[INFO] checkmake not installed; skipping Makefile lint"
 fi
 
 # Run bmake dry-run to ensure BSD make compatibility
 if command -v bmake >/dev/null 2>&1; then
-	echo "[test] Running bmake -n -f (bsdmake dry-run)..."
+	echo "[INFO] Running bmake -n -f (bsdmake dry-run)..."
 	find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name 'Makefile' -o -name 'makefile' -o -name 'GNUmakefile' -o -name '*.mk' \) -print0 |
 		while IFS= read -r -d '' f; do
 			if ! bmake -n -f "$f" >/dev/null 2>&1; then
@@ -91,7 +91,7 @@ if command -v bmake >/dev/null 2>&1; then
 			fi
 		done || true
 else
-	echo "[test] bmake not installed; skipping bmake dry-run"
+	echo "[INFO] bmake not installed; skipping bmake dry-run"
 fi
 
 issues=0
@@ -100,11 +100,11 @@ if [ -f "$TMP_FAILS" ]; then
 fi
 
 if [ "${issues:-0}" -ne 0 ]; then
-	echo "[test] Completed with $issues issue(s) (format changes and/or errors)"
-	echo "[test] Affected files (unique, first 200):"
+	echo "[INFO] Completed with $issues issue(s) (format changes and/or errors)"
+	echo "[INFO] Affected files (unique, first 200):"
 	sort -u "$TMP_FAILS" | sed -n '1,200p' | sed 's/^/  - /'
 	exit 2
 fi
 
-echo "[test] Makefile checks passed"
+echo "[INFO] Makefile checks passed"
 exit 0
