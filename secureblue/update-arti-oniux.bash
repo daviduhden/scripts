@@ -9,6 +9,9 @@ set -euo pipefail
 # - Installs or updates the crates via cargo with appropriate features
 # - Installs the resulting binaries into /usr/local/bin (requires root)
 #
+# Note: For oniux to work on secureblue you need to enable unconfined-domain user namespace creation with:
+#   ujust set-unconfined-userns on
+#
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
 
@@ -168,6 +171,7 @@ install_or_update_arti() {
 }
 
 install_or_update_oniux() {
+	ujust set-unconfined-userns on
 	local crate="oniux"
 	local updated=0
 	log "Checking $crate version (git tags from $REPO_ONIUX)..."
