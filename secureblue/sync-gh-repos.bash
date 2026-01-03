@@ -10,6 +10,9 @@ set -euo pipefail
 # - Configurable via OWNER and BASE_DIR environment variables
 # - If BASE_DIR is not set, prompts interactively (unless --non-interactive)
 #
+# Environment variables:
+#   OWNER     GitHub username to sync (default: daviduhden)
+#   BASE_DIR  Local directory to clone into (default: /var/home/david/git)
 # Flags:
 #   -n, --non-interactive   Do not prompt (use default BASE_DIR if unset)
 #
