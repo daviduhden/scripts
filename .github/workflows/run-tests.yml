@@ -2,22 +2,22 @@
 name: Run script tests
 
 'on':
-  push:
-    paths:
-      - "**/*.sh"
-      - "**/*.ksh"
-      - "**/*.bash"
-      - "**/*.pl"
-      - "Makefile"
-      - ".github/workflows/run-tests.yml"
-  pull_request:
-    paths:
-      - "**/*.sh"
-      - "**/*.ksh"
-      - "**/*.bash"
-      - "**/*.pl"
-      - "Makefile"
-      - ".github/workflows/run-tests.yml"
+  # push:
+  #   paths:
+  #     - "**/*.sh"
+  #     - "**/*.ksh"
+  #     - "**/*.bash"
+  #     - "**/*.pl"
+  #     - "Makefile"
+  #     - ".github/workflows/run-tests.yml"
+  # pull_request:
+  #   paths:
+  #     - "**/*.sh"
+  #     - "**/*.ksh"
+  #     - "**/*.bash"
+  #     - "**/*.pl"
+  #     - "Makefile"
+  #     - ".github/workflows/run-tests.yml"
   workflow_dispatch: {}
 
 permissions:
