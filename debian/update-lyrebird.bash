@@ -51,14 +51,12 @@ ensure_go() {
 fetch_lyrebird_source() {
     mkdir -p "$BUILD_DIR"
     cd "$BUILD_DIR"
-    if [ ! -d lyrebird ]; then
-        log "Cloning lyrebird repository..."
-        git clone "$REPO_URL"
-    else
-        log "Updating existing lyrebird repository..."
-        cd lyrebird
-        git pull --ff-only
+    if [ -d lyrebird ]; then
+        log "Removing existing lyrebird directory..."
+        rm -rf lyrebird
     fi
+    log "Cloning lyrebird repository..."
+    git clone --depth 1 "$REPO_URL" lyrebird
     cd lyrebird
 }
 
