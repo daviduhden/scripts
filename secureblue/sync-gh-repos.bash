@@ -40,7 +40,7 @@ log() { printf '%s %b[INFO]%b ✅ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$GREEN" 
 warn() { printf '%s %b[WARN]%b ⚠️ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$YELLOW" "$RESET" "$*"; }
 error() { printf '%s %b[ERROR]%b ❌ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$RED" "$RESET" "$*" >&2; }
 
-require_bin() {
+require_cmd() {
 	if ! command -v "$1" >/dev/null 2>&1; then
 		error "Missing required command: $1"
 		exit 1
@@ -126,8 +126,8 @@ EOF
 		fi
 	fi
 
-	require_bin gh
-	require_bin git
+	require_cmd gh
+	require_cmd git
 
 	if [ ! -d "$BASE_DIR" ]; then
 		error "Base directory $BASE_DIR does not exist"
