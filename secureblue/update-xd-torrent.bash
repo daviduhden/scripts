@@ -80,7 +80,7 @@ ensure_go() {
 
 clone_or_update_repo() {
 	mkdir -p "$BUILD_DIR"
-	cd "$BUILD_DIR"
+	cd "$BUILD_DIR"/XD || true
 
 	if [ ! -d XD ]; then
 		log "Cloning XD repository..."

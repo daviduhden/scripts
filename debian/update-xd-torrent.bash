@@ -59,7 +59,7 @@ ensure_go() {
 
 fetch_XD_source() {
 	mkdir -p "$BUILD_DIR"
-	cd "$BUILD_DIR"
+	cd "$BUILD_DIR"/XD || true
 	if [ ! -d XD ]; then
 		log "Cloning XD repository..."
 		git clone "$REPO_URL"

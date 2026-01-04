@@ -23,6 +23,7 @@ export PATH
 REPO="tpo/anti-censorship/lyrebird"
 REPO_URL="https://gitlab.torproject.org/${REPO}.git"
 BUILD_DIR="${HOME}/.local/src"
+BIN_NAME="lyrebird"
 
 # Colors
 if [ -t 1 ] && [ "${NO_COLOR:-0}" != "1" ]; then
@@ -57,16 +58,17 @@ ensure_go() {
 	log "Go version: $(go version)"
 }
 
-fetch_lyrebird_source() {
+clone_or_update_repo() {
 	mkdir -p "$BUILD_DIR"
 	cd "$BUILD_DIR"
-	if [ -d lyrebird ]; then
-		log "Removing existing lyrebird directory..."
-		rm -rf lyrebird
+	if [ -d "$BIN_NAME" ]; then
+		log "Removing existing $BIN_NAME directory..."
+		rm -rf "$BIN_NAME"
 	fi
+
 	log "Cloning lyrebird repository..."
-	git clone --depth 1 "$REPO_URL" lyrebird
-	cd lyrebird
+	git clone "$REPO_URL"
+	cd "$BIN_NAME"
 }
 
 build_lyrebird() {
@@ -88,7 +90,7 @@ main() {
 	require_root
 	require_cmd git
 	ensure_go
-	fetch_lyrebird_source
+	clone_or_update_repo
 	build_lyrebird
 	install_lyrebird
 }
