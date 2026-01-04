@@ -20,8 +20,10 @@ DEBIAN_SCRIPTS = \
 	debian/update-argon-one-v3.bash \
 	debian/update-btop.bash \
 	debian/update-fastfetch.bash \
+	debian/update-lyrebird.bash \
 	debian/update-golang.bash \
-	debian/update-monero.bash
+	debian/update-monero.bash \
+	debian/update-xd-torrent.bash
 
 OPENBSD_SCRIPTS = \
 	openbsd/apply-sysclean.ksh \
@@ -38,7 +40,9 @@ SECUREBLUE_SCRIPTS = \
 	secureblue/sudo-wrapper.bash \
 	secureblue/sync-gh-repos.bash \
 	secureblue/sysupgrade.bash \
-	secureblue/update-arti-oniux.bash
+	secureblue/update-arti-oniux.bash \
+	secureblue/update-lyrebird.bash \
+	secureblue/update-xd-torrent.bash
 
 TESTS_FORMAT_SCRIPTS = \
 	tests-format/clang-format-all.sh \
