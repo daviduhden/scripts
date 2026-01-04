@@ -89,7 +89,7 @@ clone_or_update_repo() {
 	fi
 
 	log "Cloning lyrebird repository..."
-	git clone --depth 1 "$REPO_LYREBIRD" "$BIN_NAME"
+	git clone "$REPO_LYREBIRD"
 	cd "$BIN_NAME"
 }
 
