@@ -15,6 +15,10 @@ set -euo pipefail
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
 
+# Basic PATH
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
 BUILD_DIR="${HOME}/.local/src"
 REPO="aristocratos/btop"
 REPO_URL="https://github.com/${REPO}.git"

@@ -16,6 +16,10 @@ set -euo pipefail
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
 
+# Basic PATH
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/go/bin
+export PATH
+
 REPO="majestrate/XD"
 REPO_URL="https://github.com/${REPO}.git"
 BUILD_DIR="${HOME}/.local/src"
