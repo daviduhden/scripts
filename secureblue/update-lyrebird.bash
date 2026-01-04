@@ -8,7 +8,8 @@ set -euo pipefail
 # - Builds the binary with make
 # - Installs the resulting binary into /usr/local/bin (requires root)
 
-REPO_LYREBIRD="https://gitlab.torproject.org/tpo/anti-censorship/lyrebird.git"
+REPO="tpo/anti-censorship/pluggable-transports/lyrebird"
+REPO_URL="https://gitlab.torproject.org/${REPO}.git"
 BUILD_DIR="${HOME}/.local/src"
 BIN_NAME="lyrebird"
 INSTALL_PATH="/usr/local/bin/$BIN_NAME"
@@ -89,7 +90,7 @@ clone_or_update_repo() {
 	fi
 
 	log "Cloning lyrebird repository..."
-	git clone "$REPO_LYREBIRD"
+	git clone "$REPO_URL"
 	cd "$BIN_NAME"
 }
 
