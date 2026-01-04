@@ -84,14 +84,16 @@ ensure_go() {
 clone_or_update_repo() {
 	mkdir -p "$BUILD_DIR"
 	cd "$BUILD_DIR"
-	if [ -d "$BIN_NAME" ]; then
-		log "Removing existing $BIN_NAME directory..."
-		rm -rf "$BIN_NAME"
-	fi
 
-	log "Cloning lyrebird repository..."
-	git clone "$REPO_URL"
-	cd "$BIN_NAME"
+	if [ ! -d "$BIN_NAME" ]; then
+		log "Cloning $BIN_NAME repository..."
+		git clone "$REPO_URL" "$BIN_NAME"
+	else
+		log "Updating existing $BIN_NAME repository..."
+		cd "$BUILD_DIR"/"$BIN_NAME"
+		git pull --ff-only
+	fi
+	cd "$BUILD_DIR"/"$BIN_NAME"
 }
 
 build_lyrebird() {

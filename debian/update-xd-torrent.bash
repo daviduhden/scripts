@@ -23,6 +23,7 @@ export PATH
 REPO="majestrate/XD"
 REPO_URL="https://github.com/${REPO}.git"
 BUILD_DIR="${HOME}/.local/src"
+BIN_NAME="XD"
 
 # Colors
 if [ -t 1 ] && [ "${NO_COLOR:-0}" != "1" ]; then
@@ -61,15 +62,15 @@ clone_or_update_repo() {
 	mkdir -p "$BUILD_DIR"
 	cd "$BUILD_DIR"
 
-	if [ ! -d XD ]; then
-		log "Cloning XD repository..."
-		git clone "$REPO_URL" XD
+	if [ ! -d "$BIN_NAME" ]; then
+		log "Cloning $BIN_NAME repository..."
+		git clone "$REPO_URL" "$BIN_NAME"
 	else
-		log "Updating existing XD repository..."
-		cd "$BUILD_DIR"/XD || true
+		log "Updating existing $BIN_NAME repository..."
+		cd "$BUILD_DIR"/"$BIN_NAME"
 		git pull --ff-only
 	fi
-	cd "$BUILD_DIR"/XD || true
+	cd "$BUILD_DIR"/"$BIN_NAME"
 }
 
 build_and_install_XD() {
