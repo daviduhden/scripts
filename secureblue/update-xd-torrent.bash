@@ -80,17 +80,17 @@ ensure_go() {
 
 clone_or_update_repo() {
 	mkdir -p "$BUILD_DIR"
-	cd "$BUILD_DIR"/XD || true
+	cd "$BUILD_DIR"
 
 	if [ ! -d XD ]; then
 		log "Cloning XD repository..."
 		git clone "$REPO_XD" XD
 	else
 		log "Updating existing XD repository..."
-		cd XD
+		cd "$BUILD_DIR"/XD || true
 		git pull --ff-only
 	fi
-	cd XD
+	cd "$BUILD_DIR"/XD || true
 }
 
 build_and_install_XD() {
