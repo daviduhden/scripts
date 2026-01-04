@@ -143,14 +143,14 @@ install-perl:
 	@echo "${INFO} Perl helpers installed"
 
 install-tests-format:
-	@echo "${INFO} Installing tests-format scripts"
+	@echo "${INFO} Installing Tests/Format scripts"
 	@install -d ${BINDIR}/tests-format
 	@for f in ${TESTS_FORMAT_SCRIPTS}; do \
 		base=$${f##*/}; name=$${base%.sh}; \
 		printf '%s Installing %s -> %s\n' "${INFO}" "$$f" "${BINDIR}/$$name"; \
 		install -m 0755 "$$f" "${BINDIR}/$$name"; \
 	done
-	@echo
+	@echo "${INFO} Tests/Format helpers installed"
 
 test:
 	@echo "Running shell script validation..."
