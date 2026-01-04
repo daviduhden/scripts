@@ -20,7 +20,7 @@ set -euo pipefail
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/go/bin
 export PATH
 
-REPO="tpo/anti-censorship/lyrebird"
+REPO="tpo/anti-censorship/pluggable-transports/lyrebird"
 REPO_URL="https://gitlab.torproject.org/${REPO}.git"
 BUILD_DIR="${HOME}/.local/src"
 BIN_NAME="lyrebird"

@@ -8,7 +8,7 @@ set -euo pipefail
 # - Builds the project with make
 # - Installs the project using make install (requires root)
 
-REPO_XD="https://github.com/majestrate/XD.git"
+REPO_URL="https://github.com/majestrate/XD.git"
 BUILD_DIR="${HOME}/.local/src"
 ROOT_CMD=""
 
@@ -84,7 +84,7 @@ clone_or_update_repo() {
 
 	if [ ! -d XD ]; then
 		log "Cloning XD repository..."
-		git clone "$REPO_XD" XD
+		git clone "$REPO_URL" XD
 	else
 		log "Updating existing XD repository..."
 		cd "$BUILD_DIR"/XD || true
