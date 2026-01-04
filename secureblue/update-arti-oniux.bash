@@ -168,7 +168,7 @@ install_or_update_arti() {
 }
 
 install_or_update_oniux() {
-	ujust set-unconfined-userns on
+	ujust set-unconfined-userns on >/dev/null 2>&1 || true
 	local crate="oniux"
 	local updated=0
 	log "Checking $crate version (git tags from $REPO_ONIUX)..."

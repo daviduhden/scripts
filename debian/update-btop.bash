@@ -66,9 +66,6 @@ net_curl() {
 	curl -fLsS --retry 5 "$@"
 }
 
-has_cmd() {
-	command -v "$1" >/dev/null 2>&1
-}
 
 require_root() {
 	if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
@@ -85,14 +82,14 @@ require_cmd() {
 get_latest_tag() {
 	local tag json
 
-	if has_cmd gh; then
+	if command -v gh >/dev/null 2>&1; then
 		if tag="$(run_as_gh_user env GH_CONFIG_DIR="$GH_CONFIG_DIR" GH_HOST="$GH_HOST" gh api "repos/${REPO}/releases/latest" --jq .tag_name 2>/dev/null || true)" && [[ -n $tag ]]; then
 			printf '%s\n' "$tag"
 			return 0
 		fi
 	fi
 
-	if has_cmd git; then
+	if command -v git >/dev/null 2>&1; then
 		tag="$(git ls-remote --tags --refs "$REPO_URL" 2>/dev/null |
 			awk '{print $2}' |
 			sed 's#refs/tags/##' |
@@ -136,7 +133,7 @@ install_build_deps() {
 fetch_source() {
 	local tag="$1" dest="$2" src_dir="" tarball_url tarball
 
-	if has_cmd gh; then
+	if command -v gh >/dev/null 2>&1; then
 		log "Cloning btop tag ${tag} with GitHub CLI..." >&2
 		if run_as_gh_user env GH_CONFIG_DIR="$GH_CONFIG_DIR" GH_HOST="$GH_HOST" gh repo clone "$REPO" "$dest/btop" -- --branch "$tag" --depth 1 >/dev/null 2>&1; then
 			printf '%s\n' "$dest/btop"
@@ -145,7 +142,7 @@ fetch_source() {
 		warn "gh repo clone failed; falling back to git/curl." >&2
 	fi
 
-	if has_cmd git; then
+	if command -v git >/dev/null 2>&1; then
 		log "Cloning btop tag ${tag} with git..." >&2
 		if git clone --depth 1 --branch "$tag" "$REPO_URL" "$dest/btop"; then
 			printf '%s\n' "$dest/btop"
