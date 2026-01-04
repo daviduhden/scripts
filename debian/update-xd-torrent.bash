@@ -57,18 +57,19 @@ ensure_go() {
 	log "Go version: $(go version)"
 }
 
-fetch_XD_source() {
+clone_or_update_repo() {
 	mkdir -p "$BUILD_DIR"
-	cd "$BUILD_DIR"/XD || true
+	cd "$BUILD_DIR"
+
 	if [ ! -d XD ]; then
 		log "Cloning XD repository..."
-		git clone "$REPO_URL"
+		git clone "$REPO_URL" XD
 	else
 		log "Updating existing XD repository..."
-		cd XD
+		cd "$BUILD_DIR"/XD || true
 		git pull --ff-only
 	fi
-	cd XD
+	cd "$BUILD_DIR"/XD || true
 }
 
 build_and_install_XD() {
@@ -83,7 +84,7 @@ main() {
 	require_root
 	require_cmd git
 	ensure_go
-	fetch_XD_source
+	clone_or_update_repo
 	build_and_install_XD
 }
 
