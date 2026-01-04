@@ -10,6 +10,7 @@ set -euo pipefail
 
 REPO_URL="https://github.com/majestrate/XD.git"
 BUILD_DIR="${HOME}/.local/src"
+BIN_NAME="XD"
 ROOT_CMD=""
 
 # Colors
@@ -82,22 +83,27 @@ clone_or_update_repo() {
 	mkdir -p "$BUILD_DIR"
 	cd "$BUILD_DIR"
 
-	if [ ! -d XD ]; then
-		log "Cloning XD repository..."
-		git clone "$REPO_URL" XD
+	if [ ! -d "$BIN_NAME" ]; then
+		log "Cloning $BIN_NAME repository..."
+		git clone "$REPO_URL" "$BIN_NAME"
 	else
-		log "Updating existing XD repository..."
-		cd "$BUILD_DIR"/XD || true
+		log "Updating existing $BIN_NAME repository..."
+		cd "$BUILD_DIR"/"$BIN_NAME"
 		git pull --ff-only
 	fi
-	cd "$BUILD_DIR"/XD || true
+	cd "$BUILD_DIR"/"$BIN_NAME"
 }
 
 build_and_install_XD() {
 	log "Building XD..."
 	make
+	# Adjust Makefile installation prefix: change $(PREFIX)/bin -> $(PREFIX)/local/bin
+	if [ -f Makefile ]; then
+		log "Patching Makefile install path..."
+		sed -i "s|\$(PREFIX)/bin|\$(PREFIX)/local/bin|g" Makefile || true
+	fi
 	log "Installing XD using 'make install'..."
-	run_root make install
+	run_root make install PREFIX=/usr
 	log "XD installed successfully."
 }
 

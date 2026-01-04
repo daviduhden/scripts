@@ -144,7 +144,6 @@ install-perl:
 
 install-tests-format:
 	@echo "${INFO} Installing Tests/Format scripts"
-	@install -d ${BINDIR}/tests-format
 	@for f in ${TESTS_FORMAT_SCRIPTS}; do \
 		base=$${f##*/}; name=$${base%.sh}; \
 		printf '%s Installing %s -> %s\n' "${INFO}" "$$f" "${BINDIR}/$$name"; \
