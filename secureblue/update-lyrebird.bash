@@ -14,6 +14,7 @@ BUILD_DIR="${HOME}/.local/src"
 BIN_NAME="lyrebird"
 INSTALL_PATH="/usr/local/bin/$BIN_NAME"
 ROOT_CMD=""
+SKIP_BUILD=0
 
 # Colors
 if [ -t 1 ] && [ "${NO_COLOR:-0}" != "1" ]; then
@@ -84,16 +85,33 @@ ensure_go() {
 clone_or_update_repo() {
 	mkdir -p "$BUILD_DIR"
 	cd "$BUILD_DIR"
-
 	if [ ! -d "$BIN_NAME" ]; then
 		log "Cloning $BIN_NAME repository..."
 		git clone "$REPO_URL" "$BIN_NAME"
+	fi
+
+	cd "$BUILD_DIR/$BIN_NAME"
+
+	# Traer tags y refs remotas
+	git fetch --tags --prune origin || git fetch --tags --prune
+
+	# Determinar el último tag (por fecha de creación de tag)
+	latest_tag=$(git describe --tags "$(git rev-list --tags --max-count=1)" 2>/dev/null || true)
+
+	if [ -n "$latest_tag" ]; then
+		# Verificar si el HEAD local está exactamente en un tag
+		local_tag=$(git describe --tags --exact-match HEAD 2>/dev/null || true)
+		if [ "$local_tag" = "$latest_tag" ]; then
+			log "Local repository is already at latest tag '$latest_tag'. Skipping build."
+			SKIP_BUILD=1
+			return
+		fi
+		log "Checking out latest tag $latest_tag..."
+		git checkout "tags/$latest_tag" -q
 	else
-		log "Updating existing $BIN_NAME repository..."
-		cd "$BUILD_DIR"/"$BIN_NAME"
+		log "No tags found; updating to latest commit on default branch..."
 		git pull --ff-only
 	fi
-	cd "$BUILD_DIR"/"$BIN_NAME"
 }
 
 build_lyrebird() {
@@ -116,6 +134,11 @@ main() {
 	ensure_go
 
 	clone_or_update_repo
+	if [ "$SKIP_BUILD" -eq 1 ]; then
+		log "No build required. Exiting."
+		return 0
+	fi
+
 	build_lyrebird
 	install_lyrebird
 
