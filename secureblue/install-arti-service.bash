@@ -59,13 +59,13 @@ DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/arti"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/arti"
 
 log "Creating systemd user dir: $SYSTEMD_USER_DIR"
-install -d -m 0755 "$SYSTEMD_USER_DIR"
+install -d -m 0750 "$SYSTEMD_USER_DIR"
 
 log "Installing arti.service to user unit directory..."
-install -m 0644 "$SERVICE_SRC" "$SYSTEMD_USER_DIR/arti.service"
+install -m 0640 "$SERVICE_SRC" "$SYSTEMD_USER_DIR/arti.service"
 
 log "Creating arti directories (config/data/state)..."
-install -d -m 0755 "$CONFIG_DIR" "$DATA_DIR" "$STATE_DIR"
+install -d -m 0750 "$CONFIG_DIR" "$DATA_DIR" "$STATE_DIR"
 
 if [[ -f $CONFIG_FILE ]]; then
 	BACKUP_FILE="${CONFIG_FILE}.bak.$(date +%Y%m%d%H%M%S)"
