@@ -119,8 +119,18 @@ fi
 
 # Clean up bundled systemd templates after use to keep ${SCRIPT_DIR} tidy when installed under /usr/local/bin
 if [[ -d "${SCRIPT_DIR}/systemd" ]]; then
-	log "Removing bundled systemd templates from ${SCRIPT_DIR}/systemd"
-	rm -rf "${SCRIPT_DIR}/systemd" || warn "failed to remove ${SCRIPT_DIR}/systemd"
+	log "Removing bundled systemd templates from ${SCRIPT_DIR}/systemd (requires root)"
+	if command -v run0 >/dev/null 2>&1; then
+		if ! run0 rm -rf "${SCRIPT_DIR}/systemd"; then
+			warn "failed to remove ${SCRIPT_DIR}/systemd with run0"
+		fi
+	elif command -v sudo >/dev/null 2>&1; then
+		if ! sudo rm -rf "${SCRIPT_DIR}/systemd"; then
+			warn "failed to remove ${SCRIPT_DIR}/systemd with sudo"
+		fi
+	else
+		warn "neither run0 nor sudo found; skipping removal of ${SCRIPT_DIR}/systemd"
+	fi
 fi
 
 log "arti.service installed, enabled, and running."

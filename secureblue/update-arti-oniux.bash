@@ -37,12 +37,15 @@ error() { printf '%s %b[ERROR]%b ❌ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$RED"
 detect_root_cmd() {
 	if [ "${EUID:-$(id -u)}" -eq 0 ]; then
 		ROOT_CMD=""
-		log "Running as root; no run0 needed for privileged operations."
+		log "Running as root; no elevation helper needed for privileged operations."
 	elif command -v run0 >/dev/null 2>&1; then
 		ROOT_CMD="run0"
 		log "Using run0 for privileged operations."
+	elif command -v sudo >/dev/null 2>&1; then
+		ROOT_CMD="sudo"
+		log "Using sudo for privileged operations."
 	else
-		error "run0 not found. Run this script as root or install run0."
+		error "neither run0 nor sudo found. Run this script as root or install run0/sudo."
 		exit 1
 	fi
 }
@@ -168,7 +171,7 @@ install_or_update_arti() {
 }
 
 install_or_update_oniux() {
-	ujust set-unconfined-userns on >/dev/null 2>&1 || true
+	ujust set-unconfined-userns off >/dev/null 2>&1 || true
 	local crate="oniux"
 	local updated=0
 	log "Checking $crate version (git tags from $REPO_ONIUX)..."
