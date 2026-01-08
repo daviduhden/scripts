@@ -23,6 +23,7 @@ DEBIAN_SCRIPTS = \
 	debian/update-lyrebird.bash \
 	debian/update-golang.bash \
 	debian/update-monero.bash \
+	debian/update-msedit.bash \
 	debian/update-xd-torrent.bash
 
 OPENBSD_SCRIPTS = \
@@ -41,6 +42,7 @@ SECUREBLUE_SCRIPTS = \
 	secureblue/sync-gh-repos.bash \
 	secureblue/sysupgrade.bash \
 	secureblue/update-arti-oniux.bash \
+	secureblue/update-krohnkite.bash \
 	secureblue/update-lyrebird.bash \
 	secureblue/update-xd-torrent.bash
 
