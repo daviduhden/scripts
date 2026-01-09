@@ -34,6 +34,7 @@ OPENBSD_SCRIPTS = \
 	openbsd/sysupgrade-current.ksh
 
 SECUREBLUE_SCRIPTS = \
+	secureblue/down-music.bash \
 	secureblue/install-arti-service.bash \
 	secureblue/luks-ext4-to-btrfs.bash \
 	secureblue/postinstall.bash \
