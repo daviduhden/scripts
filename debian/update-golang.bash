@@ -178,7 +178,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-log "Downloading ${TAR_NAME} (GO_ARCH=${GO_ARCH}, uname -m=${ARCH}) from ${TAR_URL}..."
+log "Downloading ${TAR_NAME} from ${TAR_URL}..."
 if ! net_curl "$TAR_URL" -o "$TAR_FILE"; then
 	error "download failed from ${TAR_URL}"
 fi
