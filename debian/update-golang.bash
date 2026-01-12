@@ -19,7 +19,7 @@ export PATH
 
 GO_BASE_URL="https://go.dev/dl"
 VERSION_URL="https://go.dev/VERSION?m=text"
-INSTALL_DIR="/usr/local"
+INSTALL_DIR="/usr/bin"
 GO_ROOT="${INSTALL_DIR}/go"
 
 # Simple colors for messages
