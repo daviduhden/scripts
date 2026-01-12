@@ -237,14 +237,20 @@ log "Installing binaries into ${INSTALL_DIR}..."
 
 install -d "${INSTALL_DIR}"
 
-shopt -s nullglob
-for bin in "${EXTRACTED_DIR}"/monero*; do
-	if [[ -f "$bin" && -x "$bin" ]]; then
-		log " -> installing $(basename "$bin")"
-		install -m 0755 "$bin" "${INSTALL_DIR}/"
-	fi
-done
-shopt -u nullglob
+installed_bins=0
+while IFS= read -r -d '' bin; do
+	log " -> installing $(basename "$bin")"
+	install -m 0755 "$bin" "${INSTALL_DIR}/"
+	installed_bins=$((installed_bins + 1))
+done < <(
+	find "$EXTRACTED_DIR" -maxdepth 2 -type f \
+		\( -name 'monerod' -o -name 'monero*' \) \
+		-perm -111 -print0 2>/dev/null | sort -z
+)
+
+if [[ $installed_bins -eq 0 ]]; then
+	error "no Monero binaries found under extracted directory: ${EXTRACTED_DIR}"
+fi
 
 # Ensure monero user and directories
 log "Ensuring monero system user and directories exist..."
