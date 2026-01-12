@@ -86,21 +86,15 @@ has_cmd() {
 get_latest_release() {
 	local tag json
 
-	if has_cmd gh; then
-		tag="$(gh api "repos/${REPO}/releases/latest" --jq .tag_name 2>/dev/null || true)"
-		if [[ -n $tag ]]; then
-			printf '%s\n' "$tag"
-			return 0
-		fi
-	fi
-
+	# Preferred method: query tags via git.
 	if has_cmd git; then
-		tag="$(git ls-remote --tags --refs "$REPO_URL" 2>/dev/null |
+		tag="$(git ls-remote --tags --refs "$REPO_URL" 'v*' 2>/dev/null |
 			awk '{print $2}' |
 			sed 's#refs/tags/##' |
 			sed 's/\^{}//' |
-			sort -Vr |
-			head -n1)"
+			grep -E '^v[0-9]+' |
+			sort -uV |
+			tail -n1)"
 		if [[ -n $tag ]]; then
 			printf '%s\n' "$tag"
 			return 0
@@ -244,7 +238,7 @@ log "Installing binaries into ${INSTALL_DIR}..."
 install -d "${INSTALL_DIR}"
 
 shopt -s nullglob
-for bin in "${EXTRACTED_DIR}"/monerod "${EXTRACTED_DIR}"/monero-*; do
+for bin in "${EXTRACTED_DIR}"/monerod "${EXTRACTED_DIR}"/monero*; do
 	if [[ -f $bin && -x $bin ]]; then
 		log " -> installing $(basename "$bin")"
 		install -m 0755 "$bin" "${INSTALL_DIR}/"
@@ -290,18 +284,27 @@ UNIT_TMP="${TMPDIR}/monerod.service"
 download_systemd_unit() {
 	local out_file="$1"
 
-	if has_cmd gh; then
-		if gh api --method GET -H "Accept: application/vnd.github.raw" "repos/${REPO}/contents/utils/systemd/monerod.service?ref=master" --output "$out_file" >/dev/null 2>&1; then
-			return 0
-		fi
-		warn "gh api for systemd unit failed; falling back to curl."
+	# Preferred method: use git to fetch the file contents.
+	if has_cmd git; then
+		local git_tmp
+		git_tmp="$(mktemp -d /tmp/monero-unit-git-XXXXXX)"
+		(
+			cd "$git_tmp"
+			git init -q
+			git remote add origin "$REPO_URL"
+			# Shallow fetch only the default branch tip (master in upstream repo)
+			git fetch -q --depth 1 origin master
+			git show "FETCH_HEAD:utils/systemd/monerod.service" >"$out_file"
+		) >/dev/null 2>&1 && rm -rf -- "$git_tmp" && return 0
+		rm -rf -- "$git_tmp" 2>/dev/null || true
+		warn "git fetch/show for systemd unit failed; falling back to curl."
 	fi
 
 	net_curl "${SYSTEMD_UNIT_URL}" -o "$out_file"
 }
 
 if ! download_systemd_unit "${UNIT_TMP}"; then
-	error "failed to download systemd unit (gh/git/curl chain)"
+	error "failed to download systemd unit (git/curl chain)"
 fi
 
 # This always overwrites the target file, whether it exists or not
