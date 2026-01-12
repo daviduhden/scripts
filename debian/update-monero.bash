@@ -217,7 +217,7 @@ log "Hash verified for ${TARBALL}."
 log "Extracting tarball..."
 tar -xjf "${TMPDIR}/${TARBALL}" -C "$TMPDIR"
 
-EXTRACTED_DIR="$(find "$TMPDIR" -maxdepth 1 -type d -name 'monero-*' | head -n1)"
+EXTRACTED_DIR="$(find "$TMPDIR" -maxdepth 1 -type d -name 'monero*' | head -n1)"
 if [[ -z ${EXTRACTED_DIR} ]]; then
 	error "could not find extracted Monero directory."
 fi
