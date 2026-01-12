@@ -55,19 +55,95 @@ require_root() {
 }
 
 backup_etc() {
-	local ts backup_dir archive
+	local ts backup_dir archive baseline_root baseline_etc changes_manifest
+	local old_umask
 
 	ts="$(date +%Y%m%d-%H%M%S)"
 	backup_dir="${BACKUP_ROOT}/${ts}"
-	archive="${backup_dir}/etc.tar.gz"
+	baseline_root="${BACKUP_ROOT}/.baseline"
+	baseline_etc="${baseline_root}/etc"
+	archive="${backup_dir}/etc-changes.tar.gz"
+	changes_manifest="${backup_dir}/etc-changes.rsync.txt"
+
+	old_umask="$(umask)"
+	umask 077
 
 	mkdir -p "$backup_dir"
+	chmod 0700 "$BACKUP_ROOT" 2>/dev/null || true
+	chmod 0700 "$backup_dir" 2>/dev/null || true
 
-	log "Backing up /etc to ${archive}..."
-	# Preserve permissions, ACLs and xattrs where possible
-	# Use -C / to avoid tar's leading-slash warning while keeping absolute paths in the archive
-	tar --numeric-owner --xattrs --acls -cpzf "$archive" -C / etc
-	log "Backup completed."
+	if ! command -v rsync >/dev/null 2>&1; then
+		warn "rsync not found; falling back to full /etc backup."
+		archive="${backup_dir}/etc-full.tar.gz"
+		log "Backing up /etc to ${archive}..."
+		tar --numeric-owner --xattrs --acls -cpzf "$archive" -C / etc
+		chmod 0600 "$archive" 2>/dev/null || true
+		umask "$old_umask"
+		log "Backup completed."
+		return 0
+	fi
+
+	# First run: no baseline exists yet, so take a full backup and create the baseline.
+	if [[ ! -d "$baseline_etc" ]] || ! find "$baseline_etc" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null | grep -q .; then
+		archive="${backup_dir}/etc-full.tar.gz"
+		log "No baseline found; creating initial full /etc backup at ${archive}..."
+		tar --numeric-owner --xattrs --acls -cpzf "$archive" -C / etc
+		chmod 0600 "$archive" 2>/dev/null || true
+
+		mkdir -p "$baseline_etc"
+		chmod 0700 "$baseline_root" 2>/dev/null || true
+		chmod 0700 "$baseline_etc" 2>/dev/null || true
+		log "Creating baseline snapshot at ${baseline_etc}..."
+		rsync -aHAX --numeric-ids --delete /etc/ "$baseline_etc/" >/dev/null
+		umask "$old_umask"
+		log "Backup completed (initial full + baseline created)."
+		return 0
+	fi
+
+	log "Detecting modified /etc files vs baseline (${baseline_etc})..."
+	# This is effectively a 'diff' of /etc vs the baseline, expressed via rsync itemized changes.
+	# It includes new/changed files and deletions (as '*deleting').
+	if ! rsync -aHAX --numeric-ids --delete --dry-run --itemize-changes /etc/ "$baseline_etc/" >"$changes_manifest"; then
+		warn "Change detection failed; falling back to full /etc backup."
+		archive="${backup_dir}/etc-full.tar.gz"
+		log "Backing up /etc to ${archive}..."
+		tar --numeric-owner --xattrs --acls -cpzf "$archive" -C / etc
+		chmod 0600 "$archive" 2>/dev/null || true
+		umask "$old_umask"
+		log "Backup completed."
+		return 0
+	fi
+
+	# Copy only new/modified files into a staging directory, then archive that.
+	# (We don't copy unchanged files; deletions are only recorded in the manifest.)
+	mkdir -p "${backup_dir}/etc"
+	chmod 0700 "${backup_dir}/etc" 2>/dev/null || true
+
+	log "Backing up only changed /etc files to ${archive}..."
+	# --compare-dest skips files identical to the baseline.
+	rsync -aHAX --numeric-ids --compare-dest="$baseline_etc" /etc/ "${backup_dir}/etc/" >/dev/null || true
+
+	# If nothing changed, avoid producing a misleading archive.
+	if ! find "${backup_dir}/etc" -type f -print -quit 2>/dev/null | grep -q .; then
+		log "No modified /etc files detected; nothing to back up."
+		rm -rf -- "${backup_dir:?}/etc"
+		chmod 0600 "$changes_manifest" 2>/dev/null || true
+		umask "$old_umask"
+		return 0
+	fi
+
+	# Archive the staging tree; paths remain under 'etc/'.
+	tar --numeric-owner --xattrs --acls -cpzf "$archive" -C "$backup_dir" etc
+	chmod 0600 "$archive" 2>/dev/null || true
+	chmod 0600 "$changes_manifest" 2>/dev/null || true
+	# Remove the staging directory after archiving to save space.
+	rm -rf -- "${backup_dir:?}/etc"
+
+	log "Updating baseline snapshot..."
+	rsync -aHAX --numeric-ids --delete /etc/ "$baseline_etc/" >/dev/null
+
+	umask "$old_umask"
+	log "Backup completed (incremental)."
 }
 
 apt_update() {
