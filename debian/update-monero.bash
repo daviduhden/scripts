@@ -217,7 +217,7 @@ log "Hash verified for ${TARBALL}."
 log "Extracting tarball..."
 tar -xjf "${TMPDIR}/${TARBALL}" -C "$TMPDIR"
 
-EXTRACTED_DIR="$(find "$TMPDIR" -maxdepth 1 -type d -name 'monero*' | head -n1)"
+EXTRACTED_DIR="$(find "$TMPDIR" -maxdepth 1 -type d -name 'monero-*' | head -n1)"
 if [[ -z ${EXTRACTED_DIR} ]]; then
 	error "could not find extracted Monero directory."
 fi
@@ -238,8 +238,8 @@ log "Installing binaries into ${INSTALL_DIR}..."
 install -d "${INSTALL_DIR}"
 
 shopt -s nullglob
-for bin in "${EXTRACTED_DIR}"/monerod "${EXTRACTED_DIR}"/monero*; do
-	if [[ -f $bin && -x $bin ]]; then
+for bin in "${EXTRACTED_DIR}"/monero*; do
+	if [[ -f "$bin" && -x "$bin" ]]; then
 		log " -> installing $(basename "$bin")"
 		install -m 0755 "$bin" "${INSTALL_DIR}/"
 	fi
