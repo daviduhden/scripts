@@ -48,6 +48,52 @@ run_as_user() {
 	runuser -u "$user" -- "$@"
 }
 
+user_home_dir() {
+	local user="$1"
+	getent passwd "$user" | cut -d: -f6
+}
+
+user_uid() {
+	local user="$1"
+	getent passwd "$user" | cut -d: -f3
+}
+
+run_as_user_env() {
+	local user="$1"
+	shift
+
+	local home uid runtime_dir bus_path
+	home="$(user_home_dir "$user" || true)"
+	uid="$(user_uid "$user" || true)"
+
+	if [[ -z ${home:-} || -z ${uid:-} ]]; then
+		warn "Could not determine HOME/UID for user '$user'; skipping command: $*"
+		return 1
+	fi
+
+	runtime_dir="/run/user/${uid}"
+	bus_path="${runtime_dir}/bus"
+
+	local -a env_vars
+	env_vars=(
+		"HOME=${home}"
+		"USER=${user}"
+		"LOGNAME=${user}"
+		"PATH=${PATH}"
+		"LANG=${LANG}"
+		"LC_ALL=${LC_ALL}"
+	)
+
+	if [[ -d $runtime_dir ]]; then
+		env_vars+=("XDG_RUNTIME_DIR=${runtime_dir}")
+		if [[ -S $bus_path ]]; then
+			env_vars+=("DBUS_SESSION_BUS_ADDRESS=unix:path=${bus_path}")
+		fi
+	fi
+
+	runuser -u "$user" -- env "${env_vars[@]}" "$@"
+}
+
 # Simple colors for messages
 if [ -t 1 ] && [ "${NO_COLOR:-0}" != "1" ]; then
 	GREEN="\033[32m"
@@ -263,7 +309,7 @@ update_flatpak() {
 	flatpak update --system -y || warn "flatpak system update failed (continuing)."
 	flatpak uninstall --system --unused -y || warn "flatpak system cleanup failed (continuing)."
 
-	# Per-user updates (best effort)
+	# Per-user updates
 	if ! require_cmd --check runuser; then
 		warn "'runuser' not available; skipping per-user Flatpak updates/repairs."
 		return
@@ -272,11 +318,11 @@ update_flatpak() {
 	log "Repairing and updating Flatpak user installations..."
 	while IFS=: read -r user _ uid _ home _; do
 		[[ $uid -ge 1000 && $uid -lt 60000 ]] || continue
-		if [[ -d "$home/.local/share/flatpak" ]]; then
+		if [[ -n ${home:-} && -d $home && -d "$home/.local/share/flatpak" ]]; then
 			log "  -> Flatpak repair/update for user $user"
-			run_as_user "$user" flatpak repair --user || warn "flatpak user repair failed for $user (continuing)."
-			run_as_user "$user" flatpak update --user -y || warn "flatpak user update failed for $user (continuing)."
-			run_as_user "$user" flatpak uninstall --user --unused -y || warn "flatpak user cleanup failed for $user (continuing)."
+			run_as_user_env "$user" flatpak repair --user || warn "flatpak user repair failed for $user (continuing)."
+			run_as_user_env "$user" flatpak update --user -y || warn "flatpak user update failed for $user (continuing)."
+			run_as_user_env "$user" flatpak uninstall --user --unused -y || warn "flatpak user cleanup failed for $user (continuing)."
 		fi
 	done </etc/passwd
 }
