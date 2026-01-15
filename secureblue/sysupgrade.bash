@@ -42,6 +42,14 @@ export PATH
 export LANG=C.UTF-8
 export LC_ALL=C.UTF-8
 
+# Non-root user for any actions that require a user session (Flatpak --user,
+# ujust, brew). This MUST be explicitly configured (no auto-detection).
+#
+# Configure via either:
+#   - CLI: --user USERNAME
+#   - Env: SYSUPGRADE_USER=USERNAME
+NONROOT_USER="${SYSUPGRADE_USER:-}"
+
 run_as_user() {
 	local user="$1"
 	shift
@@ -162,13 +170,39 @@ ensure_root() {
 	fi
 }
 
-get_primary_user() {
-	if [[ -n ${SUDO_USER:-} && ${SUDO_USER} != "root" ]]; then
-		printf '%s\n' "$SUDO_USER"
-		return 0
+validate_nonroot_user() {
+	if [[ -z ${NONROOT_USER:-} ]]; then
+		error "Non-root user is not configured. Set SYSUPGRADE_USER or pass --user USERNAME."
+		exit 1
 	fi
-	# First "normal" user (UID >= 1000 && < 60000, and a real shell)
-	awk -F: '$3>=1000 && $3<60000 && $7 !~ /(false|nologin)$/ {print $1; exit}' /etc/passwd || true
+
+	if [[ ${NONROOT_USER} == "root" ]]; then
+		error "Refusing to use 'root' as the configured non-root user."
+		exit 1
+	fi
+
+	local passwd_line uid home shell
+	passwd_line="$(getent passwd "$NONROOT_USER" || true)"
+	if [[ -z ${passwd_line:-} ]]; then
+		error "Configured non-root user '$NONROOT_USER' does not exist (getent passwd failed)."
+		exit 1
+	fi
+
+	uid="$(printf '%s' "$passwd_line" | cut -d: -f3)"
+	home="$(printf '%s' "$passwd_line" | cut -d: -f6)"
+	shell="$(printf '%s' "$passwd_line" | cut -d: -f7)"
+
+	if [[ -z ${uid:-} || ${uid} -lt 1000 || ${uid} -ge 60000 ]]; then
+		warn "Configured user '$NONROOT_USER' has uid='$uid' (expected a normal user uid between 1000 and 59999)."
+	fi
+
+	if [[ -z ${home:-} || ! -d ${home} ]]; then
+		warn "Configured user '$NONROOT_USER' has HOME='${home}', which is missing. Some per-user actions may fail."
+	fi
+
+	if [[ -n ${shell:-} && ${shell} =~ (false|nologin)$ ]]; then
+		warn "Configured user '$NONROOT_USER' has shell='${shell}'. Some per-user actions may fail."
+	fi
 }
 
 # Print usage and exit
@@ -177,6 +211,8 @@ usage() {
 Usage: sysupgrade.bash [OPTIONS]
 
 Options:
+	--user USERNAME    Non-root user for per-user actions (required)
+	                  (or set SYSUPGRADE_USER=USERNAME)
   --skip-audit       Skip running the Lynis security audit phase
   --skip-collect     Skip collecting Secureblue system information
   --help             Show this help message
@@ -188,6 +224,15 @@ USAGE
 parse_args() {
 	while [[ ${1:-} != "" ]]; do
 		case "$1" in
+		--user)
+			shift
+			if [[ -z ${1:-} ]]; then
+				error "--user requires a username argument."
+				exit 1
+			fi
+			NONROOT_USER="$1"
+			shift
+			;;
 		--skip-audit)
 			SKIP_AUDIT=1
 			shift
@@ -248,13 +293,7 @@ update_homebrew() {
 
 	# Never run "brew" as root. Determine a primary non-root user and
 	# execute brew via that user's context using "runuser"/"run_as_user".
-	local primary_user BREW_PREFIX PREFIX_UID PREFIX_GID BREW_USER
-
-	primary_user="$(get_primary_user || true)"
-	if [[ -z ${primary_user:-} ]]; then
-		warn "No primary non-root user detected; skipping Homebrew update to avoid running brew as root."
-		return
-	fi
+	local BREW_PREFIX PREFIX_UID PREFIX_GID BREW_USER
 
 	if ! require_cmd --check runuser; then
 		warn "'runuser' not available; skipping Homebrew update to avoid running brew as root."
@@ -262,14 +301,14 @@ update_homebrew() {
 	fi
 
 	# Check that the user actually has brew available and query its prefix
-	if ! runuser -u "$primary_user" -- bash -lc 'command -v brew >/dev/null 2>&1'; then
-		warn "brew not available for user '$primary_user'; skipping Homebrew update."
+	if ! runuser -u "$NONROOT_USER" -- bash -lc 'command -v brew >/dev/null 2>&1'; then
+		warn "brew not available for configured user '$NONROOT_USER'; skipping Homebrew update."
 		return
 	fi
 
-	BREW_PREFIX="$(runuser -u "$primary_user" -- brew --prefix 2>/dev/null || true)"
+	BREW_PREFIX="$(runuser -u "$NONROOT_USER" -- brew --prefix 2>/dev/null || true)"
 	if [[ -z ${BREW_PREFIX:-} || ! -d $BREW_PREFIX ]]; then
-		warn "Could not determine a valid Homebrew prefix for user '$primary_user'; skipping Homebrew update."
+		warn "Could not determine a valid Homebrew prefix for configured user '$NONROOT_USER'; skipping Homebrew update."
 		return
 	fi
 
@@ -292,10 +331,16 @@ update_homebrew() {
 		return
 	fi
 
-	log "Running brew as Homebrew owner: $BREW_USER"
-	run_as_user "$BREW_USER" brew update || warn "brew update failed (continuing)."
-	run_as_user "$BREW_USER" brew upgrade || warn "brew upgrade failed (continuing)."
-	run_as_user "$BREW_USER" brew cleanup || warn "brew cleanup failed (continuing)."
+	if [[ $BREW_USER != "$NONROOT_USER" ]]; then
+		warn "Homebrew prefix owner is '$BREW_USER' but configured non-root user is '$NONROOT_USER'."
+		warn "Skipping Homebrew update to keep runuser actions stable. Configure --user '$BREW_USER' or fix prefix ownership."
+		return
+	fi
+
+	log "Running brew as configured user: $NONROOT_USER"
+	run_as_user "$NONROOT_USER" brew update || warn "brew update failed (continuing)."
+	run_as_user "$NONROOT_USER" brew upgrade || warn "brew upgrade failed (continuing)."
+	run_as_user "$NONROOT_USER" brew cleanup || warn "brew cleanup failed (continuing)."
 }
 
 update_flatpak() {
@@ -315,16 +360,16 @@ update_flatpak() {
 		return
 	fi
 
-	log "Repairing and updating Flatpak user installations..."
-	while IFS=: read -r user _ uid _ home _; do
-		[[ $uid -ge 1000 && $uid -lt 60000 ]] || continue
-		if [[ -n ${home:-} && -d $home && -d "$home/.local/share/flatpak" ]]; then
-			log "  -> Flatpak repair/update for user $user"
-			run_as_user_env "$user" flatpak repair --user || warn "flatpak user repair failed for $user (continuing)."
-			run_as_user_env "$user" flatpak update --user -y || warn "flatpak user update failed for $user (continuing)."
-			run_as_user_env "$user" flatpak uninstall --user --unused -y || warn "flatpak user cleanup failed for $user (continuing)."
-		fi
-	done </etc/passwd
+	log "Repairing and updating Flatpak user installation for configured user: ${NONROOT_USER}"
+	local home
+	home="$(user_home_dir "$NONROOT_USER" || true)"
+	if [[ -n ${home:-} && -d $home && -d "$home/.local/share/flatpak" ]]; then
+		run_as_user_env "$NONROOT_USER" flatpak repair --user || warn "flatpak user repair failed for $NONROOT_USER (continuing)."
+		run_as_user_env "$NONROOT_USER" flatpak update --user -y || warn "flatpak user update failed for $NONROOT_USER (continuing)."
+		run_as_user_env "$NONROOT_USER" flatpak uninstall --user --unused -y || warn "flatpak user cleanup failed for $NONROOT_USER (continuing)."
+	else
+		warn "No per-user Flatpak installation detected for '${NONROOT_USER}' (missing ${home:-<unknown>}/.local/share/flatpak); skipping per-user Flatpak maintenance."
+	fi
 }
 
 maintain_filesystems() {
@@ -453,22 +498,14 @@ collect_system_info() {
 	mkdir -p "$info_log_dir"
 	info_log="${info_log_dir}/secureblue-info-$(date +%Y%m%d-%H%M%S).log"
 
-	# Determine a primary non-root user to run ujust/flatpak/brew as.
-	# This avoids collecting information as root when user context is needed.
-	local primary_user run_user
-	primary_user="$(get_primary_user || true)"
-
-	if [[ -n ${primary_user:-} ]] && require_cmd --check runuser; then
-		# We'll prefix ujust/flatpak/brew with: runuser -u "$primary_user" --
-		run_user="runuser -u ${primary_user} --"
-		log "Running ujust and flatpak as user: ${primary_user} (brew will run as that user)"
+	# Use a configured non-root user for any user-context commands.
+	local run_user
+	if require_cmd --check runuser; then
+		run_user="runuser -u ${NONROOT_USER} --"
+		log "Running ujust/flatpak/brew info as configured user: ${NONROOT_USER}"
 	else
 		run_user=""
-		if [[ -z ${primary_user:-} ]]; then
-			warn "Could not detect a primary non-root user; ujust/flatpak will run as root; brew info will be skipped."
-		else
-			warn "'runuser' not available; ujust/flatpak will run as root; brew info will be skipped."
-		fi
+		warn "'runuser' not available; ujust/flatpak will run as root; brew info will be skipped."
 	fi
 
 	log "Collecting Secureblue debug information to ${info_log} (non-interactive)..."
@@ -504,7 +541,7 @@ collect_system_info() {
 			print_section "Flatpaks Installed"
 			if require_cmd --check flatpak; then
 				if [[ -n ${run_user:-} ]]; then
-					# Run flatpak as the primary non-root user
+					# Run flatpak as the configured non-root user
 					$run_user flatpak list --columns=application,version,options
 				else
 					flatpak list --columns=application,version,options
@@ -520,7 +557,7 @@ collect_system_info() {
 			print_section "Homebrew Packages Installed"
 			if require_cmd --check brew; then
 				if [[ -n ${run_user:-} ]]; then
-					# Run brew as the primary non-root user
+					# Run brew as the configured non-root user
 					$run_user brew list --versions
 				else
 					warn "Skipping brew list --versions because running brew as root is unsafe."
@@ -535,7 +572,7 @@ collect_system_info() {
 		{
 			print_section "Audit Results"
 			if [[ -n ${run_user:-} ]]; then
-				# Run ujust as the primary non-root user
+				# Run ujust as the configured non-root user
 				$run_user ujust audit-secureblue
 			else
 				ujust audit-secureblue
@@ -547,7 +584,7 @@ collect_system_info() {
 		{
 			print_section "Listing Local Overrides"
 			if [[ -n ${run_user:-} ]]; then
-				# Run ujust as the primary non-root user
+				# Run ujust as the configured non-root user
 				$run_user ujust check-local-overrides
 			else
 				ujust check-local-overrides
@@ -581,7 +618,7 @@ collect_system_info() {
 			print_section "Homebrew Services Status"
 			if require_cmd --check brew; then
 				if [[ -n ${run_user:-} ]]; then
-					# Run brew services as the primary non-root user
+					# Run brew services as the configured non-root user
 					$run_user brew services info --all
 				else
 					warn "Skipping brew services info --all because running brew as root is unsafe."
@@ -653,4 +690,6 @@ ensure_root "$@"
 parse_args "$@"
 # Base tools we use without extra checks
 require_cmd awk getent stat journalctl systemctl
+# Ensure we have an explicit, stable non-root user for runuser actions
+validate_nonroot_user
 main "$@"
