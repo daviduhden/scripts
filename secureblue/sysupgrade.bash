@@ -360,7 +360,7 @@ update_flatpak() {
 		return
 	fi
 
-	log "Repairing and updating Flatpak user installation for configured user: ${NONROOT_USER}"
+	log "Updating and repairing Flatpak user installation for configured user: ${NONROOT_USER}"
 	local home
 	home="$(user_home_dir "$NONROOT_USER" || true)"
 	if [[ -n ${home:-} && -d $home && -d "$home/.local/share/flatpak" ]]; then
@@ -608,8 +608,17 @@ collect_system_info() {
 
 	failed_services=$(
 		{
-			print_section "Failed Systemd Services"
-			systemctl list-units --state=failed
+			print_section "Failed Systemd Services (system)"
+			systemctl list-units --state=failed || true
+
+			print_section "Failed Systemd Services (user: ${NONROOT_USER})"
+			if require_cmd --check runuser; then
+				if ! run_as_user_env "$NONROOT_USER" systemctl --user list-units --state=failed; then
+					printf 'Could not query user systemd instance for %s (no session bus / XDG_RUNTIME_DIR?).\n' "$NONROOT_USER"
+				fi
+			else
+				printf "'runuser' not available; skipping user systemd status.\n"
+			fi
 		} 2>&1 || true
 	)
 

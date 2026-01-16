@@ -41,7 +41,7 @@ have_cmd() { command -v "$1" >/dev/null 2>&1; }
 install_packages() {
 	log "Installing ClamAV packages"
 
-	for pkg in clamd clamav clamav-update clamav-data clamav-lib clamav-filesystem clamav-freshclam clamav-scanner-systemd; do
+	for pkg in clamd clamav clamav-data clamav-lib clamav-filesystem clamav-freshclam; do
 		if ! rpm -q "$pkg" >/dev/null 2>&1; then
 			rpm-ostree install -y "$pkg" || warn "Failed to layer $pkg (may already be installed)"
 		else
@@ -57,14 +57,14 @@ install_packages() {
 fix_permissions() {
 	log "Fixing filesystem permissions"
 
-	install -d -m 0755 -o clamscan -g clamscan /var/lib/clamav
-	install -d -m 0755 -o clamscan -g clamscan /var/log/clamav
-	install -d -m 0755 -o clamscan -g clamscan /run/clamd.scan
-	install -d -m 0750 -o root -g root /var/spool/quarantine
+	install -d -m 0775 -o clamscan -g clamscan /var/lib/clamav
+	install -d -m 0775 -o clamscan -g clamscan /var/log/clamav
+	install -d -m 0775 -o clamscan -g clamscan /run/clamd.scan
+	install -d -m 0770 -o root -g root /var/spool/quarantine
 
 	touch /var/log/freshclam.log
 	chown clamscan:clamscan /var/log/freshclam.log
-	chmod 0644 /var/log/freshclam.log
+	chmod 0664 /var/log/freshclam.log
 }
 
 #########################
