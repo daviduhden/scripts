@@ -106,7 +106,7 @@ stage_from_source() {
 ######################
 # Main configuration #
 ######################
-typeset WWW_DIR BRANCH SERVICE_NAME OWNER_USER OWNER_GROUP WWW_HOST ZIP_URL
+typeset WWW_DIR BRANCH SERVICE_NAME OWNER_USER OWNER_GROUP WWW_HOST ZIP_URL LOCKDIR
 WWW_DIR="/var/www/htdocs/cypherpunk-handbook"
 WWW_HOST="handbook.uhden.dev"
 BRANCH="main"
@@ -251,8 +251,6 @@ post_update_steps() {
 # Main #
 ########
 main() {
-	typeset LOCKDIR
-
 	log "----------------------------------------"
 	log "Sync started (user: $GH_USER)"
 
@@ -267,7 +265,7 @@ main() {
 		exit 0
 	fi
 
-	trap 'rmdir "$LOCKDIR" 2>/dev/null || true' EXIT INT TERM
+	trap 'if [ -n "${LOCKDIR:-}" ]; then rmdir "${LOCKDIR}" 2>/dev/null || true; fi' EXIT INT TERM
 
 	if ! sync_with_gh_cli && ! sync_with_git && ! sync_with_github_zip; then
 		error "all sync methods failed."
