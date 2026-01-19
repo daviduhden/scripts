@@ -92,7 +92,7 @@ main() {
 	OUTPUT="${SANITIZED_TITLE%.*}.ogg"
 
 	log "Converting to OGG Vorbis..."
-	ffmpeg -i "$INPUT" -c:a libvorbis -q:a 6 "$OUTPUT"
+	ffmpeg -i "$INPUT" -c:a vorbis -q:a 6 -strict -2 "$OUTPUT"
 
 	log "File saved as $OUTPUT"
 }
