@@ -152,11 +152,47 @@ apt_update() {
 }
 
 apt_full_upgrade() {
-	log "Running full-upgrade (auto-replace old config files)..."
-	"$APT_BIN" -y \
-		-o Dpkg::Options::="--force-confdef" \
-		-o Dpkg::Options::="--force-confnew" \
-		full-upgrade
+	local codename target
+	log "Running full-upgrade using backports (when available)..."
+
+	codename="$(
+		. /etc/os-release 2>/dev/null || true
+		printf '%s' "${VERSION_CODENAME:-}"
+	)"
+	if [[ -z "$codename" ]] && command -v lsb_release >/dev/null 2>&1; then
+		codename="$(lsb_release -sc 2>/dev/null || true)"
+	fi
+	if [[ -z "$codename" ]]; then
+		warn "Could not determine Debian codename; running full-upgrade without backports."
+		"$APT_BIN" -y \
+			-o Dpkg::Options::="--force-confdef" \
+			-o Dpkg::Options::="--force-confnew" \
+			-o Dpkg::Options::="--force-confmiss" \
+			-o APT::Get::Assume-Yes=true \
+			full-upgrade
+		return 0
+	fi
+
+	target="${codename}-backports"
+
+	# Only use -t if backports is actually configured.
+	if apt-cache policy 2>/dev/null | grep -Fq "$target"; then
+		log "Using target release: ${target}"
+		"$APT_BIN" -y \
+			-o Dpkg::Options::="--force-confdef" \
+			-o Dpkg::Options::="--force-confnew" \
+			-o Dpkg::Options::="--force-confmiss" \
+			-o APT::Get::Assume-Yes=true \
+			full-upgrade -t "$target"
+	else
+		warn "Backports (${target}) not found in APT policy; running full-upgrade without -t."
+		"$APT_BIN" -y \
+			-o Dpkg::Options::="--force-confdef" \
+			-o Dpkg::Options::="--force-confnew" \
+			-o Dpkg::Options::="--force-confmiss" \
+			-o APT::Get::Assume-Yes=true \
+			full-upgrade
+	fi
 }
 
 apt_cleanup() {
