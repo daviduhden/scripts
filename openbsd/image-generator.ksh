@@ -22,6 +22,9 @@ set -eu
 #   - Images remain official and unmodified except for added firmware.
 #
 # See the OpenBSD FAQ and fw_update(8) for details.
+#
+# See the LICENSE file at the top of the project tree for copyright
+# and license details.
 
 # Basic PATH
 PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin
@@ -342,18 +345,31 @@ download_firmware_set() {
 	typeset fwset file
 	fwset="$1"
 
-	# On OpenBSD, prefer fw_update(8) to fetch firmware and SHA256.sig.
 	if have fw_update; then
 		log "Downloading firmware via fw_update -Fv"
-		# shellcheck disable=SC2086
-		(cd "$FW_DIR" && fw_update -Fv -p "$FW_BASE" $fwset) || {
-			if [ "$STRICT_VERIFY" = "1" ]; then
-				exit 1
+		typeset fw
+		typeset -i rc
+		rc=0
+		for fw in $fwset; do
+			if ! (cd "$FW_DIR" && fw_update -Fv "$fw"); then
+				rc=1
+				break
 			fi
-			warn "fw_update failed (continuing with whatever was downloaded)"
-		}
-		verify_firmware_set_files "$fwset"
-		return 0
+		done
+
+		if [ "$rc" -eq 0 ]; then
+			verify_firmware_set_files "$fwset"
+			return 0
+		fi
+
+		if [ "$STRICT_VERIFY" = "1" ]; then
+			exit 1
+		fi
+		warn "fw_update failed; falling back to manual download"
+	fi
+
+	if [ ! -f "$FW_DIR/firmware.list" ]; then
+		fetch_firmware_list
 	fi
 
 	for fw in $fwset; do
@@ -443,8 +459,8 @@ main() {
 	inject_firmware "$WORKDIR/$ARM64_IMG" "$ARM64_FW"
 
 	log "Installer images ready:"
-	log " > $WORKDIR/$AMD64_IMG"
-	log " > $WORKDIR/$ARM64_IMG"
+	log " -> $WORKDIR/$AMD64_IMG"
+	log " -> $WORKDIR/$ARM64_IMG"
 
 	log "OpenBSD image generation finished"
 	log "----------------------------------------"
