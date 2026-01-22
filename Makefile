@@ -29,7 +29,7 @@ DEBIAN_SCRIPTS = \
 OPENBSD_SCRIPTS = \
 	openbsd/apply-sysclean.ksh \
 	openbsd/clean-logs.ksh \
-	openbsd/image_generator.ksh \
+	openbsd/image-generator.ksh \
 	openbsd/sudo-wrapper.ksh \
 	openbsd/sync-website.ksh \
 	openbsd/sysupgrade-current.ksh
