@@ -259,7 +259,6 @@ require_root() {
 	fi
 }
 
-
 prepare_dirs() {
 	mkdir -p "$WORKDIR" "$FW_DIR" "$MOUNTPOINT"
 }
