@@ -30,7 +30,7 @@ export PATH
 # Configuration
 typeset VERSION WORKDIR FW_DIR MOUNTPOINT
 VERSION="78"
-WORKDIR="$(pwd)/openbsd-image"
+WORKDIR="/tmp/openbsd-image"
 FW_DIR="$WORKDIR/firmware"
 MOUNTPOINT="$WORKDIR/mnt"
 
