@@ -57,28 +57,31 @@ SIGNIFY_PUBKEY_BASE="${SIGNIFY_PUBKEY_BASE:-/etc/signify/openbsd-${VERSION1}-bas
 SIGNIFY_PUBKEY_FW="${SIGNIFY_PUBKEY_FW:-/etc/signify/openbsd-${VERSION1}-fw.pub}"
 
 # Firmware selection
-typeset AMD64_FW ARM64_FW
+typeset COMMON_FW AMD64_FW ARM64_FW
 
-AMD64_FW="
-amd amdsev intel vmm
-amdgpu radeondrm inteldrm
+# Common firmware seen in snapshots index.txt (wireless/usb/etc.).
+COMMON_FW="
+acx malo ogx wpi
 iwm iwx iwn ipw iwi
 bwfm bwi
 athn qwx qwz
 mtw mwx
-otus uath upgt
+otus uath upgt pgt
 uvideo
+"
+
+# x86_64/amd64-specific (CPU/GPU/NIC firmware).
+AMD64_FW="$COMMON_FW
+amd amdsev intel vmm
+amdgpu radeondrm inteldrm
 ice
 "
 
-ARM64_FW="
+# arm64-specific (DTBs/SoC blobs).
+ARM64_FW="$COMMON_FW
 arm64-qcom-dtb
+apple-boot
 qcpas
-bwfm
-athn
-qwx qwz
-mtw mwx
-uvideo
 "
 
 # Colors and logging
