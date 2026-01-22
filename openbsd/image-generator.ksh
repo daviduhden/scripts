@@ -38,7 +38,7 @@ MOUNTPOINT="$WORKDIR/mnt"
 typeset AMD64_BASE ARM64_BASE FW_BASE
 AMD64_BASE="https://cdn.openbsd.org/pub/OpenBSD/${VERSION2}/amd64"
 ARM64_BASE="https://cdn.openbsd.org/pub/OpenBSD/${VERSION2}/arm64"
-FW_BASE="https://firmware.openbsd.org/firmware/${VERSION2}"
+FW_BASE="https://firmware.openbsd.org/firmware/${VERSION2}/"
 
 typeset AMD64_IMG ARM64_IMG
 AMD64_IMG="install${VERSION1}-amd64.img"
@@ -47,10 +47,11 @@ ARM64_IMG="install${VERSION1}-arm64.img"
 typeset CURRENT_VND
 CURRENT_VND=""
 
-typeset VERIFY STRICT_VERIFY SIGNIFY_PUBKEY
+typeset VERIFY STRICT_VERIFY SIGNIFY_PUBKEY_BASE SIGNIFY_PUBKEY_FW
 VERIFY="${VERIFY:-1}"
 STRICT_VERIFY="${STRICT_VERIFY:-0}"
-SIGNIFY_PUBKEY="${SIGNIFY_PUBKEY:-/etc/signify/openbsd-${VERSION1}-base.pub}"
+SIGNIFY_PUBKEY_BASE="${SIGNIFY_PUBKEY_BASE:-/etc/signify/openbsd-${VERSION1}-base.pub}"
+SIGNIFY_PUBKEY_FW="${SIGNIFY_PUBKEY_FW:-/etc/signify/openbsd-${VERSION1}-fw.pub}"
 
 # Firmware selection
 typeset AMD64_FW ARM64_FW
@@ -208,10 +209,10 @@ verify_image_artifacts() {
 
 	verify_against_checksum_file "$verify_dir/SHA256" "$verify_dir/$img_name" || return 1
 
-	if verify_with_signify "$SIGNIFY_PUBKEY" "$verify_dir/SHA256.sig" "$verify_dir/$img_name"; then
+	if verify_with_signify "$SIGNIFY_PUBKEY_BASE" "$verify_dir/SHA256.sig" "$verify_dir/$img_name"; then
 		log "signify verified: ${arch}/${img_name}"
 	else
-		[ -f "$verify_dir/SHA256.sig" ] && [ -f "$SIGNIFY_PUBKEY" ] && have signify && {
+		[ -f "$verify_dir/SHA256.sig" ] && [ -f "$SIGNIFY_PUBKEY_BASE" ] && have signify && {
 			warn "signify verification failed for ${arch}/${img_name}"
 			[ "$STRICT_VERIFY" = "1" ] && return 1 || true
 		}
@@ -311,9 +312,50 @@ fetch_firmware_list() {
 	fi
 }
 
+verify_firmware_set_files() {
+	typeset fwset fw file
+	fwset="$1"
+
+	[ "$VERIFY" = "1" ] || return 0
+
+	for fw in $fwset; do
+		for file in "$FW_DIR"/"${fw}"-firmware-*.tgz; do
+			[ -f "$file" ] || continue
+			verify_firmware_checksum "$file" || {
+				if [ "$STRICT_VERIFY" = "1" ]; then
+					exit 1
+				fi
+				warn "Checksum verification failed for $(basename "$file") (continuing)"
+			}
+			if verify_with_signify "$SIGNIFY_PUBKEY_FW" "$FW_DIR/SHA256.sig" "$file"; then
+				log "signify verified: $(basename "$file")"
+			else
+				[ -f "$FW_DIR/SHA256.sig" ] && [ -f "$SIGNIFY_PUBKEY_FW" ] && have signify && {
+					warn "signify verification failed for $(basename "$file")"
+					[ "$STRICT_VERIFY" = "1" ] && exit 1 || true
+				}
+			fi
+		done
+	done
+}
+
 download_firmware_set() {
 	typeset fwset file
 	fwset="$1"
+
+	# On OpenBSD, prefer fw_update(8) to fetch firmware and SHA256.sig.
+	if have fw_update; then
+		log "Downloading firmware via fw_update -Fv"
+		# shellcheck disable=SC2086
+		(cd "$FW_DIR" && fw_update -Fv -p "$FW_BASE" $fwset) || {
+			if [ "$STRICT_VERIFY" = "1" ]; then
+				exit 1
+			fi
+			warn "fw_update failed (continuing with whatever was downloaded)"
+		}
+		verify_firmware_set_files "$fwset"
+		return 0
+	fi
 
 	for fw in $fwset; do
 		# Choose the last match in case multiple VERSION1s are listed.
@@ -329,10 +371,10 @@ download_firmware_set() {
 				fi
 				warn "Checksum verification failed for $file (continuing)"
 			}
-			if verify_with_signify "$SIGNIFY_PUBKEY" "$FW_DIR/SHA256.sig" "$FW_DIR/$file"; then
+			if verify_with_signify "$SIGNIFY_PUBKEY_FW" "$FW_DIR/SHA256.sig" "$FW_DIR/$file"; then
 				log "signify verified: $file"
 			else
-				[ -f "$FW_DIR/SHA256.sig" ] && [ -f "$SIGNIFY_PUBKEY" ] && have signify && {
+				[ -f "$FW_DIR/SHA256.sig" ] && [ -f "$SIGNIFY_PUBKEY_FW" ] && have signify && {
 					warn "signify verification failed for $file"
 					[ "$STRICT_VERIFY" = "1" ] && exit 1 || true
 				}
@@ -374,7 +416,11 @@ main() {
 	require_root
 	prepare_dirs
 	download_images
-	fetch_firmware_list
+	if have fw_update; then
+		log "fw_update detected; skipping manual firmware index fetch"
+	else
+		fetch_firmware_list
+	fi
 
 	log "Downloading amd64 firmware"
 	download_firmware_set "$AMD64_FW"
