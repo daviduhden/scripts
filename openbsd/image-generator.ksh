@@ -28,20 +28,21 @@ PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin
 export PATH
 
 # Configuration
-typeset VERSION WORKDIR FW_DIR MOUNTPOINT
-VERSION="78"
+typeset VERSION1 VERSION2 WORKDIR FW_DIR MOUNTPOINT
+VERSION1="78"
+VERSION2="7.8"
 WORKDIR="/tmp/openbsd-image"
 FW_DIR="$WORKDIR/firmware"
 MOUNTPOINT="$WORKDIR/mnt"
 
 typeset AMD64_BASE ARM64_BASE FW_BASE
-AMD64_BASE="https://cdn.openbsd.org/pub/OpenBSD/snapshots/amd64"
-ARM64_BASE="https://cdn.openbsd.org/pub/OpenBSD/snapshots/arm64"
-FW_BASE="https://firmware.openbsd.org/firmware/snapshots/"
+AMD64_BASE="https://cdn.openbsd.org/pub/OpenBSD/${VERSION2}/amd64"
+ARM64_BASE="https://cdn.openbsd.org/pub/OpenBSD/${VERSION2}/arm64"
+FW_BASE="https://firmware.openbsd.org/firmware/${VERSION2}"
 
 typeset AMD64_IMG ARM64_IMG
-AMD64_IMG="install${VERSION}-amd64.img"
-ARM64_IMG="install${VERSION}-arm64.img"
+AMD64_IMG="install${VERSION1}-amd64.img"
+ARM64_IMG="install${VERSION1}-arm64.img"
 
 typeset CURRENT_VND
 CURRENT_VND=""
@@ -49,7 +50,7 @@ CURRENT_VND=""
 typeset VERIFY STRICT_VERIFY SIGNIFY_PUBKEY
 VERIFY="${VERIFY:-1}"
 STRICT_VERIFY="${STRICT_VERIFY:-0}"
-SIGNIFY_PUBKEY="${SIGNIFY_PUBKEY:-/etc/signify/openbsd-${VERSION}-base.pub}"
+SIGNIFY_PUBKEY="${SIGNIFY_PUBKEY:-/etc/signify/openbsd-${VERSION1}-base.pub}"
 
 # Firmware selection
 typeset AMD64_FW ARM64_FW
@@ -191,7 +192,7 @@ verify_image_artifacts() {
 
 	verify_dir="$WORKDIR/verify/${arch}"
 	mkdir -p "$verify_dir"
-	img_name="install${VERSION}.img"
+	img_name="install${VERSION1}.img"
 
 	# Keep the downloaded image name distinct, but verify against upstream filenames.
 	ln -sf "../../$(basename "$local_img")" "$verify_dir/$img_name"
@@ -267,14 +268,14 @@ download_images() {
 
 	if [ ! -f "$WORKDIR/$AMD64_IMG" ]; then
 		log "Downloading amd64 install image"
-		fetch_to "$AMD64_BASE/install${VERSION}.img" "$WORKDIR/$AMD64_IMG"
+		fetch_to "$AMD64_BASE/install${VERSION1}.img" "$WORKDIR/$AMD64_IMG"
 	else
 		log "amd64 image already exists, skipping"
 	fi
 
 	if [ ! -f "$WORKDIR/$ARM64_IMG" ]; then
 		log "Downloading arm64 install image"
-		fetch_to "$ARM64_BASE/install${VERSION}.img" "$WORKDIR/$ARM64_IMG"
+		fetch_to "$ARM64_BASE/install${VERSION1}.img" "$WORKDIR/$ARM64_IMG"
 	else
 		log "arm64 image already exists, skipping"
 	fi
@@ -315,7 +316,7 @@ download_firmware_set() {
 	fwset="$1"
 
 	for fw in $fwset; do
-		# Choose the last match in case multiple versions are listed.
+		# Choose the last match in case multiple VERSION1s are listed.
 		file=$(grep "^${fw}-firmware-.*\.tgz$" firmware.list | tail -n 1 || true)
 		[ -n "$file" ] || continue
 
