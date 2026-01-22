@@ -388,11 +388,11 @@ main() {
 	log "Injecting firmware into arm64 image"
 	inject_firmware "$WORKDIR/$ARM64_IMG" "$ARM64_FW"
 
-	log "Offline installer images ready:"
-	log "  $WORKDIR/$AMD64_IMG"
-	log "  $WORKDIR/$ARM64_IMG"
+	log "Installer images ready:"
+	log " > $WORKDIR/$AMD64_IMG"
+	log " > $WORKDIR/$ARM64_IMG"
 
-	log "OpenBSD offline installer preparation finished"
+	log "OpenBSD image generation finished"
 	log "----------------------------------------"
 }
 
