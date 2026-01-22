@@ -366,7 +366,7 @@ inject_firmware() {
 
 main() {
 	log "----------------------------------------"
-	log "OpenBSD offline installer preparation started"
+	log "OpenBSD image generator started"
 
 	trap 'cleanup' EXIT INT TERM
 
