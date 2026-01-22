@@ -383,7 +383,7 @@ download_firmware_set() {
 }
 
 inject_firmware() {
-	typeset img fwset vnd file
+	typeset img fwset vnd file dest_dir
 	img="$1"
 	fwset="$2"
 
@@ -392,11 +392,20 @@ inject_firmware() {
 	CURRENT_VND="$vnd"
 	mount "/dev/${vnd}a" "$MOUNTPOINT"
 
+	# Do not extract firmware into the image. Copy the compressed firmware
+	# archives so fw_update(8) can be pointed at them later.
+	dest_dir="$MOUNTPOINT/firmware"
+	mkdir -p "$dest_dir"
+
+	if [ -f "$FW_DIR/SHA256.sig" ]; then
+		cp -p "$FW_DIR/SHA256.sig" "$dest_dir/"
+	fi
+
 	for fw in $fwset; do
 		for file in "$FW_DIR"/"${fw}"-firmware-*.tgz; do
 			[ -f "$file" ] || continue
-			log "Extracting $(basename "$file") into image"
-			tar -xzf "$file" -C "$MOUNTPOINT"
+			log "Copying $(basename "$file") into image"
+			cp -p "$file" "$dest_dir/"
 		done
 	done
 
