@@ -103,6 +103,102 @@ error() { print "$(date '+%Y-%m-%d %H:%M:%S') ${RED}[ERROR]${RESET} $*" >&2; }
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
+disklabel_dev_for_vnd() {
+	# Prefer raw whole-disk device.
+	typeset vnd
+	vnd="$1"
+
+	if [ -c "/dev/r${vnd}c" ]; then
+		print "/dev/r${vnd}c"
+		return 0
+	fi
+	if [ -c "/dev/${vnd}c" ]; then
+		print "/dev/${vnd}c"
+		return 0
+	fi
+	if [ -c "/dev/r${vnd}" ]; then
+		print "/dev/r${vnd}"
+		return 0
+	fi
+	print "/dev/${vnd}"
+}
+
+expand_disklabel_partition_a() {
+	# After enlarging the backing file and re-attaching vnd(4), the filesystem
+	# won't grow unless the disklabel partition also grows.
+	# This expands partition 'a' to fill the remaining available sectors.
+	typeset vnd dl tmp_in tmp_out
+	vnd="$1"
+
+	have disklabel || {
+		warn "disklabel(8) not available; cannot expand partition for ${vnd}"
+		return 1
+	}
+
+	dl=$(disklabel_dev_for_vnd "$vnd")
+	tmp_in=$(mktemp "${WORKDIR}/disklabel.in.XXXXXXXX")
+	tmp_out=$(mktemp "${WORKDIR}/disklabel.out.XXXXXXXX")
+
+	# Use -r to work in raw sectors.
+	if ! disklabel -r "$dl" >"$tmp_in" 2>/dev/null; then
+		rm -f "$tmp_in" "$tmp_out" >/dev/null 2>&1 || true
+		warn "Could not read disklabel from ${dl}; cannot expand partition"
+		return 1
+	fi
+
+	# Compute new size from boundend/total sectors.
+	# Prefer boundend if present (it reflects usable bounds).
+	typeset parsed new_size old_size
+	parsed=$(awk '
+		$1=="boundend:"{be=$2}
+		$1=="total" && $2=="sectors:"{ts=$3}
+		/^[[:space:]]*a:[[:space:]]/ {old=$2; off=$3}
+		END{
+			if (off=="") exit 1;
+			end = (be!="" && be>0) ? be : ts;
+			if (end=="") exit 1;
+			print end - off, old, off
+		}
+	' "$tmp_in" 2>/dev/null) || true
+
+	if [ -z "$parsed" ]; then
+		rm -f "$tmp_in" "$tmp_out" >/dev/null 2>&1 || true
+		warn "Could not parse disklabel bounds for ${dl}; cannot expand partition"
+		return 1
+	fi
+
+	# Split values: "new old off" without word-splitting (ignore off).
+	new_size=${parsed%% *}
+	parsed=${parsed#* }
+	old_size=${parsed%% *}
+
+	# If there's nothing to grow, nothing to do.
+	if [ "$new_size" -le "$old_size" ]; then
+		rm -f "$tmp_in" "$tmp_out" >/dev/null 2>&1 || true
+		return 0
+	fi
+
+	# Rewrite only the 'a:' partition size.
+	awk -v ns="$new_size" '
+		/^[[:space:]]*a:[[:space:]]/ {
+			printf "  a: %s %s", ns, $3
+			for (i=4; i<=NF; i++) printf " %s", $i
+			print ""
+			next
+		}
+		{print}
+	' "$tmp_in" >"$tmp_out"
+
+	if ! disklabel -R "$dl" "$tmp_out" >/dev/null 2>&1; then
+		rm -f "$tmp_in" "$tmp_out" >/dev/null 2>&1 || true
+		warn "disklabel -R failed for ${dl}; cannot expand partition"
+		return 1
+	fi
+
+	rm -f "$tmp_in" "$tmp_out" >/dev/null 2>&1 || true
+	return 0
+}
+
 grow_image_file_mb() {
 	typeset img mb
 	img="$1"
@@ -157,14 +253,22 @@ ensure_image_space_kb() {
 		fi
 
 		log "Not enough space in image (${free_kb}KB free). Growing..."
-		umount "$MOUNTPOINT"
-		vnconfig -u "$CURRENT_VND"
-		CURRENT_VND=""
+		if mount | grep -q "on ${MOUNTPOINT} "; then
+			umount "$MOUNTPOINT"
+		fi
+		if [ -n "${CURRENT_VND}" ]; then
+			vnconfig -u "$CURRENT_VND"
+			CURRENT_VND=""
+		fi
 
 		grow_image_file_mb "$img" "$grow_mb"
 		grown_mb=$((grown_mb + grow_mb))
 
 		CURRENT_VND=$(vnconfig "$img" | awk '{sub(/:$/,"",$1); print $1; exit}')
+		# Expand disklabel partition first, then grow the filesystem.
+		expand_disklabel_partition_a "$CURRENT_VND" || {
+			warn "Partition expansion failed for ${CURRENT_VND}; growfs may not be able to grow"
+		}
 		grow_image_filesystem "$CURRENT_VND" || return 1
 		if ! mount "/dev/${CURRENT_VND}a" "$MOUNTPOINT"; then
 			error "Failed to mount /dev/${CURRENT_VND}a on $MOUNTPOINT after growing"
@@ -528,7 +632,9 @@ inject_firmware() {
 	done
 
 	sync
-	umount "$MOUNTPOINT"
+	if mount | grep -q "on ${MOUNTPOINT} "; then
+		umount "$MOUNTPOINT"
+	fi
 	vnconfig -u "$CURRENT_VND"
 	CURRENT_VND=""
 }
