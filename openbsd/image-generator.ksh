@@ -240,7 +240,7 @@ ensure_image_space_kb() {
 	required_kb="$2"
 
 	reserve_kb=${IMAGE_RESERVE_KB:-2048}
-	grow_mb=${IMAGE_GROW_MB:-64}
+	grow_mb=${IMAGE_GROW_MB:-256}
 	max_grow_mb=${IMAGE_MAX_GROW_MB:-1024}
 	grown_mb=0
 
