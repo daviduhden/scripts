@@ -103,6 +103,21 @@ error() { print "$(date '+%Y-%m-%d %H:%M:%S') ${RED}[ERROR]${RESET} $*" >&2; }
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
+fdisk_dev_for_disk() {
+	# Accepts a disk name like vnd0 and returns the best device node for fdisk.
+	typeset disk
+	disk="$1"
+	if [ -c "/dev/r${disk}c" ]; then
+		print "/dev/r${disk}c"
+		return 0
+	fi
+	if [ -c "/dev/${disk}c" ]; then
+		print "/dev/${disk}c"
+		return 0
+	fi
+	print "$disk"
+}
+
 mbr_openbsd_partition_number() {
 	# Returns the MBR partition entry number containing OpenBSD (id A6), if any.
 	typeset disk
@@ -122,15 +137,16 @@ expand_mbr_openbsd_partition() {
 	# Expands the MBR OpenBSD (A6) partition to fill the remainder of the disk.
 	# Needed for installXX.img images: even if the backing file grows, the A6
 	# partition size stays fixed until the MBR is updated.
-	typeset disk part
+	typeset disk diskdev part
 	disk="$1"
+	diskdev=$(fdisk_dev_for_disk "$disk")
 
 	have fdisk || {
 		warn "fdisk(8) not available; cannot expand MBR OpenBSD partition"
 		return 1
 	}
 
-	part=$(mbr_openbsd_partition_number "$disk" || true)
+	part=$(mbr_openbsd_partition_number "$diskdev" || true)
 	if [ -z "$part" ]; then
 		# Not an MBR OpenBSD layout (or already GPT, etc.).
 		return 0
@@ -142,17 +158,15 @@ expand_mbr_openbsd_partition() {
 	typeset tmp_fdisk
 	tmp_fdisk=$(mktemp "${WORKDIR}/fdisk.XXXXXXXX")
 	# Answer partition id explicitly (A6), keep offset default, set size '*'.
-	if ! printf 'print\nedit %s\nA6\n\n*\nwrite\nquit\n' "$part" | fdisk -e -y "$disk" >"$tmp_fdisk" 2>&1; then
-		if [ "${DEBUG:-0}" = "1" ]; then
-			warn "fdisk -e output: $(cat "$tmp_fdisk" 2>/dev/null || true)"
-		fi
+	if ! printf 'print\nedit %s\nA6\n\n*\nwrite\nquit\n' "$part" | fdisk -e -y "$diskdev" >"$tmp_fdisk" 2>&1; then
+		warn "fdisk -e output: $(sed -n '1,120p' "$tmp_fdisk" 2>/dev/null || true)"
 		rm -f "$tmp_fdisk" >/dev/null 2>&1 || true
 		warn "fdisk failed to expand MBR partition #${part} on ${disk}"
 		return 1
 	fi
 	rm -f "$tmp_fdisk" >/dev/null 2>&1 || true
 
-	if ! fdisk -v "$disk" >/dev/null 2>&1; then
+	if ! fdisk -v "$diskdev" >/dev/null 2>&1; then
 		# If fdisk itself is not usable, bail.
 		warn "fdisk(8) not usable on ${disk}"
 		return 1
@@ -411,38 +425,6 @@ ensure_image_space_kb() {
 	return 0
 }
 
-expected_sha256() {
-	typeset checksum_file base
-	checksum_file="$1"
-	base="$2"
-
-	awk -v b="$base" '$1=="SHA256" && $2=="(" b ")" && $3=="=" {print $4}' "$checksum_file" | tail -n 1
-}
-
-verify_against_checksum_file() {
-	typeset checksum_file f base expected actual
-	checksum_file="$1"
-	f="$2"
-	base=$(basename "$f")
-
-	[ "$VERIFY" = "1" ] || return 0
-	[ -f "$checksum_file" ] || return 0
-
-	expected=$(expected_sha256 "$checksum_file" "$base")
-	if [ -z "$expected" ]; then
-		warn "No SHA256 entry for $base in $(basename "$checksum_file"); skipping verification"
-		return 0
-	fi
-
-	actual=$(sha256_hash "$f")
-	if [ "$actual" != "$expected" ]; then
-		error "SHA256 mismatch for $base"
-		error "  expected: $expected"
-		error "  actual:   $actual"
-		return 1
-	fi
-}
-
 verify_with_signify() {
 	typeset pubkey sigfile f sigdir
 	pubkey="$1"
@@ -456,45 +438,6 @@ verify_with_signify() {
 
 	sigdir=$(dirname "$sigfile")
 	(cd "$sigdir" && signify -Cp "$pubkey" -x "$(basename "$sigfile")" "$(basename "$f")" >/dev/null 2>&1)
-}
-
-sha256_hash() {
-	typeset f
-	f="$1"
-
-	if have sha256; then
-		sha256 -q "$f"
-	elif have sha256sum; then
-		sha256sum "$f" | awk '{print $1}'
-	elif have openssl; then
-		openssl dgst -sha256 "$f" | awk '{print $NF}'
-	else
-		error "Need sha256(1), sha256sum(1), or openssl(1) to checksum: $f"
-		exit 1
-	fi
-}
-
-verify_firmware_checksum() {
-	typeset f base expected actual
-	f="$1"
-	base=$(basename "$f")
-
-	[ "$VERIFY" = "1" ] || return 0
-	[ -f "$FW_DIR/SHA256.sig" ] || return 0
-
-	expected=$(expected_sha256 "$FW_DIR/SHA256.sig" "$base")
-	if [ -z "$expected" ]; then
-		warn "No SHA256 entry for $base in SHA256.sig; skipping verification"
-		return 0
-	fi
-
-	actual=$(sha256_hash "$f")
-	if [ "$actual" != "$expected" ]; then
-		error "SHA256 mismatch for $base"
-		error "  expected: $expected"
-		error "  actual:   $actual"
-		return 1
-	fi
 }
 
 verify_image_artifacts() {
@@ -512,16 +455,10 @@ verify_image_artifacts() {
 	# Keep the downloaded image name distinct, but verify against upstream filenames.
 	ln -sf "../../$(basename "$local_img")" "$verify_dir/$img_name"
 
-	if ! fetch_to "$base_url/SHA256" "$verify_dir/SHA256" 2>/dev/null; then
-		warn "Could not download SHA256 for ${arch}; image checksums will not be verified"
-		[ "$STRICT_VERIFY" = "1" ] && return 1 || return 0
-	fi
 	if ! fetch_to "$base_url/SHA256.sig" "$verify_dir/SHA256.sig" 2>/dev/null; then
 		warn "Could not download SHA256.sig for ${arch}; signify verification may be unavailable"
 		[ "$STRICT_VERIFY" = "1" ] && return 1 || true
 	fi
-
-	verify_against_checksum_file "$verify_dir/SHA256" "$verify_dir/$img_name" || return 1
 
 	if verify_with_signify "$SIGNIFY_PUBKEY_BASE" "$verify_dir/SHA256.sig" "$verify_dir/$img_name"; then
 		log "signify verified: ${arch}/${img_name}"
@@ -634,12 +571,6 @@ verify_firmware_set_files() {
 	for fw in $fwset; do
 		for file in "$FW_DIR"/"${fw}"-firmware-*.tgz; do
 			[ -f "$file" ] || continue
-			verify_firmware_checksum "$file" || {
-				if [ "$STRICT_VERIFY" = "1" ]; then
-					exit 1
-				fi
-				warn "Checksum verification failed for $(basename "$file") (continuing)"
-			}
 			if verify_with_signify "$SIGNIFY_PUBKEY_FW" "$FW_DIR/SHA256.sig" "$file"; then
 				log "signify verified: $(basename "$file")"
 			else
@@ -691,12 +622,6 @@ download_firmware_set() {
 		if [ ! -f "$file" ]; then
 			log "Downloading firmware: $file"
 			fetch_to_cwd "$FW_BASE/$file"
-			verify_firmware_checksum "$FW_DIR/$file" || {
-				if [ "$STRICT_VERIFY" = "1" ]; then
-					exit 1
-				fi
-				warn "Checksum verification failed for $file (continuing)"
-			}
 			if verify_with_signify "$SIGNIFY_PUBKEY_FW" "$FW_DIR/SHA256.sig" "$FW_DIR/$file"; then
 				log "signify verified: $file"
 			else
