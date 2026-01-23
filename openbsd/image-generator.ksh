@@ -103,6 +103,60 @@ error() { print "$(date '+%Y-%m-%d %H:%M:%S') ${RED}[ERROR]${RESET} $*" >&2; }
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
+refresh_disklabel() {
+	typeset vnd
+	vnd="$1"
+	have disklabel || return 1
+	# Clear and refresh in-core label from on-disk label.
+	disklabel -c "$vnd" >/dev/null 2>&1 || true
+	return 0
+}
+
+fsck_vnd_a() {
+	typeset vnd dev
+	vnd="$1"
+
+	have fsck || return 1
+
+	if [ -c "/dev/r${vnd}a" ]; then
+		dev="/dev/r${vnd}a"
+	else
+		dev="/dev/${vnd}a"
+	fi
+
+	# Best-effort; do not fail hard if fsck isn't needed.
+	fsck -fy "$dev" >/dev/null 2>&1 || true
+	return 0
+}
+
+mount_vnd_a() {
+	typeset vnd mp tmp msg
+	vnd="$1"
+	mp="$2"
+
+	# If already mounted, nothing to do.
+	if mount | grep -q "on ${mp} "; then
+		return 0
+	fi
+
+	tmp=$(mktemp "${WORKDIR}/mount.XXXXXXXX")
+	if mount "/dev/${vnd}a" "$mp" >"$tmp" 2>&1; then
+		rm -f "$tmp" >/dev/null 2>&1 || true
+		return 0
+	fi
+
+	msg=$(sed -n '1,5p' "$tmp" 2>/dev/null || true)
+	rm -f "$tmp" >/dev/null 2>&1 || true
+
+	# If mount suggests fsck, try to repair and re-mount.
+	if print -r -- "$msg" | grep -qi 'fsck\|read-only'; then
+		fsck_vnd_a "$vnd"
+		mount "/dev/${vnd}a" "$mp" >/dev/null 2>&1 && return 0
+	fi
+
+	return 1
+}
+
 expand_disklabel_boundaries() {
 	# Some images have an on-disk disklabel with boundaries matching the original
 	# image size. After growing the backing file, we must extend the OpenBSD
@@ -130,6 +184,7 @@ expand_disklabel_boundaries() {
 		return 1
 	fi
 	rm -f "$tmp" >/dev/null 2>&1 || true
+	refresh_disklabel "$vnd"
 	return 0
 }
 
@@ -265,6 +320,7 @@ expand_disklabel_partition_a() {
 	fi
 
 	rm -f "$tmp_in" "$tmp_out" >/dev/null 2>&1 || true
+	refresh_disklabel "$vnd"
 	return 0
 }
 
@@ -350,12 +406,16 @@ ensure_image_space_kb() {
 		expand_disklabel_partition_a "$CURRENT_VND" || {
 			warn "Partition expansion failed for ${CURRENT_VND}; growfs may not be able to grow"
 		}
+		# fsck before growfs/mount if needed.
+		fsck_vnd_a "$CURRENT_VND"
 		# Try to grow the filesystem, but always remount before returning.
 		if ! grow_image_filesystem "$CURRENT_VND"; then
 			warn "growfs did not grow filesystem for ${CURRENT_VND}a"
 		fi
-		if ! mount "/dev/${CURRENT_VND}a" "$MOUNTPOINT"; then
+		if ! mount_vnd_a "$CURRENT_VND" "$MOUNTPOINT"; then
 			error "Failed to mount /dev/${CURRENT_VND}a on $MOUNTPOINT after growing"
+			# Do not leave callers copying into an unmounted directory.
+			touch "$nogrow_flag" >/dev/null 2>&1 || true
 			return 1
 		fi
 
@@ -589,7 +649,7 @@ inject_firmware() {
 
 	log "Attaching image: $img"
 	CURRENT_VND=$(vnconfig "$img" | awk '{sub(/:$/,"",$1); print $1; exit}')
-	if ! mount "/dev/${CURRENT_VND}a" "$MOUNTPOINT"; then
+	if ! mount_vnd_a "$CURRENT_VND" "$MOUNTPOINT"; then
 		error "Failed to mount /dev/${CURRENT_VND}a on $MOUNTPOINT"
 		vnconfig -u "$CURRENT_VND"
 		CURRENT_VND=""
@@ -619,6 +679,11 @@ inject_firmware() {
 			if ! ensure_image_space_kb "$img" "$need_kb"; then
 				warn "Not enough space in image for $(basename "$file")"
 				[ "$STRICT_VERIFY" = "1" ] && exit 1 || true
+				# Safety: never continue if the mount got lost.
+				if ! mount | grep -q "on ${MOUNTPOINT} "; then
+					error "Image is not mounted; aborting to avoid copying outside the image"
+					exit 1
+				fi
 				continue
 			fi
 			mkdir -p "$dest_dir"
