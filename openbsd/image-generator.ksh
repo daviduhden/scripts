@@ -137,10 +137,32 @@ expand_mbr_openbsd_partition() {
 	fi
 
 	log "Expanding MBR OpenBSD partition (#${part}) to fill disk"
-	# In command mode: edit <n>, accept default id/start, set size to '*', write+quit.
-	# If the prompt sequence differs, fdisk will error out on EOF rather than hang.
-	if ! printf 'edit %s\n\n\n*\n\n\nwrite\nquit\n' "$part" | fdisk -e -y "$disk" >/dev/null 2>&1; then
-		warn "fdisk failed to expand MBR partition #${part} on ${disk}"
+	# In command mode: edit <n>, accept default id/start, set size to '*', quit.
+	# If the prompt sequence differs, fdisk should fail on EOF rather than hang.
+	typeset tmp_fdisk
+	tmp_fdisk=$(mktemp "${WORKDIR}/fdisk.XXXXXXXX")
+	if ! printf 'edit %s\n\n\n*\nquit\n' "$part" | fdisk -e -y "$disk" >"$tmp_fdisk" 2>&1; then
+		if [ "${DEBUG:-0}" = "1" ]; then
+			warn "fdisk -e output: $(cat "$tmp_fdisk" 2>/dev/null || true)"
+		fi
+		warn "fdisk -e did not expand MBR partition; trying fdisk -i fallback"
+		# Fallback: rebuild a default MBR preserving the existing EFI partition at 64/960,
+		# and allocating the rest to OpenBSD.
+		# This matches the stock installXX.img layout (EFI + OpenBSD).
+		if ! fdisk -i -y -b 960@64:EF "$disk" >/dev/null 2>&1; then
+			if [ "${DEBUG:-0}" = "1" ]; then
+				warn "fdisk -i output: $(fdisk -i -y -b 960@64:EF "$disk" >/dev/null 2>&1 || true)"
+			fi
+			rm -f "$tmp_fdisk" >/dev/null 2>&1 || true
+			warn "fdisk -i fallback failed on ${disk}"
+			return 1
+		fi
+	fi
+	rm -f "$tmp_fdisk" >/dev/null 2>&1 || true
+
+	if ! fdisk -v "$disk" >/dev/null 2>&1; then
+		# If fdisk itself is not usable, bail.
+		warn "fdisk(8) not usable on ${disk}"
 		return 1
 	fi
 
@@ -180,12 +202,20 @@ expand_disklabel_partition_a() {
 	}
 
 	# Some images/dev setups expose different nodes; try a few.
-	typeset candidates cand
+	typeset candidates cand use_raw
 	candidates="${vnd} /dev/r${vnd}c /dev/${vnd}c /dev/r${vnd}a /dev/${vnd}a /dev/r${vnd} /dev/${vnd}"
 	dl=""
+	use_raw="1"
 	for cand in $candidates; do
 		if disklabel -r "$cand" >/dev/null 2>&1; then
 			dl="$cand"
+			use_raw="1"
+			break
+		fi
+		# Fallback: some environments refuse -r but allow in-core label reads.
+		if disklabel "$cand" >/dev/null 2>&1; then
+			dl="$cand"
+			use_raw="0"
 			break
 		fi
 	done
@@ -195,12 +225,26 @@ expand_disklabel_partition_a() {
 	tmp_in=$(mktemp "${WORKDIR}/disklabel.in.XXXXXXXX")
 	tmp_out=$(mktemp "${WORKDIR}/disklabel.out.XXXXXXXX")
 
-	# Use -r to work in raw sectors.
-	if ! disklabel -r "$dl" >"$tmp_in" 2>/dev/null; then
+	# Prefer raw (-r) output, but allow non-raw reads if -r is rejected.
+	if [ "$use_raw" = "1" ]; then
+		if ! disklabel -r "$dl" >"$tmp_in" 2>/dev/null; then
+			use_raw="0"
+		fi
+	fi
+	if [ "$use_raw" = "0" ]; then
+		if ! disklabel "$dl" >"$tmp_in" 2>/dev/null; then
+			use_raw="1"
+		fi
+	fi
+	if [ ! -s "$tmp_in" ]; then
 		if [ "${DEBUG:-0}" = "1" ]; then
 			typeset dl_err
-			dl_err=$(disklabel -r "$dl" 2>&1 >/dev/null || true)
-			warn "disklabel -r ${dl} failed: ${dl_err}"
+			if [ "$use_raw" = "1" ]; then
+				dl_err=$(disklabel -r "$dl" 2>&1 || true)
+			else
+				dl_err=$(disklabel "$dl" 2>&1 || true)
+			fi
+			warn "disklabel ${dl} failed: ${dl_err}"
 		fi
 		rm -f "$tmp_in" "$tmp_out" >/dev/null 2>&1 || true
 		warn "Could not read disklabel from ${dl}; cannot expand partition"
