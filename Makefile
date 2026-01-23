@@ -29,7 +29,6 @@ DEBIAN_SCRIPTS = \
 OPENBSD_SCRIPTS = \
 	openbsd/apply-sysclean.ksh \
 	openbsd/clean-logs.ksh \
-	openbsd/image-generator.ksh \
 	openbsd/sudo-wrapper.ksh \
 	openbsd/sync-website.ksh \
 	openbsd/sysupgrade-current.ksh
@@ -37,7 +36,6 @@ OPENBSD_SCRIPTS = \
 SECUREBLUE_SCRIPTS = \
 	secureblue/down-music.bash \
 	secureblue/install-arti-service.bash \
-	secureblue/luks-ext4-to-btrfs.bash \
 	secureblue/postinstall.bash \
 	secureblue/setup-clamav.bash \
 	secureblue/sudo-wrapper.bash \
