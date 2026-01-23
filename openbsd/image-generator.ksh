@@ -103,75 +103,33 @@ error() { print "$(date '+%Y-%m-%d %H:%M:%S') ${RED}[ERROR]${RESET} $*" >&2; }
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
-fdisk_dev_for_disk() {
-	# Accepts a disk name like vnd0 and returns the best device node for fdisk.
-	typeset disk
-	disk="$1"
-	if [ -c "/dev/r${disk}c" ]; then
-		print "/dev/r${disk}c"
-		return 0
-	fi
-	if [ -c "/dev/${disk}c" ]; then
-		print "/dev/${disk}c"
-		return 0
-	fi
-	print "$disk"
-}
+expand_disklabel_boundaries() {
+	# Some images have an on-disk disklabel with boundaries matching the original
+	# image size. After growing the backing file, we must extend the OpenBSD
+	# disk boundaries so disklabel partitions (and growfs) can use the new space.
+	#
+	# disklabel(8) explicitly supports this via the 'b' command in -E mode.
+	# This avoids fragile fdisk(8) scripting and CHS prompts.
+	typeset vnd tmp
+	vnd="$1"
 
-mbr_openbsd_partition_number() {
-	# Returns the MBR partition entry number containing OpenBSD (id A6), if any.
-	typeset disk
-	disk="$1"
+	have disklabel || return 1
 
-	fdisk "$disk" 2>/dev/null | awk '
-		/^[[:space:]]*\*?[0-9]+:[[:space:]]+[[:xdigit:]]{2}[[:space:]]/ {
-			id=tolower($2)
-			n=$1
-			gsub(/[^0-9]/,"",n)
-			if (id=="a6") { print n; exit }
-		}
-	'
-}
-
-expand_mbr_openbsd_partition() {
-	# Expands the MBR OpenBSD (A6) partition to fill the remainder of the disk.
-	# Needed for installXX.img images: even if the backing file grows, the A6
-	# partition size stays fixed until the MBR is updated.
-	typeset disk diskdev part
-	disk="$1"
-	diskdev=$(fdisk_dev_for_disk "$disk")
-
-	have fdisk || {
-		warn "fdisk(8) not available; cannot expand MBR OpenBSD partition"
-		return 1
-	}
-
-	part=$(mbr_openbsd_partition_number "$diskdev" || true)
-	if [ -z "$part" ]; then
-		# Not an MBR OpenBSD layout (or already GPT, etc.).
-		return 0
-	fi
-
-	log "Expanding MBR OpenBSD partition (#${part}) to fill disk"
-	# In command mode: edit <n>, accept default id/start, set size to '*', write, quit.
-	# This must NOT reinit the MBR because amd64/arm64 have different FAT/EFI layouts.
-	typeset tmp_fdisk
-	tmp_fdisk=$(mktemp "${WORKDIR}/fdisk.XXXXXXXX")
-	# Answer partition id explicitly (A6), keep offset default, set size '*'.
-	if ! printf 'print\nedit %s\nA6\n\n*\nwrite\nquit\n' "$part" | fdisk -e -y "$diskdev" >"$tmp_fdisk" 2>&1; then
-		warn "fdisk -e output: $(sed -n '1,120p' "$tmp_fdisk" 2>/dev/null || true)"
-		rm -f "$tmp_fdisk" >/dev/null 2>&1 || true
-		warn "fdisk failed to expand MBR partition #${part} on ${disk}"
+	tmp=$(mktemp "${WORKDIR}/disklabel.E.XXXXXXXX")
+	# Sequence:
+	#   b  -> set OpenBSD disk boundaries
+	#   <enter> keep offset
+	#   *  -> size to end of disk
+	#   w  -> write label
+	#   q  -> quit
+	if ! printf 'b\n\n*\nw\nq\n' | disklabel -E "$vnd" >"$tmp" 2>&1; then
+		if [ "${DEBUG:-0}" = "1" ]; then
+			warn "disklabel -E output: $(sed -n '1,120p' "$tmp" 2>/dev/null || true)"
+		fi
+		rm -f "$tmp" >/dev/null 2>&1 || true
 		return 1
 	fi
-	rm -f "$tmp_fdisk" >/dev/null 2>&1 || true
-
-	if ! fdisk -v "$diskdev" >/dev/null 2>&1; then
-		# If fdisk itself is not usable, bail.
-		warn "fdisk(8) not usable on ${disk}"
-		return 1
-	fi
-
+	rm -f "$tmp" >/dev/null 2>&1 || true
 	return 0
 }
 
@@ -383,21 +341,10 @@ ensure_image_space_kb() {
 		grown_mb=$((grown_mb + grow_mb))
 
 		CURRENT_VND=$(vnconfig "$img" | awk '{sub(/:$/,"",$1); print $1; exit}')
-		# Expand the OpenBSD MBR partition first (installXX.img uses MBR+A6).
-		# Re-attach after fdisk so the kernel re-reads the new bounds.
-		if ! expand_mbr_openbsd_partition "$CURRENT_VND"; then
-			warn "MBR expansion failed for ${CURRENT_VND}; cannot grow this image"
-			touch "$nogrow_flag" >/dev/null 2>&1 || true
-			# Reattach and remount so the caller is not left without a mount.
-			vnconfig -u "$CURRENT_VND" >/dev/null 2>&1 || true
-			CURRENT_VND=""
-			CURRENT_VND=$(vnconfig "$img" | awk '{sub(/:$/,"",$1); print $1; exit}')
-			mount "/dev/${CURRENT_VND}a" "$MOUNTPOINT" >/dev/null 2>&1 || true
-			return 1
+		# Extend disklabel boundaries to new end-of-disk.
+		if ! expand_disklabel_boundaries "$CURRENT_VND"; then
+			warn "Could not expand disklabel boundaries for ${CURRENT_VND}"
 		fi
-		vnconfig -u "$CURRENT_VND"
-		CURRENT_VND=""
-		CURRENT_VND=$(vnconfig "$img" | awk '{sub(/:$/,"",$1); print $1; exit}')
 
 		# Expand disklabel partition first, then grow the filesystem.
 		expand_disklabel_partition_a "$CURRENT_VND" || {
