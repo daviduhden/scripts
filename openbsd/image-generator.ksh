@@ -137,26 +137,18 @@ expand_mbr_openbsd_partition() {
 	fi
 
 	log "Expanding MBR OpenBSD partition (#${part}) to fill disk"
-	# In command mode: edit <n>, accept default id/start, set size to '*', quit.
-	# If the prompt sequence differs, fdisk should fail on EOF rather than hang.
+	# In command mode: edit <n>, accept default id/start, set size to '*', write, quit.
+	# This must NOT reinit the MBR because amd64/arm64 have different FAT/EFI layouts.
 	typeset tmp_fdisk
 	tmp_fdisk=$(mktemp "${WORKDIR}/fdisk.XXXXXXXX")
-	if ! printf 'edit %s\n\n\n*\nquit\n' "$part" | fdisk -e -y "$disk" >"$tmp_fdisk" 2>&1; then
+	# Answer partition id explicitly (A6), keep offset default, set size '*'.
+	if ! printf 'print\nedit %s\nA6\n\n*\nwrite\nquit\n' "$part" | fdisk -e -y "$disk" >"$tmp_fdisk" 2>&1; then
 		if [ "${DEBUG:-0}" = "1" ]; then
 			warn "fdisk -e output: $(cat "$tmp_fdisk" 2>/dev/null || true)"
 		fi
-		warn "fdisk -e did not expand MBR partition; trying fdisk -i fallback"
-		# Fallback: rebuild a default MBR preserving the existing EFI partition at 64/960,
-		# and allocating the rest to OpenBSD.
-		# This matches the stock installXX.img layout (EFI + OpenBSD).
-		if ! fdisk -i -y -b 960@64:EF "$disk" >/dev/null 2>&1; then
-			if [ "${DEBUG:-0}" = "1" ]; then
-				warn "fdisk -i output: $(fdisk -i -y -b 960@64:EF "$disk" >/dev/null 2>&1 || true)"
-			fi
-			rm -f "$tmp_fdisk" >/dev/null 2>&1 || true
-			warn "fdisk -i fallback failed on ${disk}"
-			return 1
-		fi
+		rm -f "$tmp_fdisk" >/dev/null 2>&1 || true
+		warn "fdisk failed to expand MBR partition #${part} on ${disk}"
+		return 1
 	fi
 	rm -f "$tmp_fdisk" >/dev/null 2>&1 || true
 
@@ -349,6 +341,13 @@ ensure_image_space_kb() {
 	max_grow_mb=${IMAGE_MAX_GROW_MB:-1024}
 	grown_mb=0
 
+	# If previous attempts proved the image can't be grown, don't thrash.
+	typeset nogrow_flag
+	nogrow_flag="$WORKDIR/no-grow.$(basename "$img")"
+	if [ -f "$nogrow_flag" ]; then
+		return 1
+	fi
+
 	free_kb=$(free_kb_in_mount "$MOUNTPOINT")
 	while [ $((free_kb - reserve_kb)) -lt "$required_kb" ]; do
 		prev_free_kb="$free_kb"
@@ -372,13 +371,19 @@ ensure_image_space_kb() {
 		CURRENT_VND=$(vnconfig "$img" | awk '{sub(/:$/,"",$1); print $1; exit}')
 		# Expand the OpenBSD MBR partition first (installXX.img uses MBR+A6).
 		# Re-attach after fdisk so the kernel re-reads the new bounds.
-		if expand_mbr_openbsd_partition "$CURRENT_VND"; then
-			vnconfig -u "$CURRENT_VND"
+		if ! expand_mbr_openbsd_partition "$CURRENT_VND"; then
+			warn "MBR expansion failed for ${CURRENT_VND}; cannot grow this image"
+			touch "$nogrow_flag" >/dev/null 2>&1 || true
+			# Reattach and remount so the caller is not left without a mount.
+			vnconfig -u "$CURRENT_VND" >/dev/null 2>&1 || true
 			CURRENT_VND=""
 			CURRENT_VND=$(vnconfig "$img" | awk '{sub(/:$/,"",$1); print $1; exit}')
-		else
-			warn "MBR expansion failed for ${CURRENT_VND}; continuing"
+			mount "/dev/${CURRENT_VND}a" "$MOUNTPOINT" >/dev/null 2>&1 || true
+			return 1
 		fi
+		vnconfig -u "$CURRENT_VND"
+		CURRENT_VND=""
+		CURRENT_VND=$(vnconfig "$img" | awk '{sub(/:$/,"",$1); print $1; exit}')
 
 		# Expand disklabel partition first, then grow the filesystem.
 		expand_disklabel_partition_a "$CURRENT_VND" || {
@@ -398,6 +403,7 @@ ensure_image_space_kb() {
 
 		if [ "$free_kb" -le "$prev_free_kb" ]; then
 			warn "Filesystem did not grow (free space unchanged); cannot add more space"
+			touch "$nogrow_flag" >/dev/null 2>&1 || true
 			return 1
 		fi
 	done
