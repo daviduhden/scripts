@@ -103,6 +103,77 @@ error() { print "$(date '+%Y-%m-%d %H:%M:%S') ${RED}[ERROR]${RESET} $*" >&2; }
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
+grow_image_file_mb() {
+	typeset img mb
+	img="$1"
+	mb="$2"
+
+	log "Growing image file by ${mb}MB: $img"
+	dd if=/dev/zero bs=1m count="$mb" >>"$img"
+}
+
+grow_image_filesystem() {
+	typeset vnd
+	vnd="$1"
+
+	if have growfs; then
+		# Prefer raw device if available.
+		if [ -c "/dev/r${vnd}a" ]; then
+			growfs -y "/dev/r${vnd}a" >/dev/null
+		else
+			growfs -y "/dev/${vnd}a" >/dev/null
+		fi
+	else
+		warn "growfs(8) not available; cannot grow filesystem"
+		return 1
+	fi
+}
+
+free_kb_in_mount() {
+	typeset path
+	path="$1"
+	df -k "$path" | awk 'NR==2 {print $4}'
+}
+
+ensure_image_space_kb() {
+	# Ensures at least required_kb free within the mounted image.
+	# May detach/reattach and grow the image+filesystem.
+	typeset img required_kb
+	typeset -i free_kb reserve_kb grow_mb max_grow_mb grown_mb
+	img="$1"
+	required_kb="$2"
+
+	reserve_kb=${IMAGE_RESERVE_KB:-2048}
+	grow_mb=${IMAGE_GROW_MB:-64}
+	max_grow_mb=${IMAGE_MAX_GROW_MB:-1024}
+	grown_mb=0
+
+	free_kb=$(free_kb_in_mount "$MOUNTPOINT")
+	while [ $((free_kb - reserve_kb)) -lt "$required_kb" ]; do
+		if [ "$grown_mb" -ge "$max_grow_mb" ]; then
+			warn "Reached IMAGE_MAX_GROW_MB=${max_grow_mb}MB; cannot grow further"
+			return 1
+		fi
+
+		log "Not enough space in image (${free_kb}KB free). Growing..."
+		umount "$MOUNTPOINT"
+		vnconfig -u "$CURRENT_VND"
+		CURRENT_VND=""
+
+		grow_image_file_mb "$img" "$grow_mb"
+		grown_mb=$((grown_mb + grow_mb))
+
+		CURRENT_VND=$(vnconfig "$img" | awk '{sub(/:$/,"",$1); print $1; exit}')
+		grow_image_filesystem "$CURRENT_VND" || return 1
+		mount "/dev/${CURRENT_VND}a" "$MOUNTPOINT"
+
+		free_kb=$(free_kb_in_mount "$MOUNTPOINT")
+		log "Free space in image after grow: ${free_kb} KB"
+	done
+
+	return 0
+}
+
 expected_sha256() {
 	typeset checksum_file base
 	checksum_file="$1"
@@ -403,6 +474,7 @@ download_firmware_set() {
 
 inject_firmware() {
 	typeset img fwset vnd file dest_dir
+	typeset -i need_kb
 	img="$1"
 	fwset="$2"
 
@@ -417,12 +489,24 @@ inject_firmware() {
 	mkdir -p "$dest_dir"
 
 	if [ -f "$FW_DIR/SHA256.sig" ]; then
-		cp -p "$FW_DIR/SHA256.sig" "$dest_dir/"
+		need_kb=$(du -k "$FW_DIR/SHA256.sig" | awk '{print $1}')
+		if ! ensure_image_space_kb "$img" "$need_kb"; then
+			warn "Not enough space to copy SHA256.sig into image"
+			[ "$STRICT_VERIFY" = "1" ] && exit 1 || true
+		else
+			cp -p "$FW_DIR/SHA256.sig" "$dest_dir/"
+		fi
 	fi
 
 	for fw in $fwset; do
 		for file in "$FW_DIR"/"${fw}"-firmware-*.tgz; do
 			[ -f "$file" ] || continue
+			need_kb=$(du -k "$file" | awk '{print $1}')
+			if ! ensure_image_space_kb "$img" "$need_kb"; then
+				warn "Not enough space in image for $(basename "$file")"
+				[ "$STRICT_VERIFY" = "1" ] && exit 1 || true
+				continue
+			fi
 			log "Copying $(basename "$file") into image"
 			cp -p "$file" "$dest_dir/"
 		done
