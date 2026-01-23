@@ -103,6 +103,50 @@ error() { print "$(date '+%Y-%m-%d %H:%M:%S') ${RED}[ERROR]${RESET} $*" >&2; }
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
+mbr_openbsd_partition_number() {
+	# Returns the MBR partition entry number containing OpenBSD (id A6), if any.
+	typeset disk
+	disk="$1"
+
+	fdisk "$disk" 2>/dev/null | awk '
+		/^[[:space:]]*\*?[0-9]+:[[:space:]]+[[:xdigit:]]{2}[[:space:]]/ {
+			id=tolower($2)
+			n=$1
+			gsub(/[^0-9]/,"",n)
+			if (id=="a6") { print n; exit }
+		}
+	'
+}
+
+expand_mbr_openbsd_partition() {
+	# Expands the MBR OpenBSD (A6) partition to fill the remainder of the disk.
+	# Needed for installXX.img images: even if the backing file grows, the A6
+	# partition size stays fixed until the MBR is updated.
+	typeset disk part
+	disk="$1"
+
+	have fdisk || {
+		warn "fdisk(8) not available; cannot expand MBR OpenBSD partition"
+		return 1
+	}
+
+	part=$(mbr_openbsd_partition_number "$disk" || true)
+	if [ -z "$part" ]; then
+		# Not an MBR OpenBSD layout (or already GPT, etc.).
+		return 0
+	fi
+
+	log "Expanding MBR OpenBSD partition (#${part}) to fill disk"
+	# In command mode: edit <n>, accept default id/start, set size to '*', write+quit.
+	# If the prompt sequence differs, fdisk will error out on EOF rather than hang.
+	if ! printf 'edit %s\n\n\n*\n\n\nwrite\nquit\n' "$part" | fdisk -e -y "$disk" >/dev/null 2>&1; then
+		warn "fdisk failed to expand MBR partition #${part} on ${disk}"
+		return 1
+	fi
+
+	return 0
+}
+
 disklabel_dev_for_vnd() {
 	# Prefer raw whole-disk device.
 	typeset vnd
@@ -135,12 +179,29 @@ expand_disklabel_partition_a() {
 		return 1
 	}
 
-	dl=$(disklabel_dev_for_vnd "$vnd")
+	# Some images/dev setups expose different nodes; try a few.
+	typeset candidates cand
+	candidates="${vnd} /dev/r${vnd}c /dev/${vnd}c /dev/r${vnd}a /dev/${vnd}a /dev/r${vnd} /dev/${vnd}"
+	dl=""
+	for cand in $candidates; do
+		if disklabel -r "$cand" >/dev/null 2>&1; then
+			dl="$cand"
+			break
+		fi
+	done
+	if [ -z "$dl" ]; then
+		dl=$(disklabel_dev_for_vnd "$vnd")
+	fi
 	tmp_in=$(mktemp "${WORKDIR}/disklabel.in.XXXXXXXX")
 	tmp_out=$(mktemp "${WORKDIR}/disklabel.out.XXXXXXXX")
 
 	# Use -r to work in raw sectors.
 	if ! disklabel -r "$dl" >"$tmp_in" 2>/dev/null; then
+		if [ "${DEBUG:-0}" = "1" ]; then
+			typeset dl_err
+			dl_err=$(disklabel -r "$dl" 2>&1 >/dev/null || true)
+			warn "disklabel -r ${dl} failed: ${dl_err}"
+		fi
 		rm -f "$tmp_in" "$tmp_out" >/dev/null 2>&1 || true
 		warn "Could not read disklabel from ${dl}; cannot expand partition"
 		return 1
@@ -265,11 +326,24 @@ ensure_image_space_kb() {
 		grown_mb=$((grown_mb + grow_mb))
 
 		CURRENT_VND=$(vnconfig "$img" | awk '{sub(/:$/,"",$1); print $1; exit}')
+		# Expand the OpenBSD MBR partition first (installXX.img uses MBR+A6).
+		# Re-attach after fdisk so the kernel re-reads the new bounds.
+		if expand_mbr_openbsd_partition "$CURRENT_VND"; then
+			vnconfig -u "$CURRENT_VND"
+			CURRENT_VND=""
+			CURRENT_VND=$(vnconfig "$img" | awk '{sub(/:$/,"",$1); print $1; exit}')
+		else
+			warn "MBR expansion failed for ${CURRENT_VND}; continuing"
+		fi
+
 		# Expand disklabel partition first, then grow the filesystem.
 		expand_disklabel_partition_a "$CURRENT_VND" || {
 			warn "Partition expansion failed for ${CURRENT_VND}; growfs may not be able to grow"
 		}
-		grow_image_filesystem "$CURRENT_VND" || return 1
+		# Try to grow the filesystem, but always remount before returning.
+		if ! grow_image_filesystem "$CURRENT_VND"; then
+			warn "growfs did not grow filesystem for ${CURRENT_VND}a"
+		fi
 		if ! mount "/dev/${CURRENT_VND}a" "$MOUNTPOINT"; then
 			error "Failed to mount /dev/${CURRENT_VND}a on $MOUNTPOINT after growing"
 			return 1
