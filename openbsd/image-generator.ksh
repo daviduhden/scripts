@@ -139,7 +139,7 @@ ensure_image_space_kb() {
 	# Ensures at least required_kb free within the mounted image.
 	# May detach/reattach and grow the image+filesystem.
 	typeset img required_kb
-	typeset -i free_kb reserve_kb grow_mb max_grow_mb grown_mb
+	typeset -i free_kb prev_free_kb reserve_kb grow_mb max_grow_mb grown_mb
 	img="$1"
 	required_kb="$2"
 
@@ -150,6 +150,7 @@ ensure_image_space_kb() {
 
 	free_kb=$(free_kb_in_mount "$MOUNTPOINT")
 	while [ $((free_kb - reserve_kb)) -lt "$required_kb" ]; do
+		prev_free_kb="$free_kb"
 		if [ "$grown_mb" -ge "$max_grow_mb" ]; then
 			warn "Reached IMAGE_MAX_GROW_MB=${max_grow_mb}MB; cannot grow further"
 			return 1
@@ -165,10 +166,18 @@ ensure_image_space_kb() {
 
 		CURRENT_VND=$(vnconfig "$img" | awk '{sub(/:$/,"",$1); print $1; exit}')
 		grow_image_filesystem "$CURRENT_VND" || return 1
-		mount "/dev/${CURRENT_VND}a" "$MOUNTPOINT"
+		if ! mount "/dev/${CURRENT_VND}a" "$MOUNTPOINT"; then
+			error "Failed to mount /dev/${CURRENT_VND}a on $MOUNTPOINT after growing"
+			return 1
+		fi
 
 		free_kb=$(free_kb_in_mount "$MOUNTPOINT")
 		log "Free space in image after grow: ${free_kb} KB"
+
+		if [ "$free_kb" -le "$prev_free_kb" ]; then
+			warn "Filesystem did not grow (free space unchanged); cannot add more space"
+			return 1
+		fi
 	done
 
 	return 0
@@ -479,9 +488,13 @@ inject_firmware() {
 	fwset="$2"
 
 	log "Attaching image: $img"
-	vnd=$(vnconfig "$img" | awk '{sub(/:$/,"",$1); print $1; exit}')
-	CURRENT_VND="$vnd"
-	mount "/dev/${vnd}a" "$MOUNTPOINT"
+	CURRENT_VND=$(vnconfig "$img" | awk '{sub(/:$/,"",$1); print $1; exit}')
+	if ! mount "/dev/${CURRENT_VND}a" "$MOUNTPOINT"; then
+		error "Failed to mount /dev/${CURRENT_VND}a on $MOUNTPOINT"
+		vnconfig -u "$CURRENT_VND"
+		CURRENT_VND=""
+		exit 1
+	fi
 
 	# Do not extract firmware into the image. Copy the compressed firmware
 	# archives so fw_update(8) can be pointed at them later.
@@ -494,6 +507,7 @@ inject_firmware() {
 			warn "Not enough space to copy SHA256.sig into image"
 			[ "$STRICT_VERIFY" = "1" ] && exit 1 || true
 		else
+			mkdir -p "$dest_dir"
 			cp -p "$FW_DIR/SHA256.sig" "$dest_dir/"
 		fi
 	fi
@@ -507,6 +521,7 @@ inject_firmware() {
 				[ "$STRICT_VERIFY" = "1" ] && exit 1 || true
 				continue
 			fi
+			mkdir -p "$dest_dir"
 			log "Copying $(basename "$file") into image"
 			cp -p "$file" "$dest_dir/"
 		done
@@ -514,7 +529,7 @@ inject_firmware() {
 
 	sync
 	umount "$MOUNTPOINT"
-	vnconfig -u "$vnd"
+	vnconfig -u "$CURRENT_VND"
 	CURRENT_VND=""
 }
 
