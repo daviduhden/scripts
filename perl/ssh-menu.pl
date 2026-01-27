@@ -12,6 +12,7 @@
 
 use strict;
 use warnings;
+use File::Path qw(make_path);
 
 my $no_color  = 0;
 my $is_tty    = ( -t STDOUT )             ? 1 : 0;
@@ -38,6 +39,8 @@ sub die_tool {
 }
 
 my $known_hosts = $ENV{SSH_MENU_KNOWN_HOSTS} // "$ENV{HOME}/.ssh/known_hosts";
+my $freq_file   = $ENV{SSH_MENU_FREQ_FILE}
+  // "$ENV{HOME}/.cache/ssh-menu/frequencies";
 
 if ( !-f $known_hosts ) {
     error("$known_hosts not found.");
@@ -75,6 +78,25 @@ else {
 my @entries;
 my %seen;
 my $hashed_count = 0;
+my %freq;
+my $freq_file_exists = -f $freq_file ? 1 : 0;
+
+if ($freq_file_exists) {
+    if ( open my $ffh, '<', $freq_file ) {
+        while ( my $line = <$ffh> ) {
+            chomp $line;
+            next if $line =~ /^\s*$/;
+            my ( $k, $v ) = split /\s+/, $line, 2;
+            next unless defined $k && defined $v;
+            next unless $v =~ /^\d+$/;
+            $freq{$k} = $v;
+        }
+        close $ffh;
+    }
+    else {
+        logw("Could not read frequency file $freq_file: $!");
+    }
+}
 
 open my $fh, '<', $known_hosts
   or error("cannot open $known_hosts: $!");
@@ -135,6 +157,7 @@ while ( my $line = <$fh> ) {
         host    => $host,
         port    => $port,
         display => $display,
+        freq    => $freq{$key} // 0,
       };
 }
 close $fh;
@@ -152,7 +175,15 @@ if ( !@entries ) {
     }
 }
 
-@entries = sort { lc $a->{display} cmp lc $b->{display} } @entries;
+if ($freq_file_exists) {
+    @entries = sort {
+             ( $b->{freq} <=> $a->{freq} )
+          || ( lc $a->{display} cmp lc $b->{display} )
+    } @entries;
+}
+else {
+    @entries = sort { lc $a->{display} cmp lc $b->{display} } @entries;
+}
 
 logw("Skipped $hashed_count hashed known_hosts entries.")
   if $hashed_count > 0;
@@ -200,6 +231,7 @@ while (1) {
 my $selected_host    = $entries[$selected_idx]{host};
 my $selected_port    = $entries[$selected_idx]{port};
 my $selected_display = $entries[$selected_idx]{display};
+my $selected_key = join ':', $selected_host, ( $selected_port || 'default' );
 
 logi("Selected server: $selected_display");
 
@@ -240,6 +272,24 @@ if ($selected_port) {
 else {
     logi("Connecting to $ssh_user\@$selected_host ...");
     @cmd = ( 'ssh', "$ssh_user\@$selected_host" );
+}
+
+$freq{$selected_key} = ( $freq{$selected_key} // 0 ) + 1;
+eval {
+    my ($dir) = $freq_file =~ m{^(.*)/[^/]+$};
+    make_path($dir) if defined $dir && length $dir;
+    if ( open my $ffh, '>', $freq_file ) {
+        for my $k ( sort keys %freq ) {
+            printf $ffh "%s %d\n", $k, $freq{$k};
+        }
+        close $ffh;
+    }
+    else {
+        logw("Could not write frequency file $freq_file: $!");
+    }
+};
+if ($@) {
+    logw("Could not persist frequency file: $@");
 }
 
 exec @cmd or error("Failed to exec ssh: $!");
