@@ -60,7 +60,7 @@ run_cmd() {
 	} 2>&1 | tee -a "$LOG_FILE"
 	local rc=${PIPESTATUS[0]}
 	if [[ $rc -ne 0 ]]; then
-		say "⚠️  Failed with exit code $rc: ${_cmdstr% }"
+		say "⚠️ Failed with exit code $rc: ${_cmdstr% }"
 		FAILURES+=("${_cmdstr% } (rc=$rc)")
 		return "$rc"
 	fi
@@ -104,20 +104,20 @@ if ! have ujust; then
 	exit 1
 fi
 
-say "ℹ️  Notas:"
-say "• Este script solo automatiza los comandos 'ujust' del artículo."
-say "• 'ujust bios' reinicia inmediatamente en UEFI/BIOS y el script termina ahí."
-say "• Algunos pasos (dns-selector, create-admin, LUKS unlock) son interactivos por sí mismos."
+say "ℹ️ Notes:"
+say "• This script only automates the article's 'ujust' commands."
+say "• 'ujust bios' reboots immediately into UEFI/BIOS and the script ends there."
+say "• Some steps (dns-selector, create-admin, LUKS unlock) are interactive on their own."
 hr
 
 # ---------- interactive walk-through ----------
 # Essential — Enroll Secure Boot key (queue late)
-if confirm "Run: ujust enroll-secureblue-secure-boot-key ? (often needs a reboot; will be queued for the end)" "y"; then
+if confirm "Run: ujust enroll-secureblue-secure-boot-key? (often needs a reboot; queued for the end)" "y"; then
 	enqueue_late "ujust enroll-secureblue-secure-boot-key||Enroll Secure Boot key"
 fi
 
 # Essential — Validation (can run now)
-if confirm "Run validation now: ujust audit-secureblue ? (recommended, but results may change after reboot)" "y"; then
+if confirm "Run validation now: ujust audit-secureblue? (recommended; results may change after reboot)" "y"; then
 	enqueue_now "ujust audit-secureblue||Validation (audit-secureblue)"
 fi
 
@@ -132,22 +132,22 @@ if confirm "Open UEFI/BIOS now: ujust bios ? (REBOOTS IMMEDIATELY and ends the s
 fi
 
 # Recommended — USBGuard
-if confirm "Run: ujust setup-usbguard ? (generates policy from currently attached USB devices, blocks others)" "y"; then
+if confirm "Run: ujust setup-usbguard? (generates policy from currently attached USB devices, blocks others)" "y"; then
 	enqueue_now "ujust setup-usbguard||Setup USBGuard"
 fi
 
 # Recommended — Create admin wheel account
-if confirm "Run: ujust create-admin ? (creates a dedicated admin account; interactive)" "y"; then
+if confirm "Run: ujust create-admin? (creates a dedicated admin account; interactive)" "y"; then
 	enqueue_now "ujust create-admin||Create separate wheel/admin account"
 fi
 
 # Recommended — DNS selector (with VPN warning)
-if confirm "Run: ujust dns-selector ? (configures DNS; interactive)" "y"; then
+if confirm "Run: ujust dns-selector? (configures DNS; interactive)" "y"; then
 	hr
-	say "⚠️ Aviso VPN:"
-	say "Si planeas usar una VPN, quizá quieras mantener el DNS por defecto del sistema"
-	say "o usar systemd-resolved (según tu configuración) para evitar fugas DNS."
-	say "Evita poner la política Trivalent DNS-over-HTTPS si usas VPN."
+	say "⚠️ VPN note:"
+	say "If you plan to use a VPN, you may want to keep the system default DNS"
+	say "or use systemd-resolved (depending on your setup) to avoid DNS leaks."
+	say "Avoid forcing Trivalent DNS-over-HTTPS when using a VPN."
 	if confirm "Continue with dns-selector anyway?" "y"; then
 		enqueue_now "ujust dns-selector||Configure system DNS (dns-selector)"
 	else
@@ -161,15 +161,15 @@ if confirm "Run: ujust toggle-mac-randomization ? (toggles random/permanent MAC 
 fi
 
 # Recommended — Bash environment lockdown
-if confirm "Run: ujust toggle-bash-environment-lockdown ? (mitigates LD_PRELOAD-style attacks)" "y"; then
+if confirm "Run: ujust toggle-bash-environment-lockdown? (mitigates LD_PRELOAD-style attacks)" "y"; then
 	enqueue_now "ujust toggle-bash-environment-lockdown||Bash environment lockdown"
 fi
 
 # Recommended — LUKS Hardware Unlock (queue late)
 hr
 say "🔐 LUKS Hardware Unlock"
-say "Opciones: FIDO2 (preferido si tienes llave de seguridad) o TPM2 (con advertencias AMD/fTPM)."
-say "Guía: elige SOLO UNA (no actives ambas)."
+say "Options: FIDO2 (preferred if you have a security key) or TPM2 (with AMD/fTPM caveats)."
+say "Guidance: pick ONLY ONE (do not enable both)."
 hr
 
 if confirm "Configure LUKS FIDO2 unlock? (ujust setup-luks-fido2-unlock; often needs reboot; queued for the end)" "n"; then
@@ -177,9 +177,9 @@ if confirm "Configure LUKS FIDO2 unlock? (ujust setup-luks-fido2-unlock; often n
 else
 	if confirm "Configure LUKS TPM2 unlock? (ujust setup-luks-tpm-unlock; often needs reboot; queued for the end)" "n"; then
 		hr
-		say "⚠️  Aviso AMD/fTPM:"
-		say "Si tu sistema AMD usa un fTPM (TPM por firmware) en vez de TPM/Pluton dedicado,"
-		say "el artículo recomienda saltar el registro TPM2."
+		say "⚠️ AMD/fTPM note:"
+		say "If your AMD system uses fTPM (firmware TPM) instead of a dedicated TPM/Pluton,"
+		say "the guide recommends skipping TPM2 enrollment."
 		if confirm "Continue with TPM2 anyway?" "n"; then
 			enqueue_late "ujust setup-luks-tpm-unlock||LUKS TPM2 unlock"
 		else
@@ -190,33 +190,32 @@ fi
 
 # ---------- execution ----------
 hr
-say "📋 Plan de ejecución"
+say "📋 Execution plan"
 if ((${#QUEUE_NOW[@]})); then
-	say "🚀 Pasos SIN reinicio (se ejecutan ahora):"
+	say "🚀 No-reboot steps (run now):"
 	for item in "${QUEUE_NOW[@]}"; do
 		say "  - ${item%%||*}"
 	done
 else
-	say "🚀 Pasos SIN reinicio (se ejecutan ahora): ninguno"
+	say "🚀 No-reboot steps (run now): none"
 fi
 
 if ((${#QUEUE_LATE[@]})); then
-	say "♻️  Pasos que PROBABLEMENTE requieren reinicio (al final):"
+	say "♻️ Likely-reboot steps (queued for the end):"
 	for item in "${QUEUE_LATE[@]}"; do
 		say "  - ${item%%||*}"
 	done
 else
-	say "♻️  Pasos que PROBABLEMENTE requieren reinicio (al final): ninguno"
+	say "♻️ Likely-reboot steps (queued for the end): none"
 fi
 hr
 
 if ! confirm "Start running the selected steps now?" "y"; then
-	say "🚪 Saliendo sin ejecutar nada."
+	say "🚪 Exiting without running anything."
 	exit 0
 fi
 
 # Run NOW queue
-# (removed shellcheck enable directive)
 for item in "${QUEUE_NOW[@]}"; do
 	ucmd="${item%%||*}"
 	desc="${item#*||}"
@@ -226,7 +225,7 @@ done
 # Run LATE queue (reboot-likely)
 if ((${#QUEUE_LATE[@]})); then
 	hr
-	say "⏭️  Ejecutando los pasos que requieren reinicio (guardados para el final)…"
+	say "⏭️ Running the likely-reboot steps saved for the end…"
 
 	for item in "${QUEUE_LATE[@]}"; do
 		ucmd="${item%%||*}"
@@ -235,26 +234,26 @@ if ((${#QUEUE_LATE[@]})); then
 	done
 
 	hr
-	say "✅ Finalizados los pasos finales."
+	say "✅ Completed the final steps."
 	if confirm "Reboot now to apply everything that requires it?" "y"; then
 		reboot_system
 	else
-		say "ℹ️  Recuerda reiniciar más tarde para aplicar todos los cambios."
+		say "ℹ️ Remember to reboot later to apply all changes."
 	fi
 else
-	say "No se han programado pasos que requieran reinicio."
+	say "No reboot-requiring steps were scheduled."
 fi
 
 # Summary
 hr
-say "🧾 Resumen"
+say "🧾 Summary"
 say "📝 Log: $LOG_FILE"
 if ((${#FAILURES[@]})); then
-	say "⚠️  Fallos encontrados:"
+	say "⚠️  Failures found:"
 	for f in "${FAILURES[@]}"; do
 		say "  - $f"
 	done
 	exit 1
 else
-	say "✅ Completado sin errores detectados."
+	say "✅ Completed with no detected errors."
 fi
