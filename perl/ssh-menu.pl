@@ -41,9 +41,11 @@ sub die_tool {
 my $known_hosts = $ENV{SSH_MENU_KNOWN_HOSTS} // "$ENV{HOME}/.ssh/known_hosts";
 my $freq_file   = $ENV{SSH_MENU_FREQ_FILE}
   // "$ENV{HOME}/.cache/ssh-menu/frequencies";
+my $alias_file = $ENV{SSH_MENU_ALIAS_FILE}
+  // "$ENV{HOME}/.cache/ssh-menu/aliases";
 
 if ( !-f $known_hosts ) {
-    error("$known_hosts not found.");
+    die_tool("$known_hosts not found.");
 }
 
 #######################################
@@ -80,6 +82,8 @@ my %seen;
 my $hashed_count = 0;
 my %freq;
 my $freq_file_exists = -f $freq_file ? 1 : 0;
+my %alias;
+my $alias_file_exists = -f $alias_file ? 1 : 0;
 
 if ($freq_file_exists) {
     if ( open my $ffh, '<', $freq_file ) {
@@ -98,8 +102,24 @@ if ($freq_file_exists) {
     }
 }
 
+if ($alias_file_exists) {
+    if ( open my $afh, '<', $alias_file ) {
+        while ( my $line = <$afh> ) {
+            chomp $line;
+            next if $line =~ /^\s*$/;
+            my ( $k, $v ) = split /\s+/, $line, 2;
+            next unless defined $k && defined $v;
+            $alias{$k} = $v;
+        }
+        close $afh;
+    }
+    else {
+        logw("Could not read alias file $alias_file: $!");
+    }
+}
+
 open my $fh, '<', $known_hosts
-  or error("cannot open $known_hosts: $!");
+  or die_tool("cannot open $known_hosts: $!");
 
 while ( my $line = <$fh> ) {
     chomp $line;
@@ -133,6 +153,8 @@ while ( my $line = <$fh> ) {
     next if $seen{$key}++;
 
     my $display;
+    my $alias_key  = $key;
+    my $alias_name = $alias{$alias_key};
     if ( @parts > 1 ) {
         my @aliases   = @parts[ 1 .. $#parts ];
         my $alias_str = join ', ', @aliases;
@@ -152,6 +174,10 @@ while ( my $line = <$fh> ) {
         }
     }
 
+    if ( defined $alias_name && length $alias_name ) {
+        $display = "$alias_name -> $display";
+    }
+
     push @entries,
       {
         host    => $host,
@@ -162,16 +188,40 @@ while ( my $line = <$fh> ) {
 }
 close $fh;
 
+my %valid_keys =
+  map { ( $_->{host} . ':' . ( $_->{port} || 'default' ) ) => 1 } @entries;
+
+# Drop stale frequency entries for hosts no longer present
+my $pruned_freq = 0;
+for my $k ( keys %freq ) {
+    if ( !$valid_keys{$k} ) {
+        delete $freq{$k};
+        $pruned_freq = 1;
+    }
+}
+
+# Drop stale aliases for hosts no longer present
+my $pruned_alias = 0;
+for my $k ( keys %alias ) {
+    if ( !$valid_keys{$k} ) {
+        delete $alias{$k};
+        $pruned_alias = 1;
+    }
+}
+
+write_freq_file( \%freq )   if $pruned_freq;
+write_alias_file( \%alias ) if $pruned_alias;
+
 if ( !@entries ) {
     if ( $hashed_count > 0 ) {
-        error(  "No valid plain hosts found in $known_hosts.\n"
+        die_tool( "No valid plain hosts found in $known_hosts.\n"
               . "It looks like your known_hosts file contains only hashed entries.\n"
               . "This script cannot recover hostnames from hashed lines.\n"
               . "Consider keeping a separate non-hashed file (e.g. ~/.ssh/known_hosts.menu)\n"
               . "for use with this menu script." );
     }
     else {
-        error("No valid hosts found in $known_hosts.");
+        die_tool("No valid hosts found in $known_hosts.");
     }
 }
 
@@ -188,6 +238,188 @@ else {
 logw("Skipped $hashed_count hashed known_hosts entries.")
   if $hashed_count > 0;
 
+#################################
+# 3. Manage known_hosts entries #
+#################################
+
+sub remove_known_host_entry {
+    my ( $host, $port ) = @_;
+    my $target  = $port ? "[$host]:$port" : $host;
+    my $tmp     = "$known_hosts.tmp.$$";
+    my $removed = 0;
+
+    open my $rfh, '<', $known_hosts or die_tool("Cannot open $known_hosts: $!");
+    open my $wfh, '>', $tmp         or die_tool("Cannot write $tmp: $!");
+
+    while ( my $line = <$rfh> ) {
+        my ($field) = split /\s+/, $line, 2;
+        my @parts   = defined $field ? split( /,/, $field ) : ();
+        my $match   = 0;
+        for my $p (@parts) {
+            next unless defined $p && length $p;
+            $p =~ s/^\s+|\s+$//g;
+            if ( $p eq $target || $p eq $host ) {
+                $match = 1;
+                last;
+            }
+        }
+        if ($match) {
+            $removed = 1;
+            next;
+        }
+        print {$wfh} $line;
+    }
+
+    close $rfh;
+    close $wfh;
+
+    if ($removed) {
+        rename $tmp, $known_hosts
+          or die_tool("Failed to replace $known_hosts: $!");
+    }
+    else {
+        unlink $tmp;
+        logw("No matching entry found to remove for $target");
+    }
+    return $removed;
+}
+
+sub manage_known_hosts_menu {
+    if ( !@entries ) {
+        logw('No entries available to manage.');
+        exit 0;
+    }
+
+    logi('Manage known_hosts entries (delete)');
+    for my $i ( 0 .. $#entries ) {
+        printf "  ${CYAN}%2d)${RESET} ${BOLD}%s${RESET}\n", $i + 1,
+          $entries[$i]{display};
+    }
+    printf "  ${CYAN}%2d)${RESET} ${BOLD}Cancel${RESET}\n\n",
+      scalar(@entries) + 1;
+
+    while (1) {
+        print "Delete which entry [1-", scalar(@entries) + 1,
+          "] (q to cancel): ";
+        my $input = <STDIN>;
+        defined $input or die_tool('Input closed.');
+        chomp $input;
+
+        return if $input =~ /^[qQ]$/;
+        next   if $input !~ /^\d+$/;
+        my $num = int($input);
+        if ( $num == scalar(@entries) + 1 ) {
+            return;
+        }
+        next if $num < 1 || $num > scalar(@entries);
+
+        my $idx  = $num - 1;
+        my $host = $entries[$idx]{host};
+        my $port = $entries[$idx]{port};
+        my $disp = $entries[$idx]{display};
+        logi("Selected for deletion: $disp");
+        print "Confirm delete this entry from $known_hosts? [y/N]: ";
+        my $ans = <STDIN> // '';
+        chomp $ans;
+
+        if ( $ans =~ /^[Yy]/ ) {
+            if ( remove_known_host_entry( $host, $port ) ) {
+                my $k = join ':', $host, ( $port || 'default' );
+                delete $freq{$k};
+                delete $alias{$k};
+                write_freq_file( \%freq );
+                write_alias_file( \%alias );
+                logi(
+                    'Entry removed. Please re-run ssh-menu to refresh the list.'
+                );
+            }
+            exit 0;
+        }
+        else {
+            logi('Deletion cancelled.');
+            return;
+        }
+    }
+}
+
+sub write_alias_file {
+    my ($aliases_ref) = @_;
+    my ($dir)         = $alias_file =~ m{^(.*)/[^/]+$};
+    make_path($dir) if defined $dir && length $dir;
+    if ( open my $afh, '>', $alias_file ) {
+        for my $k ( sort keys %{$aliases_ref} ) {
+            printf $afh "%s %s\n", $k, $aliases_ref->{$k};
+        }
+        close $afh;
+    }
+    else {
+        logw("Could not write alias file $alias_file: $!");
+    }
+}
+
+sub write_freq_file {
+    my ($freq_ref) = @_;
+    my ($dir)      = $freq_file =~ m{^(.*)/[^/]+$};
+    make_path($dir) if defined $dir && length $dir;
+    if ( open my $ffh, '>', $freq_file ) {
+        for my $k ( sort keys %{$freq_ref} ) {
+            printf $ffh "%s %d\n", $k, $freq_ref->{$k};
+        }
+        close $ffh;
+    }
+    else {
+        logw("Could not write frequency file $freq_file: $!");
+    }
+}
+
+sub add_alias_menu {
+    if ( !@entries ) {
+        logw('No entries available to alias.');
+        return;
+    }
+
+    logi('Add custom name (alias) for a host');
+    for my $i ( 0 .. $#entries ) {
+        printf "  ${CYAN}%2d)${RESET} ${BOLD}%s${RESET}\n", $i + 1,
+          $entries[$i]{display};
+    }
+    printf "  ${CYAN}%2d)${RESET} ${BOLD}Cancel${RESET}\n\n",
+      scalar(@entries) + 1;
+
+    while (1) {
+        print "Alias which entry [1-", scalar(@entries) + 1,
+          "] (q to cancel): ";
+        my $input = <STDIN>;
+        defined $input or die_tool('Input closed.');
+        chomp $input;
+
+        return if $input =~ /^[qQ]$/;
+        next   if $input !~ /^\d+$/;
+        my $num = int($input);
+        if ( $num == scalar(@entries) + 1 ) {
+            return;
+        }
+        next if $num < 1 || $num > scalar(@entries);
+
+        my $idx  = $num - 1;
+        my $host = $entries[$idx]{host};
+        my $port = $entries[$idx]{port};
+        my $key  = join ':', $host, ( $port || 'default' );
+
+        print "Enter custom name (alias) for $host"
+          . ( $port ? " (port $port)" : '' )
+          . " [blank to cancel]: ";
+        my $alias_val = <STDIN> // '';
+        chomp $alias_val;
+        return if $alias_val !~ /\S/;
+
+        $alias{$key} = $alias_val;
+        write_alias_file( \%alias );
+        logi('Alias saved. Please re-run ssh-menu to refresh the list.');
+        return;
+    }
+}
+
 ##########################################
 # 3. Interactive menu to choose a server #
 ##########################################
@@ -198,13 +430,17 @@ for my $i ( 0 .. $#entries ) {
     printf "  ${CYAN}%2d)${RESET} ${BOLD}%s${RESET}\n", $i + 1,
       $entries[$i]{display};
 }
-printf "  ${CYAN}%2d)${RESET} ${BOLD}Quit${RESET}\n\n", scalar(@entries) + 1;
+printf "  ${CYAN}%2d)${RESET} ${BOLD}Manage known_hosts (delete)${RESET}\n",
+  scalar(@entries) + 1;
+printf "  ${CYAN}%2d)${RESET} ${BOLD}Add custom name (alias)${RESET}\n",
+  scalar(@entries) + 2;
+printf "  ${CYAN}%2d)${RESET} ${BOLD}Quit${RESET}\n\n", scalar(@entries) + 3;
 
 my $selected_idx;
 while (1) {
-    print "Choice [1-", scalar(@entries) + 1, "]: ";
+    print "Choice [1-", scalar(@entries) + 3, "]: ";
     my $input = <STDIN>;
-    defined $input or error("Input closed.");
+    defined $input or die_tool("Input closed.");
     chomp $input;
     if ( $input =~ /^[qQ]$/ ) {
         logi("Exiting.");
@@ -215,9 +451,19 @@ while (1) {
 
     my $num = int($input);
 
-    if ( $num == scalar(@entries) + 1 ) {
+    if ( $num == scalar(@entries) + 3 ) {
         logi("Exiting.");
         exit 0;
+    }
+
+    if ( $num == scalar(@entries) + 1 ) {
+        manage_known_hosts_menu();
+        next;
+    }
+
+    if ( $num == scalar(@entries) + 2 ) {
+        add_alias_menu();
+        next;
     }
 
     if ( $num >= 1 && $num <= scalar(@entries) ) {
@@ -244,7 +490,7 @@ my $default_user = $ENV{SSH_MENU_USER} // $ENV{USER} // '';
 print "${BOLD}SSH user${RESET}"
   . ( length $default_user ? " [${CYAN}$default_user${RESET}]" : '' ) . ": ";
 my $ssh_user = <STDIN>;
-defined $ssh_user or error("Input closed.");
+defined $ssh_user or die_tool("Input closed.");
 chomp $ssh_user;
 
 if ( !length $ssh_user ) {
@@ -252,12 +498,12 @@ if ( !length $ssh_user ) {
         $ssh_user = $default_user;
     }
     else {
-        error("Empty user. Aborting.");
+        die_tool("Empty user. Aborting.");
     }
 }
 
 if ( $ssh_user =~ /^\s+$/ ) {
-    error("Empty user. Aborting.");
+    die_tool("Empty user. Aborting.");
 }
 
 ######################
@@ -275,21 +521,7 @@ else {
 }
 
 $freq{$selected_key} = ( $freq{$selected_key} // 0 ) + 1;
-eval {
-    my ($dir) = $freq_file =~ m{^(.*)/[^/]+$};
-    make_path($dir) if defined $dir && length $dir;
-    if ( open my $ffh, '>', $freq_file ) {
-        for my $k ( sort keys %freq ) {
-            printf $ffh "%s %d\n", $k, $freq{$k};
-        }
-        close $ffh;
-    }
-    else {
-        logw("Could not write frequency file $freq_file: $!");
-    }
-};
-if ($@) {
-    logw("Could not persist frequency file: $@");
-}
+eval { write_freq_file( \%freq ); };
+if ($@) { logw("Could not persist frequency file: $@"); }
 
-exec @cmd or error("Failed to exec ssh: $!");
+exec @cmd or die_tool("Failed to exec ssh: $!");
