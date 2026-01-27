@@ -4,7 +4,11 @@
 #  - Exports SSH_ASKPASS/SSH_ASKPASS_REQUIRE for ksshaskpass GUI password prompts
 #  - Parses known_hosts and builds a de-duplicated list of hosts (and custom ports)
 #  - Shows an interactive numbered menu to choose a server
-#  - Prompts for the SSH username
+#  - Prompts for the SSH username (to use; default from SSH_MENU_USER or $USER)
+#  - Persists usage frequencies to a file for sorting frequently used hosts to the top
+#  - Supports custom aliases for known_hosts entries via a separate alias file
+#  - Supports managing known_hosts entries (deletion) via an interactive menu
+#  - Supports adding custom names (aliases) for known_hosts entries via an interactive menu
 #  - Executes ssh to the selected host (with -p if a custom port is present)
 #
 # See the LICENSE file at the top of the project tree for copyright
