@@ -59,117 +59,56 @@ SHELL_SCRIPTS = \
 PERL_SCRIPTS = \
 	perl/ssh-menu.pl
 
-.PHONY: install-debian install-openbsd install-secureblue install-shell install-shell-openbsd install-perl install-tests-format test help
+.PHONY: all clean install-debian install-openbsd install-secureblue install-shell install-shell-openbsd install-perl install-tests-format test help
+
+all: install-debian install-openbsd install-secureblue install-shell install-perl install-tests-format
+
+clean:
+	@echo "${INFO} Nothing to clean"
 
 install-debian:
 	@echo "${INFO} Installing Debian helpers"
 	@install -d ${BINDIR}
-	@for f in ${DEBIAN_SCRIPTS}; do \
-		base=$${f##*/}; name=$${base%.bash}; \
-		printf '%s Installing %s -> %s\n' "${INFO}" "$$f" "${BINDIR}/$$name"; \
-		install -m 0755 "$$f" "${BINDIR}/$$name"; \
-	done
+	@for f in ${DEBIAN_SCRIPTS}; do base=$${f##*/}; name=$${base%.bash}; printf '%s Installing %s -> %s\n' "${INFO}" "$$f" "${BINDIR}/$$name"; install -m 0755 "$$f" "${BINDIR}/$$name"; done
 	@echo "${INFO} Debian helpers installed"
 
 install-openbsd:
 	@echo "${INFO} Installing OpenBSD helpers"
 	@install -d ${BINDIR}
-	@for f in ${OPENBSD_SCRIPTS}; do \
-		base=$${f##*/}; name=$${base%.ksh}; \
-		printf '%s Installing %s -> %s\n' "${INFO}" "$$f" "${BINDIR}/$$name"; \
-		install -m 0755 "$$f" "${BINDIR}/$$name"; \
-	done
-	@wrapper="${BINDIR}/sudo-wrapper"; \
-	if [ -x "$$wrapper" ]; then \
-		ln -sf "$$wrapper" "${BINDIR}/sudo"; \
-		for link in sudo visudo sudoedit; do \
-			printf '%s Symlinking %s -> %s\n' "${INFO}" "${BINDIR}/$$link" "$$wrapper"; \
-			ln -sf "$$wrapper" "${BINDIR}/$$link"; \
-		done; \
-	fi
-	@printf '%s Installing openbsd/sysclean -> %s\n' "${INFO}" "${BINDIR}/sysclean"; \
-	rm -rf "${BINDIR}/sysclean"; \
-	cp -R openbsd/sysclean "${BINDIR}/sysclean"; \
-	chmod -R a+rX "${BINDIR}/sysclean"
-	@echo "${INFO} OpenBSD helpers installed"
+	@for f in ${OPENBSD_SCRIPTS}; do base=$${f##*/}; name=$${base%.ksh}; printf '%s Installing %s -> %s\n' "${INFO}" "$$f" "${BINDIR}/$$name"; install -m 0755 "$$f" "${BINDIR}/$$name"; done
+	@wrapper="${BINDIR}/sudo-wrapper"; if [ -x "$$wrapper" ]; then ln -sf "$$wrapper" "${BINDIR}/sudo"; for link in sudo visudo sudoedit; do printf '%s Symlinking %s -> %s\n' "${INFO}" "${BINDIR}/$$link" "$$wrapper"; ln -sf "$$wrapper" "${BINDIR}/$$link"; done; fi
+	@printf '%s Installing openbsd/sysclean -> %s\n' "${INFO}" "${BINDIR}/sysclean"; rm -rf "${BINDIR}/sysclean"; cp -R openbsd/sysclean "${BINDIR}/sysclean"; chmod -R a+rX "${BINDIR}/sysclean"; echo "${INFO} OpenBSD helpers installed"
 
 install-secureblue:
 	@echo "${INFO} Installing SecureBlue helpers"
 	@install -d ${BINDIR}
-	@for f in ${SECUREBLUE_SCRIPTS}; do \
-		base=$${f##*/}; name=$${base%.bash}; \
-		printf '%s Installing %s -> %s\n' "${INFO}" "$$f" "${BINDIR}/$$name"; \
-		install -m 0755 "$$f" "${BINDIR}/$$name"; \
-	done
-	@# Copy systemd unit templates for secureblue helpers alongside the installed scripts
-	@if [ -d secureblue/systemd ]; then \
-		printf '%s Installing %s -> %s\n' "${INFO}" "secureblue/systemd" "${BINDIR}/systemd"; \
-		rm -rf "${BINDIR}/systemd"; \
-		cp -R secureblue/systemd "${BINDIR}/systemd"; \
-		chmod -R a+rX "${BINDIR}/systemd"; \
-	fi
-	@wrapper="${BINDIR}/sudo-wrapper"; \
-	if [ -x "$$wrapper" ]; then \
-		ln -sf "$$wrapper" "${BINDIR}/sudo"; \
-		for link in sudo visudo sudoedit; do \
-			printf '%s Symlinking %s -> %s\n' "${INFO}" "${BINDIR}/$$link" "$$wrapper"; \
-			ln -sf "$$wrapper" "${BINDIR}/$$link"; \
-		done; \
-	fi
-	@echo "${INFO} SecureBlue helpers installed"
+	@for f in ${SECUREBLUE_SCRIPTS}; do base=$${f##*/}; name=$${base%.bash}; printf '%s Installing %s -> %s\n' "${INFO}" "$$f" "${BINDIR}/$$name"; install -m 0755 "$$f" "${BINDIR}/$$name"; done
+	@if [ -d secureblue/systemd ]; then printf '%s Installing %s -> %s\n' "${INFO}" "secureblue/systemd" "${BINDIR}/systemd"; rm -rf "${BINDIR}/systemd"; cp -R secureblue/systemd "${BINDIR}/systemd"; chmod -R a+rX "${BINDIR}/systemd"; fi
+	@wrapper="${BINDIR}/sudo-wrapper"; if [ -x "$$wrapper" ]; then ln -sf "$$wrapper" "${BINDIR}/sudo"; for link in sudo visudo sudoedit; do printf '%s Symlinking %s -> %s\n' "${INFO}" "${BINDIR}/$$link" "$$wrapper"; ln -sf "$$wrapper" "${BINDIR}/$$link"; done; fi; echo "${INFO} SecureBlue helpers installed"
 
 install-shell:
 	@echo "${INFO} Installing shell helpers"
-	@# Install global-vi-mode into /etc/profile.d
-	@printf '%s Installing %s -> %s\n' "${INFO}" "shell/global-vi-mode.sh" "/etc/profile.d/global-vi-mode.sh"
-	@install -d /etc/profile.d
-	@install -m 0644 shell/global-vi-mode.sh /etc/profile.d/global-vi-mode.sh
-	@echo "${INFO} Shell helpers installed"
+	@install -d /etc/profile.d && install -m 0644 shell/global-vi-mode.sh /etc/profile.d/global-vi-mode.sh && echo "${INFO} Shell helpers installed"
 
 # OpenBSD does not ship /etc/profile.d; provide guidance instead of editing /etc/profile automatically.
 install-shell-openbsd:
-	@echo "OpenBSD does not provide /etc/profile.d; to install global-vi-mode.sh do:" ; \
-	 echo "  install -d /etc/shinit.d" ; \
-	 echo "  install -m 0644 shell/global-vi-mode.sh /etc/shinit.d/global-vi-mode.sh" ; \
-	 echo "Then source it from /etc/shinit (and optionally /etc/profile) with:" ; \
-	 echo "  . /etc/shinit.d/global-vi-mode.sh"
+	@printf "OpenBSD does not provide /etc/profile.d; to install global-vi-mode.sh do:\n  install -d /etc/shinit.d\n  install -m 0644 shell/global-vi-mode.sh /etc/shinit.d/global-vi-mode.sh\nThen source it from /etc/shinit (and optionally /etc/profile) with:\n  . /etc/shinit.d/global-vi-mode.sh\n"
 
 install-perl:
 	@echo "${INFO} Installing perl helpers"
 	@install -d ${BINDIR}
-	@for f in ${PERL_SCRIPTS}; do \
-		base=$${f##*/}; name=$${base%.pl}; \
-		printf 'Installing %s -> %s\n' "$$f" "${BINDIR}/$$name"; \
-		install -m 0755 "$$f" "${BINDIR}/$$name"; \
-	done
+	@for f in ${PERL_SCRIPTS}; do base=$${f##*/}; name=$${base%.pl}; printf 'Installing %s -> %s\n' "$$f" "${BINDIR}/$$name"; install -m 0755 "$$f" "${BINDIR}/$$name"; done
 	@echo "${INFO} Perl helpers installed"
 
 install-tests-format:
 	@echo "${INFO} Installing Tests/Format scripts"
-	@for f in ${TESTS_FORMAT_SCRIPTS}; do \
-		base=$${f##*/}; name=$${base%.sh}; \
-		printf '%s Installing %s -> %s\n' "${INFO}" "$$f" "${BINDIR}/$$name"; \
-		install -m 0755 "$$f" "${BINDIR}/$$name"; \
-	done
+	@for f in ${TESTS_FORMAT_SCRIPTS}; do base=$${f##*/}; name=$${base%.sh}; printf '%s Installing %s -> %s\n' "${INFO}" "$$f" "${BINDIR}/$$name"; install -m 0755 "$$f" "${BINDIR}/$$name"; done
 	@echo "${INFO} Tests/Format helpers installed"
 
 test:
-	@echo "Running shell script validation..."
-	@/bin/bash tests-format/validate-shell.sh .
-	@echo "Running perl script validation..."
-	@/bin/bash tests-format/validate-perl.sh .
-	@echo "Running make validation..."
-	@/bin/bash tests-format/validate-make.sh .
+	@echo "Running shell script validation..." && /bin/bash tests-format/validate-shell.sh .
+	@echo "Running perl script validation..." && /bin/bash tests-format/validate-perl.sh .
+	@echo "Running make validation..." && /bin/bash tests-format/validate-make.sh .
+
 help:
-	@echo "Usage: make [target]"
-	@echo ""
-	@echo "Targets:"
-	@echo "  install-debian        Install Debian helper scripts into $(BINDIR)"
-	@echo "  install-openbsd       Install OpenBSD helper scripts into $(BINDIR)"
-	@echo "  install-secureblue    Install secureblue helper scripts into $(BINDIR)"
-	@echo "  install-shell         Install shell helpers (global-vi-mode)"
-	@echo "  install-shell-openbsd Guidance for installing shell helpers on OpenBSD"
-	@echo "  install-perl          Install perl helper scripts into $(BINDIR)"
-	@echo "  test                  Run script and make validation tests"
-	@echo "  install-tests-format  Install tests-format helper scripts into $(BINDIR)/tests-format"
-	@echo "  help                  Show this help"
+	@printf "Usage: make [target]\n\nTargets:\n  all                   Install all helper sets\n  install-debian        Install Debian helper scripts into ${BINDIR}\n  install-openbsd       Install OpenBSD helper scripts into ${BINDIR}\n  install-secureblue    Install secureblue helper scripts into ${BINDIR}\n  install-shell         Install shell helpers (global-vi-mode)\n  install-shell-openbsd Guidance for installing shell helpers on OpenBSD\n  install-perl          Install perl helper scripts into ${BINDIR}\n  install-tests-format  Install tests-format helper scripts into ${BINDIR}/tests-format\n  test                  Run script and make validation tests\n  clean                 No-op clean target\n  help                  Show this help\n"
