@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 set -eu
 
 # Save original stdout/stderr, create per-run log in TMPDIR and redirect
@@ -31,6 +31,11 @@ ROOT_DIR=${1:-}
 	exit 2
 }
 
+OS_NAME=$(uname -s 2>/dev/null || printf '%s' unknown)
+if [ "$OS_NAME" = "OpenBSD" ]; then
+	printf '%s\n' "[INFO] OpenBSD detected: install shfmt, shellcheck and bash (if needed)"
+fi
+
 TMPDIR_BASE="${TMPDIR:-/tmp}"
 TMP_FAILS="$TMPDIR_BASE/validate-shell-fails-$$.txt"
 trap 'rm -f "$TMP_FAILS"' EXIT
@@ -41,8 +46,9 @@ echo "[INFO] Formatting shell scripts with shfmt..."
 if command -v shfmt >/dev/null 2>&1; then
 	UNFMT_SH="$TMPDIR_BASE/unformatted-sh-$$.txt"
 
-	find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name '*.sh' -o -name '*.bash' -o -name '*.ksh' \) -print0 |
-		xargs -0 --no-run-if-empty shfmt -l 2>/dev/null >"$UNFMT_SH" || true
+	find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name '*.sh' -o -name '*.bash' -o -name '*.ksh' \) -exec sh -c '
+		shfmt -l "$@"
+	' sh {} + 2>/dev/null >"$UNFMT_SH" || true
 
 	if [ -s "$UNFMT_SH" ]; then
 		echo "[INFO] shfmt will format the following files:"
@@ -68,58 +74,61 @@ fi
 
 echo "[INFO] Running shell syntax checks..."
 
-find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f -name '*.sh' -print0 |
-	while IFS= read -r -d '' f; do
+find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f -name '*.sh' -exec sh -c '
+	for f do
 		if ! sh -n "$f" 2>/dev/null; then
-			echo "[ERROR] sh syntax error in: $f" 1>&2
+			printf "%s\n" "[ERROR] sh syntax error in: $f" 1>&2
 			printf "%s\n" "$f"
 		fi
-	done |
-	while IFS= read -r bad; do
+	done
+' sh {} + | while IFS= read -r bad; do
+	[ -n "$bad" ] && note_fail "$bad"
+done
+
+if command -v bash >/dev/null 2>&1; then
+	echo "[INFO] Running bash syntax checks..."
+	find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f -name '*.bash' -exec sh -c '
+		for f do
+			if ! bash -n "$f" 2>/dev/null; then
+				printf "%s\n" "[ERROR] bash syntax error in: $f" 1>&2
+				printf "%s\n" "$f"
+			fi
+		done
+	' sh {} + | while IFS= read -r bad; do
 		[ -n "$bad" ] && note_fail "$bad"
 	done
-
-echo "[INFO] Running bash syntax checks..."
-
-find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f -name '*.bash' -print0 |
-	while IFS= read -r -d '' f; do
-		if ! bash -n "$f" 2>/dev/null; then
-			echo "[ERROR] bash syntax error in: $f" 1>&2
-			printf "%s\n" "$f"
-		fi
-	done |
-	while IFS= read -r bad; do
-		[ -n "$bad" ] && note_fail "$bad"
-	done
+else
+	echo "[INFO] bash not found; skipping bash syntax checks"
+fi
 
 if command -v ksh >/dev/null 2>&1; then
 	echo "[INFO] Running ksh syntax checks..."
-	find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f -name '*.ksh' -print0 |
-		while IFS= read -r -d '' f; do
+	find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f -name '*.ksh' -exec sh -c '
+		for f do
 			if ! ksh -n "$f" 2>/dev/null; then
-				echo "[ERROR] ksh syntax error in: $f" 1>&2
+				printf "%s\n" "[ERROR] ksh syntax error in: $f" 1>&2
 				printf "%s\n" "$f"
 			fi
-		done |
-		while IFS= read -r bad; do
-			[ -n "$bad" ] && note_fail "$bad"
 		done
+	' sh {} + | while IFS= read -r bad; do
+		[ -n "$bad" ] && note_fail "$bad"
+	done
 else
 	echo "[INFO] ksh not found; skipping ksh syntax checks"
 fi
 
 if command -v shellcheck >/dev/null 2>&1; then
 	echo "[INFO] Running shellcheck..."
-	find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name '*.bash' -o -name '*.ksh' -o -name '*.sh' \) -print0 |
-		while IFS= read -r -d '' f; do
+	find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name '*.bash' -o -name '*.ksh' -o -name '*.sh' \) -exec sh -c '
+		for f do
 			if ! shellcheck -x "$f"; then
-				echo "[ERROR] shellcheck found issues in: $f" 1>&2
+				printf "%s\n" "[ERROR] shellcheck found issues in: $f" 1>&2
 				printf "%s\n" "$f"
 			fi
-		done |
-		while IFS= read -r bad; do
-			[ -n "$bad" ] && note_fail "$bad"
 		done
+	' sh {} + | while IFS= read -r bad; do
+		[ -n "$bad" ] && note_fail "$bad"
+	done
 else
 	echo "[INFO] shellcheck not installed; skipping shellcheck"
 fi
