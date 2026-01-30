@@ -31,6 +31,11 @@ ROOT_DIR=${1:-}
 	exit 2
 }
 
+OS_NAME=$(uname -s 2>/dev/null || printf '%s' unknown)
+if [ "$OS_NAME" = "OpenBSD" ]; then
+	printf '%s\n' "[INFO] OpenBSD detected: mandoc is in base"
+fi
+
 TMPDIR_BASE="${TMPDIR:-/tmp}"
 TMP_FAILS="$TMPDIR_BASE/validate-manpages-fails-$$.txt"
 trap 'rm -f "$TMP_FAILS"' EXIT

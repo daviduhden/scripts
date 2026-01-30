@@ -1,0 +1,11 @@
+clang-format = clang-tools-extra
+tidy = tidy
+perltidy = perltidy
+shfmt = shfmt
+shellcheck = shellcheck
+bmake = make
+checkmake = not ported
+mbake = not ported
+
+perltidy: 20260109 -> upstream: 20260109.01
+shfmt: 3.6.0 -> upstream: 3.12.0

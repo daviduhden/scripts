@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 set -eu
 
 # Save original stdout/stderr, create per-run log in TMPDIR and redirect
@@ -29,6 +29,11 @@ ROOT_DIR=${1:-}
 	exit 2
 }
 
+OS_NAME=$(uname -s 2>/dev/null || printf '%s' unknown)
+if [ "$OS_NAME" = "OpenBSD" ]; then
+	printf '%s\n' "[INFO] OpenBSD detected: install perltidy"
+fi
+
 TMPDIR_BASE="${TMPDIR:-/tmp}"
 TMP_FAILS="$TMPDIR_BASE/validate-perl-fails-$$.txt"
 trap 'rm -f "$TMP_FAILS"' EXIT
@@ -40,12 +45,13 @@ if command -v perltidy >/dev/null 2>&1; then
 	UNFMT="$TMPDIR_BASE/unformatted-perl-$$.txt"
 
 	# Detect files that would change formatting
-	find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name '*.pl' -o -name '*.pm' -o -name '*.t' -o -name '*.psgi' \) -print0 |
-		while IFS= read -r -d '' f; do
+	find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name '*.pl' -o -name '*.pm' -o -name '*.t' -o -name '*.psgi' \) -exec sh -c '
+		for f do
 			if ! perltidy -ast -se -o /dev/null "$f" >/dev/null 2>&1; then
-				echo "$f"
+				printf "%s\n" "$f"
 			fi
-		done >"$UNFMT" || true
+		done
+	' sh {} + >"$UNFMT" || true
 
 	if [ -s "$UNFMT" ]; then
 		echo "[INFO] perltidy will format the following files:"
@@ -71,24 +77,24 @@ else
 fi
 
 echo "[INFO] Running Perl syntax checks..."
-find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name '*.pl' -o -name '*.pm' -o -name '*.t' -o -name '*.psgi' \) -print0 |
-	while IFS= read -r -d '' f; do
-		# Allow failed perl -c without exiting the script
+find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name '*.pl' -o -name '*.pm' -o -name '*.t' -o -name '*.psgi' \) -exec sh -c '
+	for f do
 		set +e
 		perlc_out=$(perl -c "$f" 2>&1)
 		perlc_rc=$?
 		set -e
-
 		if [ "${perlc_rc:-0}" -ne 0 ]; then
-			if printf '%s' "$perlc_out" | grep -qi "Can't locate"; then
-				echo "[WARN] Skipping syntax check for $f due to missing modules" 1>&2
-				continue
+			if printf "%s" "$perlc_out" | grep -qi "Can.t locate"; then
+				printf "%s\n" "[WARN] Skipping syntax check for $f due to missing modules" 1>&2
 			else
-				echo "[ERROR] Perl syntax error in: $f" 1>&2
-				note_fail "$f"
+				printf "%s\n" "[ERROR] Perl syntax error in: $f" 1>&2
+				printf "%s\n" "$f"
 			fi
 		fi
 	done
+' sh {} + | while IFS= read -r bad; do
+	[ -n "$bad" ] && note_fail "$bad"
+done
 
 issues=0
 if [ -f "$TMP_FAILS" ]; then

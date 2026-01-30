@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 set -eu
 
 # Save original stdout/stderr, create per-run log in TMPDIR and redirect
@@ -29,6 +29,13 @@ ROOT_DIR=${1:-}
 	exit 2
 }
 
+OS_NAME=$(uname -s 2>/dev/null || printf '%s' unknown)
+IS_OPENBSD=0
+if [ "$OS_NAME" = "OpenBSD" ]; then
+	IS_OPENBSD=1
+	printf '%s\n' "[INFO] OpenBSD detected: checkmake and mbake are not ported"
+fi
+
 TMPDIR_BASE="${TMPDIR:-/tmp}"
 TMP_FAILS="$TMPDIR_BASE/validate-make-fails-$$.txt"
 trap 'rm -f "$TMP_FAILS"' EXIT
@@ -36,15 +43,18 @@ trap 'rm -f "$TMP_FAILS"' EXIT
 note_fail() { printf '%s\n' "$1" >>"$TMP_FAILS"; }
 
 echo "[INFO] Formatting Makefiles with mbake..."
-if command -v mbake >/dev/null 2>&1; then
+if [ "$IS_OPENBSD" -eq 1 ]; then
+	echo "[INFO] OpenBSD: skipping mbake"
+elif command -v mbake >/dev/null 2>&1; then
 	UNFMT="$TMPDIR_BASE/unformatted-make-$$.txt"
 
-	find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name 'Makefile' -o -name 'makefile' -o -name 'GNUmakefile' -o -name '*.mk' \) -print0 |
-		while IFS= read -r -d '' f; do
+	find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name 'Makefile' -o -name 'makefile' -o -name 'GNUmakefile' -o -name '*.mk' \) -exec sh -c '
+		for f do
 			if ! mbake format --check "$f" >/dev/null 2>&1; then
-				echo "$f"
+				printf "%s\n" "$f"
 			fi
-		done >"$UNFMT" || true
+		done
+	' sh {} + >"$UNFMT" || true
 
 	if [ -s "$UNFMT" ]; then
 		echo "[INFO] mbake will format the following files:"
@@ -68,30 +78,43 @@ else
 	echo "[INFO] mbake not installed; skipping Makefile formatting"
 fi
 
-if command -v checkmake >/dev/null 2>&1; then
+if [ "$IS_OPENBSD" -eq 1 ]; then
+	echo "[INFO] OpenBSD: skipping checkmake"
+elif command -v checkmake >/dev/null 2>&1; then
 	echo "[INFO] Running checkmake (Makefile linter)..."
-	find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name 'Makefile' -o -name 'makefile' -o -name 'GNUmakefile' -o -name '*.mk' \) -print0 |
-		while IFS= read -r -d '' f; do
+	find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name 'Makefile' -o -name 'makefile' -o -name 'GNUmakefile' -o -name '*.mk' \) -exec sh -c '
+		for f do
 			if ! checkmake "$f" >/dev/null 2>&1; then
-				echo "[WARN] checkmake found issues in: $f" 1>&2
+				printf "%s\n" "[WARN] checkmake found issues in: $f" 1>&2
 			fi
-		done || true
+		done
+	' sh {} + || true
 else
 	echo "[INFO] checkmake not installed; skipping Makefile lint"
 fi
 
-# Run bmake dry-run to ensure BSD make compatibility
-if command -v bmake >/dev/null 2>&1; then
-	echo "[INFO] Running bmake -n -f (bsdmake dry-run)..."
-	find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name 'Makefile' -o -name 'makefile' -o -name 'GNUmakefile' -o -name '*.mk' \) -print0 |
-		while IFS= read -r -d '' f; do
-			if ! bmake -n -f "$f" >/dev/null 2>&1; then
-				echo "[WARN] bmake -n -f failed on: $f" 1>&2
-				note_fail "$f"
+# Run bmake/make dry-run to ensure BSD make compatibility
+MAKE_CMD="bmake"
+if [ "$IS_OPENBSD" -eq 1 ] && ! command -v bmake >/dev/null 2>&1 && command -v make >/dev/null 2>&1; then
+	MAKE_CMD="make"
+fi
+
+if command -v "$MAKE_CMD" >/dev/null 2>&1; then
+	echo "[INFO] Running $MAKE_CMD -n -f (bsdmake dry-run)..."
+	find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name 'Makefile' -o -name 'makefile' -o -name 'GNUmakefile' -o -name '*.mk' \) -exec sh -c '
+		cmd="$1"
+		shift
+		for f do
+			if ! "$cmd" -n -f "$f" >/dev/null 2>&1; then
+				printf "%s\n" "[WARN] $cmd -n -f failed on: $f" 1>&2
+				printf "%s\n" "$f"
 			fi
-		done || true
+		done
+	' sh "$MAKE_CMD" {} + | while IFS= read -r bad; do
+		[ -n "$bad" ] && note_fail "$bad"
+	done || true
 else
-	echo "[INFO] bmake not installed; skipping bmake dry-run"
+	echo "[INFO] bmake/make not installed; skipping dry-run"
 fi
 
 issues=0

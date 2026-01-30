@@ -31,12 +31,17 @@ ROOT_DIR=${1:-}
 	exit 2
 }
 
-TMPDIR_BASE="${TMPDIR:-/tmp}"
-TMP_FAILS="$TMPDIR_BASE/validate-clang-format-fails-$$.txt"
-trap 'rm -f "$TMP_FAILS"' EXIT
+OS_NAME=$(uname -s 2>/dev/null || printf '%s' unknown)
+if [ "$OS_NAME" = "OpenBSD" ]; then
+	printf '%s\n' "[INFO] OpenBSD detected: install clang-tools-extra"
+fi
 
 if ! command -v clang-format >/dev/null 2>&1; then
-	printf '%s\n' "[ERROR] clang-format not found in PATH" >&2
+	if [ "$OS_NAME" = "OpenBSD" ]; then
+		printf '%s\n' "[ERROR] clang-format not found; install clang-tools-extra" >&2
+	else
+		printf '%s\n' "[ERROR] clang-format not found in PATH" >&2
+	fi
 	exit 1
 fi
 
