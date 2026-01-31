@@ -29,9 +29,6 @@ make install-openbsd
 # SecureBlue
 make install-secureblue
 
-# Shell helpers (install to /etc/profile.d)
-make install-shell
-
 # Perl
 make install-perl
 
