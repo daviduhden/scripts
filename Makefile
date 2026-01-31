@@ -53,15 +53,12 @@ TESTS_FORMAT_SCRIPTS = \
 	tests-format/validate-perl.sh \
 	tests-format/validate-shell.sh
 
-SHELL_SCRIPTS = \
-	shell/global-vi-mode.sh
-
 PERL_SCRIPTS = \
 	perl/ssh-menu.pl
 
-.PHONY: all clean install-debian install-openbsd install-secureblue install-shell install-shell-openbsd install-perl install-tests-format test help
+.PHONY: all clean install-debian install-openbsd install-secureblue install-perl install-tests-format test help
 
-all: install-debian install-openbsd install-secureblue install-shell install-perl install-tests-format
+all: install-debian install-openbsd install-secureblue install-perl install-tests-format
 
 clean:
 	@echo "${INFO} Nothing to clean"
@@ -85,14 +82,6 @@ install-secureblue:
 	@for f in ${SECUREBLUE_SCRIPTS}; do base=$${f##*/}; name=$${base%.bash}; printf '%s Installing %s -> %s\n' "${INFO}" "$$f" "${BINDIR}/$$name"; install -m 0755 "$$f" "${BINDIR}/$$name"; done
 	@if [ -d secureblue/systemd ]; then printf '%s Installing %s -> %s\n' "${INFO}" "secureblue/systemd" "${BINDIR}/systemd"; rm -rf "${BINDIR}/systemd"; cp -R secureblue/systemd "${BINDIR}/systemd"; chmod -R a+rX "${BINDIR}/systemd"; fi
 	@wrapper="${BINDIR}/sudo-wrapper"; if [ -x "$$wrapper" ]; then ln -sf "$$wrapper" "${BINDIR}/sudo"; for link in sudo visudo sudoedit; do printf '%s Symlinking %s -> %s\n' "${INFO}" "${BINDIR}/$$link" "$$wrapper"; ln -sf "$$wrapper" "${BINDIR}/$$link"; done; fi; echo "${INFO} SecureBlue helpers installed"
-
-install-shell:
-	@echo "${INFO} Installing shell helpers"
-	@install -d /etc/profile.d && install -m 0644 shell/global-vi-mode.sh /etc/profile.d/global-vi-mode.sh && echo "${INFO} Shell helpers installed"
-
-# OpenBSD does not ship /etc/profile.d; provide guidance instead of editing /etc/profile automatically.
-install-shell-openbsd:
-	@printf "OpenBSD does not provide /etc/profile.d; to install global-vi-mode.sh do:\n  install -d /etc/shinit.d\n  install -m 0644 shell/global-vi-mode.sh /etc/shinit.d/global-vi-mode.sh\nThen source it from /etc/shinit (and optionally /etc/profile) with:\n  . /etc/shinit.d/global-vi-mode.sh\n"
 
 install-perl:
 	@echo "${INFO} Installing perl helpers"
