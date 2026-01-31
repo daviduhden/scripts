@@ -48,13 +48,13 @@ if [ "$IS_OPENBSD" -eq 1 ]; then
 elif command -v mbake >/dev/null 2>&1; then
 	UNFMT="$TMPDIR_BASE/unformatted-make-$$.txt"
 
-	find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name 'Makefile' -o -name 'makefile' -o -name 'GNUmakefile' -o -name '*.mk' \) -exec sh -c '
-		for f do
+	find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name 'Makefile' -o -name 'makefile' -o -name 'GNUmakefile' -o -name '*.mk' \) -print |
+		while IFS= read -r f; do
+			[ -n "$f" ] || continue
 			if ! mbake format --check "$f" >/dev/null 2>&1; then
 				printf "%s\n" "$f"
 			fi
-		done
-	' sh {} + >"$UNFMT" || true
+		done >"$UNFMT" || true
 
 	if [ -s "$UNFMT" ]; then
 		echo "[INFO] mbake will format the following files:"
@@ -82,13 +82,13 @@ if [ "$IS_OPENBSD" -eq 1 ]; then
 	echo "[INFO] OpenBSD: skipping checkmake"
 elif command -v checkmake >/dev/null 2>&1; then
 	echo "[INFO] Running checkmake (Makefile linter)..."
-	find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name 'Makefile' -o -name 'makefile' -o -name 'GNUmakefile' -o -name '*.mk' \) -exec sh -c '
-		for f do
+	find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name 'Makefile' -o -name 'makefile' -o -name 'GNUmakefile' -o -name '*.mk' \) -print |
+		while IFS= read -r f; do
+			[ -n "$f" ] || continue
 			if ! checkmake "$f" >/dev/null 2>&1; then
 				printf "%s\n" "[WARN] checkmake found issues in: $f" 1>&2
 			fi
-		done
-	' sh {} + || true
+		done || true
 else
 	echo "[INFO] checkmake not installed; skipping Makefile lint"
 fi
@@ -101,16 +101,14 @@ fi
 
 if command -v "$MAKE_CMD" >/dev/null 2>&1; then
 	echo "[INFO] Running $MAKE_CMD -n -f (bsdmake dry-run)..."
-	find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name 'Makefile' -o -name 'makefile' -o -name 'GNUmakefile' -o -name '*.mk' \) -exec sh -c '
-		cmd="$1"
-		shift
-		for f do
-			if ! "$cmd" -n -f "$f" >/dev/null 2>&1; then
-				printf "%s\n" "[WARN] $cmd -n -f failed on: $f" 1>&2
+	find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name 'Makefile' -o -name 'makefile' -o -name 'GNUmakefile' -o -name '*.mk' \) -print |
+		while IFS= read -r f; do
+			[ -n "$f" ] || continue
+			if ! "$MAKE_CMD" -n -f "$f" >/dev/null 2>&1; then
+				printf "%s\n" "[WARN] $MAKE_CMD -n -f failed on: $f" 1>&2
 				printf "%s\n" "$f"
 			fi
-		done
-	' sh "$MAKE_CMD" {} + | while IFS= read -r bad; do
+		done | while IFS= read -r bad; do
 		[ -n "$bad" ] && note_fail "$bad"
 	done || true
 else

@@ -67,7 +67,10 @@ find "$ROOT_DIR" \
 	-name '*.[1-9]' \
 	-o -name '*.[1-9][A-Za-z]' \
 	-o -name '*.[1-9][A-Za-z][A-Za-z]' \
-	\) -exec mandoc -Tlint -Werror {} +
+	\) -print | while IFS= read -r f; do
+	[ -n "$f" ] || continue
+	mandoc -Tlint -Werror "$f"
+done
 
 printf '%s\n' "[INFO] mandoc lint passed"
 exit 0
