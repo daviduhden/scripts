@@ -39,4 +39,4 @@ make install-perl
 make install-tests-format
 ```
 
-Recipes use `install(1)` and strip `.pl`/`.bash`/`.zsh`/`.ksh`/`.sh` when placing shell scripts in `${BINDIR}`.
+Recipes use `install(1)` and strip `.pl`/`.bash`/`.ksh`/`.sh` when placing shell scripts in `${BINDIR}`.
