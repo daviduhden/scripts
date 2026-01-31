@@ -45,13 +45,13 @@ if command -v perltidy >/dev/null 2>&1; then
 	UNFMT="$TMPDIR_BASE/unformatted-perl-$$.txt"
 
 	# Detect files that would change formatting
-	find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name '*.pl' -o -name '*.pm' -o -name '*.t' -o -name '*.psgi' \) -exec sh -c '
-		for f do
+	find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name '*.pl' -o -name '*.pm' -o -name '*.t' -o -name '*.psgi' \) -print |
+		while IFS= read -r f; do
+			[ -n "$f" ] || continue
 			if ! perltidy -ast -se -o /dev/null "$f" >/dev/null 2>&1; then
 				printf "%s\n" "$f"
 			fi
-		done
-	' sh {} + >"$UNFMT" || true
+		done >"$UNFMT" || true
 
 	if [ -s "$UNFMT" ]; then
 		echo "[INFO] perltidy will format the following files:"
@@ -77,8 +77,9 @@ else
 fi
 
 echo "[INFO] Running Perl syntax checks..."
-find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name '*.pl' -o -name '*.pm' -o -name '*.t' -o -name '*.psgi' \) -exec sh -c '
-	for f do
+find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name '*.pl' -o -name '*.pm' -o -name '*.t' -o -name '*.psgi' \) -print |
+	while IFS= read -r f; do
+		[ -n "$f" ] || continue
 		set +e
 		perlc_out=$(perl -c "$f" 2>&1)
 		perlc_rc=$?
@@ -91,8 +92,7 @@ find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune
 				printf "%s\n" "$f"
 			fi
 		fi
-	done
-' sh {} + | while IFS= read -r bad; do
+	done | while IFS= read -r bad; do
 	[ -n "$bad" ] && note_fail "$bad"
 done
 

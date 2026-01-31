@@ -57,6 +57,10 @@ fi
 
 printf '%s\n' "[INFO] Applying clang-format in place..."
 # Batch formatting (fast)
-find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name "*.[ch]" -o -name "*.cc" -o -name "*.cpp" -o -name "*.cxx" -o -name "*.hh" -o -name "*.hpp" -o -name "*.hxx" \) -exec clang-format -i -style=file -fallback-style=none {} +
+find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name "*.[ch]" -o -name "*.cc" -o -name "*.cpp" -o -name "*.cxx" -o -name "*.hh" -o -name "*.hpp" -o -name "*.hxx" \) -print |
+	while IFS= read -r f; do
+		[ -n "$f" ] || continue
+		clang-format -i -style=file -fallback-style=none "$f"
+	done
 printf '%s\n' "[INFO] clang-format applied"
 exit 0
