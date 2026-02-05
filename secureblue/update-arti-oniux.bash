@@ -98,7 +98,7 @@ ensure_rust() {
 
 ensure_git() {
 	if ! command -v git >/dev/null 2>&1; then
-		error "git is required but not installed. Please install git (e.g. 'apt install git', 'dnf install git', etc.) and rerun."
+		error "git is required but not installed. Please install git and rerun."
 		exit 1
 	fi
 }
