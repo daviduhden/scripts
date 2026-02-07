@@ -4,7 +4,7 @@ set -eu
 # Save original stdout/stderr, create per-run log in TMPDIR and redirect
 exec 3>&1 4>&2
 TMPLOG="${TMPDIR:-/tmp}/clang-format-all-$$.log"
-printf '[INFO] Logging to: %s\n' "$TMPLOG" >&3
+printf '%s\n' "[INFO] Logging to: $TMPLOG" >&3
 exec >"$TMPLOG" 2>&1
 
 # clang-format-all.sh
@@ -50,7 +50,7 @@ fi
 
 # Prune .git and run clang-format safely via find -exec ... {} +
 # Note: -style=file with -fallback-style=none keeps your existing behavior.
-if ! find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name "*.[ch]" -o -name "*.cc" -o -name "*.cpp" -o -name "*.cxx" -o -name "*.hh" -o -name "*.hpp" -o -name "*.hxx" \) -print -quit | grep -q .; then
+if ! find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name "*.[ch]" -o -name "*.cc" -o -name "*.cpp" -o -name "*.cxx" -o -name "*.hh" -o -name "*.hpp" -o -name "*.hxx" \) -print | sed -n '1p' | grep -q .; then
 	printf '%s\n' "[INFO] No C/C++ source files found under: $ROOT_DIR"
 	exit 0
 fi

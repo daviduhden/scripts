@@ -4,7 +4,7 @@ set -eu
 # Save original stdout/stderr, create per-run log in TMPDIR and redirect
 exec 3>&1 4>&2
 TMPLOG="${TMPDIR:-/tmp}/validate-manpages-$$.log"
-printf '[INFO] Logging to: %s\n' "$TMPLOG" >&3
+printf '%s\n' "[INFO] Logging to: $TMPLOG" >&3
 exec >"$TMPLOG" 2>&1
 
 # validate-manpages.sh
@@ -55,7 +55,7 @@ if ! find "$ROOT_DIR" \
 	-name '*.[1-9]' \
 	-o -name '*.[1-9][A-Za-z]' \
 	-o -name '*.[1-9][A-Za-z][A-Za-z]' \
-	\) -print -quit | grep -q .; then
+	\) -print | sed -n '1p' | grep -q .; then
 	printf '%s\n' "[INFO] No man pages found under: $ROOT_DIR"
 	exit 0
 fi
