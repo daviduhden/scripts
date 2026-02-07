@@ -4,7 +4,7 @@ set -eu
 # Save original stdout/stderr, create per-run log in TMPDIR and redirect
 exec 3>&1 4>&2
 TMPLOG="${TMPDIR:-/tmp}/validate-perl-$$.log"
-printf '[INFO] Logging to: %s\n' "$TMPLOG" >&3
+printf '%s\n' "[INFO] Logging to: $TMPLOG" >&3
 exec >"$TMPLOG" 2>&1
 
 # validate-perl.sh
@@ -40,7 +40,7 @@ trap 'rm -f "$TMP_FAILS"' EXIT
 
 note_fail() { printf '%s\n' "$1" >>"$TMP_FAILS"; }
 
-echo "[INFO] Formatting Perl files with perltidy..."
+printf '%s\n' "[INFO] Formatting Perl files with perltidy..."
 if command -v perltidy >/dev/null 2>&1; then
 	UNFMT="$TMPDIR_BASE/unformatted-perl-$$.txt"
 
@@ -54,7 +54,7 @@ if command -v perltidy >/dev/null 2>&1; then
 		done >"$UNFMT" || true
 
 	if [ -s "$UNFMT" ]; then
-		echo "[INFO] perltidy will format the following files:"
+		printf '%s\n' "[INFO] perltidy will format the following files:"
 		sed -n '1,200p' "$UNFMT" | sed 's/^/  - /'
 
 		while IFS= read -r file; do
@@ -63,20 +63,20 @@ if command -v perltidy >/dev/null 2>&1; then
 			if perltidy --backup-and-modify-in-place --backup-file-extension=/ -se "$file" >/dev/null 2>&1; then
 				note_fail "$file"
 			else
-				echo "[WARN] perltidy failed for: $file" 1>&2
+				printf '%s\n' "[WARN] perltidy failed for: $file" 1>&2
 				note_fail "$file"
 			fi
 		done <"$UNFMT"
 	else
-		echo "[INFO] All Perl files already formatted"
+		printf '%s\n' "[INFO] All Perl files already formatted"
 	fi
 
 	rm -f "$UNFMT"
 else
-	echo "[INFO] perltidy not installed; skipping Perl formatting"
+	printf '%s\n' "[INFO] perltidy not installed; skipping Perl formatting"
 fi
 
-echo "[INFO] Running Perl syntax checks..."
+printf '%s\n' "[INFO] Running Perl syntax checks..."
 find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name '*.pl' -o -name '*.pm' -o -name '*.t' -o -name '*.psgi' \) -print |
 	while IFS= read -r f; do
 		[ -n "$f" ] || continue
@@ -86,9 +86,9 @@ find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune
 		set -e
 		if [ "${perlc_rc:-0}" -ne 0 ]; then
 			if printf "%s" "$perlc_out" | grep -qi "Can.t locate"; then
-				printf "%s\n" "[WARN] Skipping syntax check for $f due to missing modules" 1>&2
+				printf '%s\n' "[WARN] Skipping syntax check for $f due to missing modules" 1>&2
 			else
-				printf "%s\n" "[ERROR] Perl syntax error in: $f" 1>&2
+				printf '%s\n' "[ERROR] Perl syntax error in: $f" 1>&2
 				printf "%s\n" "$f"
 			fi
 		fi
@@ -102,11 +102,11 @@ if [ -f "$TMP_FAILS" ]; then
 fi
 
 if [ "${issues:-0}" -ne 0 ]; then
-	echo "[INFO] Completed with $issues issue(s) (format changes and/or errors)"
-	echo "[INFO] Affected files (unique, first 200):"
+	printf '%s\n' "[INFO] Completed with $issues issue(s) (format changes and/or errors)"
+	printf '%s\n' "[INFO] Affected files (unique, first 200):"
 	sort -u "$TMP_FAILS" | sed -n '1,200p' | sed 's/^/  - /'
 	exit 2
 fi
 
-echo "[INFO] Perl checks passed"
+printf '%s\n' "[INFO] Perl checks passed"
 exit 0
