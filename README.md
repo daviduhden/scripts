@@ -7,7 +7,6 @@ Shell and Perl utilities for system administration and maintenance across multip
 ```
 .
 ├── debian/        # Scripts for Debian-based distributions
-├── lib/           # Shared libraries for scripts
 ├── openbsd/       # Scripts for OpenBSD systems
 ├── perl/          # Perl scripts (portable)
 ├── secureblue/    # Scripts for SecureBlue (Fedora Atomic/rpm-ostree)
