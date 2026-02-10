@@ -3,6 +3,8 @@
 # Custom aliases & functions
 # Loaded from ~/.bashrc.d
 # ==================================================
+# See the LICENSE file at the top of the project tree for copyright
+# and license details.
 
 # --------------------------------------------------
 # LS and navigation
@@ -59,6 +61,7 @@ sysupgrade-all() {
 		update-arti-oniux &&
 		update-lyrebird &&
 		update-xd-torrent &&
+		pipx upgrade-all &&
 		echo "✅ System upgrade completed successfully."
 }
 
