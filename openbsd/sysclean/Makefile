@@ -8,7 +8,7 @@ BINDIR ?= /usr/local/sbin
 MANDIR ?= /usr/local/man/man
 INSTALL ?= /usr/bin/install
 BINOWN ?= root
-BINGRP ?= root
+BINGRP ?= wheel
 BINMODE ?= 0755
 
 .PHONY: all clean test realinstall regress release
