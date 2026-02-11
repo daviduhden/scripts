@@ -52,6 +52,57 @@ if ( !-f $known_hosts ) {
     die_tool("$known_hosts not found.");
 }
 
+############################
+# 0. OpenBSD pledge/unveil #
+############################
+
+sub parent_dir {
+    my ($path) = @_;
+    return unless defined $path && length $path;
+    my ($dir) = $path =~ m{^(.*)/[^/]+$};
+    return $dir;
+}
+
+sub setup_openbsd_sandbox {
+    return unless $^O eq 'openbsd';
+
+    my @path_dirs = grep { defined $_ && length $_ }
+      split /:/, ( $ENV{PATH} || '' );
+    my @rw_dirs;
+    my $known_hosts_dir = parent_dir($known_hosts);
+    my $freq_dir        = parent_dir($freq_file);
+    my $alias_dir       = parent_dir($alias_file);
+
+    push @rw_dirs, $known_hosts_dir if defined $known_hosts_dir;
+    push @rw_dirs, $freq_dir        if defined $freq_dir;
+    push @rw_dirs, $alias_dir       if defined $alias_dir;
+
+    my %uniq;
+    @rw_dirs = grep { defined $_ && length $_ && !$uniq{$_}++ } @rw_dirs;
+
+    eval {
+        require OpenBSD::Pledge;
+        require OpenBSD::Unveil;
+
+        for my $dir (@path_dirs) {
+            OpenBSD::Unveil::unveil( $dir, 'rx' );
+        }
+        for my $dir (@rw_dirs) {
+            OpenBSD::Unveil::unveil( $dir, 'rwc' );
+        }
+
+        OpenBSD::Unveil::unveil();
+        OpenBSD::Pledge::pledge(
+            'stdio rpath wpath cpath fattr exec proc inet dns unix')
+          or die "pledge failed";
+        1;
+    } or do {
+        logw("OpenBSD pledge/unveil setup failed: $@");
+    };
+}
+
+setup_openbsd_sandbox();
+
 #######################################
 # 1. Export environment variables     #
 #######################################

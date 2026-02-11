@@ -20,8 +20,8 @@ DEBIAN_SCRIPTS = \
 	debian/update-argon-one-v3.bash \
 	debian/update-btop.bash \
 	debian/update-fastfetch.bash \
-	debian/update-lyrebird.bash \
 	debian/update-golang.bash \
+	debian/update-lyrebird.bash \
 	debian/update-monero.bash \
 	debian/update-msedit.bash \
 	debian/update-xd-torrent.bash
@@ -48,8 +48,9 @@ SECUREBLUE_SCRIPTS = \
 
 TESTS_FORMAT_SCRIPTS = \
 	tests-format/clang-format-all.sh \
-	tests-format/validate-manpages.sh \
+	tests-format/clang-tidy-all.sh \
 	tests-format/validate-make.sh \
+	tests-format/validate-manpages.sh \
 	tests-format/validate-perl.sh \
 	tests-format/validate-shell.sh
 
