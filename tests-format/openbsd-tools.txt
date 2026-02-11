@@ -1,4 +1,5 @@
 clang-format = clang-tools-extra
+clang-tidy = clang-tools-extra
 tidy = tidy
 perltidy = perltidy
 shfmt = shfmt
