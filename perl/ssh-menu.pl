@@ -1,15 +1,14 @@
 #!/usr/bin/env perl
 
 # Interactive SSH launcher using entries from ~/.ssh/known_hosts:
-#  - Exports SSH_ASKPASS/SSH_ASKPASS_REQUIRE for ksshaskpass GUI password prompts
-#  - Parses known_hosts and builds a de-duplicated list of hosts (and custom ports)
-#  - Shows an interactive numbered menu to choose a server
-#  - Prompts for the SSH username (to use; default from SSH_MENU_USER or $USER)
-#  - Persists usage frequencies to a file for sorting frequently used hosts to the top
-#  - Supports custom aliases for known_hosts entries via a separate alias file
-#  - Supports managing known_hosts entries (deletion) via an interactive menu
-#  - Supports adding custom names (aliases) for known_hosts entries via an interactive menu
-#  - Executes ssh to the selected host (with -p if a custom port is present)
+#  - Exports SSH_ASKPASS/SSH_ASKPASS_REQUIRE for ksshaskpass GUI prompts
+#  - Parses known_hosts and de-duplicates hosts (including custom ports)
+#  - Presents a numbered menu to choose a server
+#  - Prompts for the SSH username (default from SSH_MENU_USER or $USER)
+#  - Persists usage frequencies to sort frequently used hosts to the top
+#  - Supports custom aliases via a separate alias file
+#  - Supports known_hosts entry deletion and alias management via menus
+#  - Executes ssh to the selected host (with -p when a custom port exists)
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
@@ -56,9 +55,9 @@ my $freq_file_exists;
 my %alias;
 my $alias_file_exists;
 
-############################
-# 0. OpenBSD pledge/unveil #
-############################
+########################
+# 0. Small helper bits #
+########################
 
 sub parent_dir {
     my ($path) = @_;
@@ -67,9 +66,48 @@ sub parent_dir {
     return $dir;
 }
 
+sub entry_key {
+    my ( $host, $port ) = @_;
+    return join ':', $host, ( $port || 'default' );
+}
+
+# Small PATH search for ksshaskpass (no extra modules needed)
+sub find_in_path {
+    my ($prog) = @_;
+    for my $dir ( split /:/, $ENV{PATH} || '' ) {
+        next unless length $dir;
+        my $full = "$dir/$prog";
+        return $full if -x $full;
+    }
+    return;
+}
+
+##########################
+# 1. Setup and validation #
+##########################
+
+sub ensure_known_hosts_exists {
+    if ( !-f $known_hosts ) {
+        die_tool("$known_hosts not found.");
+    }
+}
+
+sub setup_ssh_askpass {
+    my $ksshaskpass = find_in_path('ksshaskpass');
+
+    if ($ksshaskpass) {
+        $ENV{SSH_ASKPASS}         = $ksshaskpass;
+        $ENV{SSH_ASKPASS_REQUIRE} = 'prefer';
+    }
+    else {
+        logw('ksshaskpass not found in PATH; continuing without SSH_ASKPASS');
+    }
+}
+
 sub setup_openbsd_sandbox {
     return unless $^O eq 'openbsd';
 
+    # Unveil PATH for exec, and state/cache dirs for read/write.
     my @path_dirs = grep { defined $_ && length $_ }
       split /:/, ( $ENV{PATH} || '' );
     my @rw_dirs;
@@ -105,20 +143,9 @@ sub setup_openbsd_sandbox {
     };
 }
 
-###################################
-# 1. Export environment variables #
-###################################
-
-# Simple PATH search for ksshaskpass (no extra modules needed)
-sub find_in_path {
-    my ($prog) = @_;
-    for my $dir ( split /:/, $ENV{PATH} || '' ) {
-        next unless length $dir;
-        my $full = "$dir/$prog";
-        return $full if -x $full;
-    }
-    return;
-}
+########################
+# 2. State persistence #
+########################
 
 sub write_alias_file {
     my ($aliases_ref) = @_;
@@ -149,6 +176,200 @@ sub write_freq_file {
         logw("Could not write frequency file $freq_file: $!");
     }
 }
+
+sub reset_state {
+    @entries           = ();
+    %seen              = ();
+    $hashed_count      = 0;
+    %freq              = ();
+    %alias             = ();
+    $freq_file_exists  = -f $freq_file  ? 1 : 0;
+    $alias_file_exists = -f $alias_file ? 1 : 0;
+}
+
+sub load_freq_file {
+    return unless $freq_file_exists;
+
+    if ( open my $ffh, '<', $freq_file ) {
+        while ( my $line = <$ffh> ) {
+            chomp $line;
+            next if $line =~ /^\s*$/;
+            my ( $k, $v ) = split /\s+/, $line, 2;
+            next unless defined $k && defined $v;
+            next unless $v =~ /^\d+$/;
+            $freq{$k} = $v;
+        }
+        close $ffh;
+    }
+    else {
+        logw("Could not read frequency file $freq_file: $!");
+    }
+}
+
+sub load_alias_file {
+    return unless $alias_file_exists;
+
+    if ( open my $afh, '<', $alias_file ) {
+        while ( my $line = <$afh> ) {
+            chomp $line;
+            next if $line =~ /^\s*$/;
+            my ( $k, $v ) = split /\s+/, $line, 2;
+            next unless defined $k && defined $v;
+            $alias{$k} = $v;
+        }
+        close $afh;
+    }
+    else {
+        logw("Could not read alias file $alias_file: $!");
+    }
+}
+
+sub load_state_from_disk {
+    reset_state();
+    load_freq_file();
+    load_alias_file();
+}
+
+###########################
+# 3. known_hosts handling #
+###########################
+
+sub build_display {
+    my ( $host, $port, $parts_ref, $alias_name ) = @_;
+
+    my $display;
+    if ( @{$parts_ref} > 1 ) {
+        my @aliases   = @{$parts_ref}[ 1 .. $#{$parts_ref} ];
+        my $alias_str = join ', ', @aliases;
+        if ($port) {
+            $display = "$host (port $port; aliases: $alias_str)";
+        }
+        else {
+            $display = "$host (aliases: $alias_str)";
+        }
+    }
+    else {
+        if ($port) {
+            $display = "$host (port $port)";
+        }
+        else {
+            $display = $host;
+        }
+    }
+
+    if ( defined $alias_name && length $alias_name ) {
+        $display = "$alias_name -> $display";
+    }
+
+    return $display;
+}
+
+sub parse_known_hosts {
+    open my $fh, '<', $known_hosts
+      or die_tool("cannot open $known_hosts: $!");
+
+    while ( my $line = <$fh> ) {
+        chomp $line;
+        next if $line =~ /^\s*$/;
+        next if $line =~ /^\s*#/;
+
+        if ( $line =~ /^\s*\|/ ) {
+
+            # Hashed known_hosts entries cannot be decoded.
+            $hashed_count++;
+            next;
+        }
+
+        my ($field) = split /\s+/, $line, 2;
+        next unless defined $field && length $field;
+
+        my @parts =
+          grep { defined $_ && length $_ && $_ !~ /^\s*#/ && $_ !~ /^\s*\|/ }
+          split /,/, $field;
+
+        next unless @parts;
+
+        my $primary = $parts[0];
+        my $host    = $primary;
+        my $port    = '';
+
+        if ( $host =~ /^\[(.+)\]:(\d+)$/ ) {
+            $host = $1;
+            $port = $2;
+        }
+
+        my $key = entry_key( $host, $port );
+        next if $seen{$key}++;
+
+        my $display = build_display( $host, $port, \@parts, $alias{$key} );
+
+        push @entries,
+          {
+            host    => $host,
+            port    => $port,
+            display => $display,
+            freq    => $freq{$key} // 0,
+          };
+    }
+    close $fh;
+}
+
+sub prune_stale_data {
+
+    # Keep frequency and alias data consistent with the current host list.
+    my %valid_keys =
+      map { entry_key( $_->{host}, $_->{port} ) => 1 } @entries;
+
+    my $pruned_freq = 0;
+    for my $k ( keys %freq ) {
+        if ( !$valid_keys{$k} ) {
+            delete $freq{$k};
+            $pruned_freq = 1;
+        }
+    }
+
+    my $pruned_alias = 0;
+    for my $k ( keys %alias ) {
+        if ( !$valid_keys{$k} ) {
+            delete $alias{$k};
+            $pruned_alias = 1;
+        }
+    }
+
+    write_freq_file( \%freq )   if $pruned_freq;
+    write_alias_file( \%alias ) if $pruned_alias;
+}
+
+sub ensure_entries_present {
+    if ( !@entries ) {
+        if ( $hashed_count > 0 ) {
+            die_tool( "No valid plain hosts found in $known_hosts.\n"
+                  . "It looks like your known_hosts file contains only hashed entries.\n"
+                  . "This script cannot recover hostnames from hashed lines.\n"
+                  . "Consider keeping a separate non-hashed file (e.g. ~/.ssh/known_hosts.menu)\n"
+                  . "for use with this menu script." );
+        }
+        else {
+            die_tool("No valid hosts found in $known_hosts.");
+        }
+    }
+}
+
+sub sort_entries {
+    if ($freq_file_exists) {
+        @entries = sort {
+                 ( $b->{freq} <=> $a->{freq} )
+              || ( lc $a->{display} cmp lc $b->{display} )
+        } @entries;
+    }
+    else {
+        @entries = sort { lc $a->{display} cmp lc $b->{display} } @entries;
+    }
+}
+
+###################
+# 4. Menu actions #
+###################
 
 sub add_alias_menu {
     if ( !@entries ) {
@@ -198,193 +419,9 @@ sub add_alias_menu {
     }
 }
 
-sub main {
+sub select_entry_menu {
 
-    if ( !-f $known_hosts ) {
-        die_tool("$known_hosts not found.");
-    }
-
-    my $ksshaskpass = find_in_path('ksshaskpass');
-
-    if ($ksshaskpass) {
-        $ENV{SSH_ASKPASS}         = $ksshaskpass;
-        $ENV{SSH_ASKPASS_REQUIRE} = 'prefer';
-    }
-    else {
-        logw('ksshaskpass not found in PATH; continuing without SSH_ASKPASS');
-    }
-
-    setup_openbsd_sandbox();
-
-    #######################################
-    # 2. Build host list from known_hosts #
-    #######################################
-
-    @entries           = ();
-    %seen              = ();
-    $hashed_count      = 0;
-    %freq              = ();
-    %alias             = ();
-    $freq_file_exists  = -f $freq_file  ? 1 : 0;
-    $alias_file_exists = -f $alias_file ? 1 : 0;
-
-    if ($freq_file_exists) {
-        if ( open my $ffh, '<', $freq_file ) {
-            while ( my $line = <$ffh> ) {
-                chomp $line;
-                next if $line =~ /^\s*$/;
-                my ( $k, $v ) = split /\s+/, $line, 2;
-                next unless defined $k && defined $v;
-                next unless $v =~ /^\d+$/;
-                $freq{$k} = $v;
-            }
-            close $ffh;
-        }
-        else {
-            logw("Could not read frequency file $freq_file: $!");
-        }
-    }
-
-    if ($alias_file_exists) {
-        if ( open my $afh, '<', $alias_file ) {
-            while ( my $line = <$afh> ) {
-                chomp $line;
-                next if $line =~ /^\s*$/;
-                my ( $k, $v ) = split /\s+/, $line, 2;
-                next unless defined $k && defined $v;
-                $alias{$k} = $v;
-            }
-            close $afh;
-        }
-        else {
-            logw("Could not read alias file $alias_file: $!");
-        }
-    }
-
-    open my $fh, '<', $known_hosts
-      or die_tool("cannot open $known_hosts: $!");
-
-    while ( my $line = <$fh> ) {
-        chomp $line;
-        next if $line =~ /^\s*$/;
-        next if $line =~ /^\s*#/;
-
-        if ( $line =~ /^\s*\|/ ) {
-            $hashed_count++;
-            next;
-        }
-
-        my ($field) = split /\s+/, $line, 2;
-        next unless defined $field && length $field;
-
-        my @parts =
-          grep { defined $_ && length $_ && $_ !~ /^\s*#/ && $_ !~ /^\s*\|/ }
-          split /,/, $field;
-
-        next unless @parts;
-
-        my $primary = $parts[0];
-        my $host    = $primary;
-        my $port    = '';
-
-        if ( $host =~ /^\[(.+)\]:(\d+)$/ ) {
-            $host = $1;
-            $port = $2;
-        }
-
-        my $key = join ':', $host, ( $port || 'default' );
-        next if $seen{$key}++;
-
-        my $display;
-        my $alias_key  = $key;
-        my $alias_name = $alias{$alias_key};
-        if ( @parts > 1 ) {
-            my @aliases   = @parts[ 1 .. $#parts ];
-            my $alias_str = join ', ', @aliases;
-            if ($port) {
-                $display = "$host (port $port; aliases: $alias_str)";
-            }
-            else {
-                $display = "$host (aliases: $alias_str)";
-            }
-        }
-        else {
-            if ($port) {
-                $display = "$host (port $port)";
-            }
-            else {
-                $display = $host;
-            }
-        }
-
-        if ( defined $alias_name && length $alias_name ) {
-            $display = "$alias_name -> $display";
-        }
-
-        push @entries,
-          {
-            host    => $host,
-            port    => $port,
-            display => $display,
-            freq    => $freq{$key} // 0,
-          };
-    }
-    close $fh;
-
-    my %valid_keys =
-      map { ( $_->{host} . ':' . ( $_->{port} || 'default' ) ) => 1 } @entries;
-
-    # Drop stale frequency entries for hosts no longer present
-    my $pruned_freq = 0;
-    for my $k ( keys %freq ) {
-        if ( !$valid_keys{$k} ) {
-            delete $freq{$k};
-            $pruned_freq = 1;
-        }
-    }
-
-    # Drop stale aliases for hosts no longer present
-    my $pruned_alias = 0;
-    for my $k ( keys %alias ) {
-        if ( !$valid_keys{$k} ) {
-            delete $alias{$k};
-            $pruned_alias = 1;
-        }
-    }
-
-    write_freq_file( \%freq )   if $pruned_freq;
-    write_alias_file( \%alias ) if $pruned_alias;
-
-    if ( !@entries ) {
-        if ( $hashed_count > 0 ) {
-            die_tool( "No valid plain hosts found in $known_hosts.\n"
-                  . "It looks like your known_hosts file contains only hashed entries.\n"
-                  . "This script cannot recover hostnames from hashed lines.\n"
-                  . "Consider keeping a separate non-hashed file (e.g. ~/.ssh/known_hosts.menu)\n"
-                  . "for use with this menu script." );
-        }
-        else {
-            die_tool("No valid hosts found in $known_hosts.");
-        }
-    }
-
-    if ($freq_file_exists) {
-        @entries = sort {
-                 ( $b->{freq} <=> $a->{freq} )
-              || ( lc $a->{display} cmp lc $b->{display} )
-        } @entries;
-    }
-    else {
-        @entries = sort { lc $a->{display} cmp lc $b->{display} } @entries;
-    }
-
-    logw("Skipped $hashed_count hashed known_hosts entries.")
-      if $hashed_count > 0;
-
-    ##########################################
-    # 3. Interactive menu to choose a server #
-    ##########################################
-
+    # Returns the selected entry index after handling menu actions.
     logi("Select a server to connect to:");
     print "\n";
     for my $i ( 0 .. $#entries ) {
@@ -436,18 +473,14 @@ sub main {
         logw("Invalid option. Please try again.");
     }
 
-    my $selected_host    = $entries[$selected_idx]{host};
-    my $selected_port    = $entries[$selected_idx]{port};
-    my $selected_display = $entries[$selected_idx]{display};
-    my $selected_key     = join ':', $selected_host,
-      ( $selected_port || 'default' );
+    return $selected_idx;
+}
 
-    logi("Selected server: $selected_display");
+#####################
+# 5. SSH connection #
+#####################
 
-    #######################
-    # 4. Ask for SSH user #
-    #######################
-
+sub prompt_ssh_user {
     my $default_user = $ENV{SSH_MENU_USER} // $ENV{USER} // '';
 
     print "${BOLD}SSH user${RESET}"
@@ -470,11 +503,13 @@ sub main {
         die_tool("Empty user. Aborting.");
     }
 
-    ######################
-    # 5. Connect via SSH #
-    ######################
+    return $ssh_user;
+}
 
+sub build_ssh_command {
+    my ( $ssh_user, $selected_host, $selected_port ) = @_;
     my @cmd;
+
     if ($selected_port) {
         logi(
             "Connecting to $ssh_user\@$selected_host (port $selected_port)...");
@@ -485,10 +520,43 @@ sub main {
         @cmd = ( 'ssh', "$ssh_user\@$selected_host" );
     }
 
+    return @cmd;
+}
+
+sub update_frequency {
+    my ($selected_key) = @_;
     $freq{$selected_key} = ( $freq{$selected_key} // 0 ) + 1;
     eval { write_freq_file( \%freq ); };
     if ($@) { logw("Could not persist frequency file: $@"); }
+}
 
+sub main {
+
+    ensure_known_hosts_exists();
+    setup_ssh_askpass();
+    setup_openbsd_sandbox();
+
+    load_state_from_disk();
+    parse_known_hosts();
+    prune_stale_data();
+    ensure_entries_present();
+    sort_entries();
+
+    logw("Skipped $hashed_count hashed known_hosts entries.")
+      if $hashed_count > 0;
+
+    my $selected_idx     = select_entry_menu();
+    my $selected_host    = $entries[$selected_idx]{host};
+    my $selected_port    = $entries[$selected_idx]{port};
+    my $selected_display = $entries[$selected_idx]{display};
+    my $selected_key     = entry_key( $selected_host, $selected_port );
+
+    logi("Selected server: $selected_display");
+
+    my $ssh_user = prompt_ssh_user();
+    my @cmd = build_ssh_command( $ssh_user, $selected_host, $selected_port );
+
+    update_frequency($selected_key);
     exec @cmd or die_tool("Failed to exec ssh: $!");
 }
 
