@@ -1,0 +1,10 @@
+[Unit]
+Description=Standalone I2P BitTorrent Client
+
+[Service]
+WorkingDirectory=%h/.local/share/XD
+ExecStart=/usr/local/bin/XD %h/.local/share/XD/xd.ini
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
