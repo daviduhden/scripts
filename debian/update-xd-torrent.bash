@@ -28,7 +28,7 @@ XD_USER="xd"
 XD_GROUP="xd"
 XD_HOME_DIR="/var/lib/XD"
 
-# Control: si se determina que la copia local ya está en el último tag
+# Control: set when the local copy is already on the latest tag
 SKIP_BUILD=0
 WAS_ACTIVE=0
 
@@ -79,10 +79,10 @@ clone_or_update_repo() {
 
 	cd "$BUILD_DIR/$BIN_NAME"
 
-	# Traer tags y refs remotas
+	# Fetch tags and remote refs
 	git fetch --tags --prune origin || git fetch --tags --prune
 
-	# Determinar el último tag (por fecha de creación de tag)
+	# Determine latest tag (by tag creation date)
 	latest_tag=$(git describe --tags "$(git rev-list --tags --max-count=1)" 2>/dev/null || true)
 
 	if [ -n "$latest_tag" ]; then
