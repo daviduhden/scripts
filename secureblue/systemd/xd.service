@@ -1,3 +1,8 @@
+# XD user service - systemd unit file
+#
+# See the LICENSE file at the top of the project tree for copyright
+# and license details.
+
 [Unit]
 Description=Standalone I2P BitTorrent Client
 

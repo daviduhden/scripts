@@ -1,4 +1,4 @@
-# UNIX socket -> Arti SOCKS bridge (socat) — systemd unit file
+# UNIX socket -> Arti SOCKS bridge (socat) - systemd unit file
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
