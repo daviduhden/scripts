@@ -8,4 +8,4 @@ bmake = make
 checkmake = not ported
 mbake = not ported
 
-shfmt: 3.6.0 -> upstream: 3.12.0
+shfmt: 3.6.0 -> upstream: 3.13.0
