@@ -8,6 +8,8 @@ set -euo pipefail
 # - Clones or updates the XD GitHub repository
 # - Builds the project using make
 # - Installs the resulting binary into /usr/local/bin
+# - Ensures "xd" system user/group and working directory exist
+# - Installs/upgrades official xd.service systemd unit
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
@@ -20,9 +22,15 @@ REPO="majestrate/XD"
 REPO_URL="https://github.com/${REPO}.git"
 BUILD_DIR="${HOME}/.local/src"
 BIN_NAME="XD"
+SYSTEMD_UNIT_URL="https://raw.githubusercontent.com/majestrate/XD/refs/heads/master/contrib/systemd/xd.service"
+SYSTEMD_UNIT_FILE="/etc/systemd/system/xd.service"
+XD_USER="xd"
+XD_GROUP="xd"
+XD_HOME_DIR="/var/lib/XD"
 
 # Control: si se determina que la copia local ya está en el último tag
 SKIP_BUILD=0
+WAS_ACTIVE=0
 
 # Colors
 if [ -t 1 ] && [ "${NO_COLOR:-0}" != "1" ]; then
@@ -50,6 +58,10 @@ require_root() {
 
 require_cmd() {
 	command -v "$1" >/dev/null 2>&1 || error "Required command '$1' not found."
+}
+
+net_curl() {
+	curl -fLsS --retry 5 "$@"
 }
 
 ensure_go() {
@@ -96,16 +108,79 @@ build_and_install_XD() {
 	log "XD installed successfully."
 }
 
+ensure_xd_user_group_and_home() {
+	log "Ensuring xd system group/user and working directory exist..."
+
+	if ! getent group "$XD_GROUP" >/dev/null 2>&1; then
+		log "Creating system group '$XD_GROUP'..."
+		groupadd --system "$XD_GROUP"
+	fi
+
+	if ! id -u "$XD_USER" >/dev/null 2>&1; then
+		log "Creating system user '$XD_USER'..."
+		useradd --system --gid "$XD_GROUP" --home-dir "$XD_HOME_DIR" --shell /usr/sbin/nologin "$XD_USER"
+	fi
+
+	mkdir -p "$XD_HOME_DIR"
+	chown -R "$XD_USER:$XD_GROUP" "$XD_HOME_DIR"
+}
+
+stop_xd_if_running() {
+	log "Stopping xd service if it is running..."
+	if systemctl is-active --quiet xd; then
+		WAS_ACTIVE=1
+		systemctl stop xd
+	fi
+}
+
+install_systemd_service() {
+	log "Updating systemd unit: $SYSTEMD_UNIT_FILE..."
+	install -d /etc/systemd/system
+
+	local unit_tmp
+	unit_tmp="$(mktemp /tmp/xd-service-XXXXXX)"
+	if ! net_curl "$SYSTEMD_UNIT_URL" -o "$unit_tmp"; then
+		rm -f "$unit_tmp"
+		error "Failed to download systemd unit from ${SYSTEMD_UNIT_URL}"
+	fi
+
+	install -m 0644 "$unit_tmp" "$SYSTEMD_UNIT_FILE"
+	rm -f "$unit_tmp"
+
+	log "Reloading systemd daemon..."
+	systemctl daemon-reload
+
+	log "Enabling xd service at boot..."
+	systemctl enable xd >/dev/null 2>&1 || true
+
+	if [ "$WAS_ACTIVE" -eq 1 ]; then
+		log "Restarting xd..."
+		systemctl restart xd
+	else
+		log "xd was not running before."
+		log "You can start it now with: systemctl start xd"
+	fi
+}
+
 main() {
 	require_root
 	require_cmd git
+	require_cmd curl
+	require_cmd systemctl
+	require_cmd install
+	require_cmd getent
+	require_cmd useradd
+	require_cmd groupadd
 	ensure_go
 	clone_or_update_repo
+	ensure_xd_user_group_and_home
+	stop_xd_if_running
 	if [ "$SKIP_BUILD" -eq 1 ]; then
-		log "No build required. Exiting."
-		exit 0
+		log "No build required. Continuing with system setup."
+	else
+		build_and_install_XD
 	fi
-	build_and_install_XD
+	install_systemd_service
 }
 
 main "$@"
