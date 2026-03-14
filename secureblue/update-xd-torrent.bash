@@ -7,12 +7,17 @@ set -euo pipefail
 # - Clones the XD repository from GitHub
 # - Builds the project with make
 # - Installs the project using make install (requires root)
+# - Installs/updates xd.service as a local user systemd unit
+# - Uses user-local XD data directory under XDG paths
 
 REPO_URL="https://github.com/majestrate/XD.git"
 BUILD_DIR="${HOME}/.local/src"
 BIN_NAME="XD"
 ROOT_CMD=""
 SKIP_BUILD=0
+WAS_ACTIVE=0
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SERVICE_SRC="${SCRIPT_DIR}/systemd/xd.service"
 
 # Colors
 if [ -t 1 ] && [ "${NO_COLOR:-0}" != "1" ]; then
@@ -32,6 +37,10 @@ warn() { printf '%s %b[WARN]%b ⚠️ %s\n' "$(date '+%F %T')" "$YELLOW" "$RESET
 error() {
 	printf '%s %b[ERROR]%b ❌ %s\n' "$(date '+%F %T')" "$RED" "$RESET" "$*" >&2
 	exit 1
+}
+
+require_cmd() {
+	command -v "$1" >/dev/null 2>&1 || error "Required command '$1' not found."
 }
 
 detect_root_cmd() {
@@ -55,7 +64,7 @@ run_root() {
 }
 
 ensure_git() {
-	command -v git >/dev/null 2>&1 || error "git is required but not installed."
+	require_cmd git
 }
 
 ensure_go() {
@@ -90,10 +99,10 @@ clone_or_update_repo() {
 
 	cd "$BUILD_DIR/$BIN_NAME"
 
-	# Traer tags y refs remotas
+	# Fetch tags and remote refs
 	git fetch --tags --prune origin || git fetch --tags --prune
 
-	# Determinar el último tag (por fecha de creación de tag)
+	# Determine latest tag (by tag creation date)
 	latest_tag=$(git describe --tags "$(git rev-list --tags --max-count=1)" 2>/dev/null || true)
 
 	if [ -n "$latest_tag" ]; then
@@ -124,20 +133,74 @@ build_and_install_XD() {
 	log "XD installed successfully."
 }
 
+install_user_service() {
+	local systemd_user_dir data_dir config_file unit_dst
+	systemd_user_dir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+	data_dir="${XDG_DATA_HOME:-$HOME/.local/share}/XD"
+	config_file="${data_dir}/xd.ini"
+	unit_dst="${systemd_user_dir}/xd.service"
+
+	log "Creating XD data directory: $data_dir"
+	install -d -m 0750 "$data_dir"
+
+	log "Creating systemd user directory: $systemd_user_dir"
+	install -d -m 0750 "$systemd_user_dir"
+
+	log "Installing xd.service to user unit directory..."
+	install -m 0640 "$SERVICE_SRC" "$unit_dst"
+
+	log "Stopping xd.service if it is running..."
+	if systemctl --user is-active --quiet xd.service; then
+		WAS_ACTIVE=1
+		systemctl --user stop xd.service
+	fi
+
+	log "Reloading systemd --user units..."
+	if ! systemctl --user daemon-reload; then
+		error "systemctl --user daemon-reload failed (ensure a user systemd session is running)"
+	fi
+
+	log "Enabling xd.service at login..."
+	if ! systemctl --user enable xd.service >/dev/null 2>&1; then
+		error "failed to enable xd.service (ensure user systemd is active)"
+	fi
+
+	if [ "$WAS_ACTIVE" -eq 1 ]; then
+		log "Restarting xd.service..."
+		if ! systemctl --user restart xd.service; then
+			error "failed to restart xd.service"
+		fi
+	else
+		log "xd.service was not running before."
+		log "You can start it now with: systemctl --user start xd.service"
+	fi
+
+	if [ ! -f "$config_file" ]; then
+		warn "XD config not found at $config_file (create it before starting xd.service)."
+	fi
+}
+
 main() {
 	detect_root_cmd
 	ensure_git
 	ensure_go
+	require_cmd systemctl
+	require_cmd install
+
+	if [ ! -f "$SERVICE_SRC" ]; then
+		error "service file not found at $SERVICE_SRC"
+	fi
 
 	clone_or_update_repo
 	if [ "$SKIP_BUILD" -eq 1 ]; then
-		log "No build required. Exiting."
-		return 0
+		log "No build required. Continuing with user service setup."
+	else
+		build_and_install_XD
 	fi
 
-	build_and_install_XD
+	install_user_service
 
-	log "Done. Make sure XD is in your PATH."
+	log "Done. Make sure /usr/local/bin is in your PATH."
 }
 
 main "$@"
