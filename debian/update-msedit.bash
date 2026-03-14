@@ -9,6 +9,10 @@ set -euo pipefail
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
 
+# Basic PATH
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
 REPO_OWNER="microsoft"
 REPO_NAME="edit"
 GITHUB_API="https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest"
