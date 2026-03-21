@@ -117,35 +117,57 @@ build_and_install() {
 	log "btop ${tag} installed successfully."
 }
 
-main() {
+check_prereqs() {
 	require_root
 	require_cmd git
 	require_cmd make
 	require_cmd cmake
+}
 
-	install_build_deps
+resolve_latest_tag() {
+	local latest_tag
 
 	log "Fetching latest btop release tag..."
-	local latest_tag
 	latest_tag="$(get_latest_tag || true)"
 	[[ -n $latest_tag ]] || error "Could not determine latest release tag."
+	printf '%s\n' "$latest_tag"
+}
 
-	log "Latest release tag: ${latest_tag}"
-	local latest_stripped="${latest_tag#v}"
+is_up_to_date() {
+	local latest_tag="$1"
+	local latest_stripped current
 
-	local current
+	latest_stripped="${latest_tag#v}"
 	current="$(get_current_version)"
 	if [[ -n $current ]]; then
 		log "Currently installed btop version: ${current}"
 		if [[ $current == "$latest_stripped" || $current == "$latest_tag" ]]; then
 			log "btop is already up to date. Nothing to do."
-			exit 0
+			return 0
 		fi
 	else
 		log "btop is not currently installed."
 	fi
 
+	return 1
+}
+
+run_update() {
+	local latest_tag
+
+	install_build_deps
+	latest_tag="$(resolve_latest_tag)"
+	log "Latest release tag: ${latest_tag}"
+
+	if is_up_to_date "$latest_tag"; then
+		exit 0
+	fi
 	build_and_install "$latest_tag"
+}
+
+main() {
+	check_prereqs
+	run_update
 }
 
 main "$@"

@@ -61,40 +61,61 @@ sanitize_filename() {
 	printf '%s\n' "$name"
 }
 
-# ---------- Main ----------
+usage() {
+	echo "Usage: $0 YOUTUBE_VIDEO_URL"
+}
 
-main() {
+parse_args() {
 	if [ $# -lt 1 ]; then
-		echo "Usage: $0 YOUTUBE_VIDEO_URL"
+		usage
 		exit 1
 	fi
 
 	URL="$1"
+}
 
+check_prereqs() {
 	require_cmd yt-dlp
 	require_cmd ffmpeg
+}
 
-	log "Downloading audio from YouTube..."
-	# Download best audio only
-	yt-dlp -x --audio-format best -o "$TMP_DIR/%(title)s.%(ext)s" "$URL"
-
-	# Find the first regular file in TMP_DIR robustly (handles spaces/newlines)
+resolve_downloaded_file() {
 	shopt -s nullglob
 	files=("$TMP_DIR"/*)
 	if [ ${#files[@]} -eq 0 ]; then
 		error "Failed to download audio."
 		exit 1
 	fi
+	printf '%s\n' "${files[0]}"
+}
 
-	INPUT="${files[0]}"
-	AUDIO_FILE="$(basename "$INPUT")"
-	SANITIZED_TITLE=$(sanitize_filename "$AUDIO_FILE")
-	OUTPUT="${SANITIZED_TITLE%.*}.ogg"
+run_download_and_convert() {
+	local input audio_file sanitized_title output
+
+	log "Downloading audio from YouTube..."
+	yt-dlp -x --audio-format best -o "$TMP_DIR/%(title)s.%(ext)s" "$URL"
+
+	input="$(resolve_downloaded_file)"
+	audio_file="$(basename "$input")"
+	sanitized_title="$(sanitize_filename "$audio_file")"
+	output="${sanitized_title%.*}.ogg"
 
 	log "Converting to OGG Vorbis..."
-	ffmpeg -i "$INPUT" -c:a vorbis -q:a 6 -strict -2 "$OUTPUT"
+	ffmpeg -i "$input" -c:a vorbis -q:a 6 -strict -2 "$output"
 
-	log "File saved as $OUTPUT"
+	log "File saved as $output"
+}
+
+run_update() {
+	run_download_and_convert
+}
+
+# ---------- Main ----------
+
+main() {
+	parse_args "$@"
+	check_prereqs
+	run_update
 }
 
 main "$@"

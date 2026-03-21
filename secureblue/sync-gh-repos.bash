@@ -89,15 +89,8 @@ repo_has_content() {
 	return 1
 }
 
-main() {
-	while [ $# -gt 0 ]; do
-		case "$1" in
-		-n | --non-interactive)
-			NON_INTERACTIVE=1
-			shift
-			;;
-		-h | --help)
-			cat <<'EOF'
+usage() {
+	cat <<'EOF'
 Usage: sync-gh-repos.bash [--non-interactive]
 
 Environment variables:
@@ -108,6 +101,17 @@ Options:
   -n, --non-interactive  Do not prompt for BASE_DIR
   -h, --help             Show this help
 EOF
+}
+
+parse_args() {
+	while [ $# -gt 0 ]; do
+		case "$1" in
+		-n | --non-interactive)
+			NON_INTERACTIVE=1
+			shift
+			;;
+		-h | --help)
+			usage
 			exit 0
 			;;
 		*)
@@ -116,7 +120,9 @@ EOF
 			;;
 		esac
 	done
+}
 
+resolve_base_dir() {
 	if [ -z "${BASE_DIR+x}" ]; then
 		if [ $NON_INTERACTIVE -eq 0 ] && [ -t 0 ]; then
 			read -r -p "BASE_DIR [${DEFAULT_BASE_DIR}]: " BASE_DIR || true
@@ -125,7 +131,9 @@ EOF
 			BASE_DIR="$DEFAULT_BASE_DIR"
 		fi
 	fi
+}
 
+check_prereqs() {
 	require_cmd gh
 	require_cmd git
 
@@ -134,69 +142,84 @@ EOF
 		exit 1
 	fi
 
-	# Ensure gh is authenticated
 	if ! gh auth status >/dev/null 2>&1; then
 		error "GitHub CLI is not authenticated; run 'gh auth login' first."
 		exit 1
 	fi
+}
 
+sync_single_repo() {
+	local name="$1"
+	local ssh_url="$2"
+	local default_branch="$3"
+	local target backup_dir restored
+
+	target="$BASE_DIR/$name"
+	backup_dir=""
+	restored=0
+
+	cleanup_on_error() {
+		if [ -n "${backup_dir:-}" ] && [ -d "$backup_dir" ] && [ "$restored" -eq 0 ]; then
+			warn "Restoring previous directory for $name from $backup_dir"
+			rm -rf -- "$target" 2>/dev/null || true
+			mv -- "$backup_dir" "$target" 2>/dev/null || true
+			restored=1
+		fi
+	}
+
+	if [ -e "$target" ]; then
+		backup_dir="$(make_backup_dir "$target")"
+		log "Directory exists; renaming $target -> $backup_dir"
+		mv -- "$target" "$backup_dir"
+		trap cleanup_on_error ERR
+	fi
+
+	log "Cloning $name -> $target"
+	git clone "$ssh_url" "$target"
+	if [ -n "${default_branch:-}" ]; then
+		git -C "$target" checkout "$default_branch" || true
+	fi
+
+	if ! repo_has_content "$target"; then
+		warn "Repository $name appears empty; skipping sync."
+		rm -rf -- "$target"
+		if [ -n "${backup_dir:-}" ] && [ -d "$backup_dir" ]; then
+			warn "Restoring previous directory for $name from $backup_dir"
+			mv -- "$backup_dir" "$target" 2>/dev/null || true
+		fi
+		trap - ERR
+		return 0
+	fi
+
+	if [ -n "${backup_dir:-}" ] && [ -d "$backup_dir" ]; then
+		log "Pruning fresh clone (keep only .git and .github): $target"
+		remove_all_except_git_and_github "$target"
+
+		log "Copying files from $backup_dir into $target"
+		copy_from_backup_excluding_git "$backup_dir" "$target"
+
+		log "Removing backup directory: $backup_dir"
+		rm -rf -- "$backup_dir"
+	fi
+
+	trap - ERR
+}
+
+sync_repositories() {
 	log "Listing repositories for $OWNER"
-	# name, ssh_url, default_branch
 	while IFS=$'\t' read -r name ssh_url default_branch; do
 		[ -n "$name" ] || continue
-		target="$BASE_DIR/$name"
-
-		backup_dir=""
-		restored=0
-		cleanup_on_error() {
-			# If something failed mid-flight, try to restore the previous directory.
-			if [ -n "${backup_dir:-}" ] && [ -d "$backup_dir" ] && [ "$restored" -eq 0 ]; then
-				warn "Restoring previous directory for $name from $backup_dir"
-				rm -rf -- "$target" 2>/dev/null || true
-				mv -- "$backup_dir" "$target" 2>/dev/null || true
-				restored=1
-			fi
-		}
-
-		if [ -e "$target" ]; then
-			backup_dir="$(make_backup_dir "$target")"
-			log "Directory exists; renaming $target -> $backup_dir"
-			mv -- "$target" "$backup_dir"
-			trap cleanup_on_error ERR
-		fi
-
-		log "Cloning $name -> $target"
-		git clone "$ssh_url" "$target"
-		if [ -n "${default_branch:-}" ]; then
-			git -C "$target" checkout "$default_branch" || true
-		fi
-
-		if ! repo_has_content "$target"; then
-			warn "Repository $name appears empty; skipping sync."
-			rm -rf -- "$target"
-			if [ -n "${backup_dir:-}" ] && [ -d "$backup_dir" ]; then
-				warn "Restoring previous directory for $name from $backup_dir"
-				mv -- "$backup_dir" "$target" 2>/dev/null || true
-			fi
-			trap - ERR
-			continue
-		fi
-
-		if [ -n "${backup_dir:-}" ] && [ -d "$backup_dir" ]; then
-			log "Pruning fresh clone (keep only .git and .github): $target"
-			remove_all_except_git_and_github "$target"
-
-			log "Copying files from $backup_dir into $target"
-			copy_from_backup_excluding_git "$backup_dir" "$target"
-
-			log "Removing backup directory: $backup_dir"
-			rm -rf -- "$backup_dir"
-		fi
-
-		trap - ERR
+		sync_single_repo "$name" "$ssh_url" "$default_branch"
 	done < <(gh api --paginate "users/${OWNER}/repos" --jq '.[] | [.name, .ssh_url, .default_branch] | @tsv')
 
 	log "Sync complete"
+}
+
+main() {
+	parse_args "$@"
+	resolve_base_dir
+	check_prereqs
+	sync_repositories
 }
 
 main "$@"

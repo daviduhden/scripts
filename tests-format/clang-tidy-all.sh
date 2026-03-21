@@ -22,44 +22,64 @@ usage() {
 	exit 2
 }
 
-ROOT_DIR=${1:-}
-[ "${ROOT_DIR#-}" = "$ROOT_DIR" ] || usage
-[ -n "$ROOT_DIR" ] || usage
-[ -d "$ROOT_DIR" ] || {
-	printf '%s\n' "[ERROR] ROOT_DIR is not a directory: $ROOT_DIR" >&2
-	exit 2
+require_cmd() {
+	command -v "$1" >/dev/null 2>&1 || {
+		printf '%s\n' "[ERROR] $1 not found in PATH" >&2
+		exit 1
+	}
 }
 
-OS_NAME=$(uname -s 2>/dev/null || printf '%s' unknown)
-if [ "$OS_NAME" = "OpenBSD" ]; then
-	printf '%s\n' "[INFO] OpenBSD detected: install clang-tools-extra"
-fi
+run_clang_tidy_all() {
 
-if ! command -v clang-tidy >/dev/null 2>&1; then
+	ROOT_DIR=${1:-}
+	[ "${ROOT_DIR#-}" = "$ROOT_DIR" ] || usage
+	[ -n "$ROOT_DIR" ] || usage
+	[ -d "$ROOT_DIR" ] || {
+		printf '%s\n' "[ERROR] ROOT_DIR is not a directory: $ROOT_DIR" >&2
+		exit 2
+	}
+
+	OS_NAME=$(uname -s 2>/dev/null || printf '%s' unknown)
 	if [ "$OS_NAME" = "OpenBSD" ]; then
-		printf '%s\n' "[ERROR] clang-tidy not found; install clang-tools-extra" >&2
-	else
-		printf '%s\n' "[ERROR] clang-tidy not found in PATH" >&2
+		printf '%s\n' "[INFO] OpenBSD detected: install clang-tools-extra"
 	fi
-	exit 1
-fi
 
-set -- --extra-arg=-std=c23
-if [ -n "${CLANG_TIDY_BUILD_DIR:-}" ]; then
-	set -- "$@" -p "$CLANG_TIDY_BUILD_DIR"
-fi
+	if ! command -v clang-tidy >/dev/null 2>&1; then
+		if [ "$OS_NAME" = "OpenBSD" ]; then
+			printf '%s\n' "[ERROR] clang-tidy not found; install clang-tools-extra" >&2
+		else
+			printf '%s\n' "[ERROR] clang-tidy not found in PATH" >&2
+		fi
+		exit 1
+	fi
 
-# Prune .git and run clang-tidy safely via find
-if ! find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name "*.c" -o -name "*.h" \) -print | sed -n '1p' | grep -q .; then
-	printf '%s\n' "[INFO] No C/C++ source files found under: $ROOT_DIR"
+	set -- --extra-arg=-std=c23
+	if [ -n "${CLANG_TIDY_BUILD_DIR:-}" ]; then
+		set -- "$@" -p "$CLANG_TIDY_BUILD_DIR"
+	fi
+
+	# Prune .git and run clang-tidy safely via find
+	if ! find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name "*.c" -o -name "*.h" \) -print | sed -n '1p' | grep -q .; then
+		printf '%s\n' "[INFO] No C/C++ source files found under: $ROOT_DIR"
+		exit 0
+	fi
+
+	printf '%s\n' "[INFO] Running clang-tidy (C23)..."
+	find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name "*.c" -o -name "*.h" \) -print |
+		while IFS= read -r f; do
+			[ -n "$f" ] || continue
+			clang-tidy "$@" "$f"
+		done
+	printf '%s\n' "[INFO] clang-tidy completed"
 	exit 0
-fi
+}
 
-printf '%s\n' "[INFO] Running clang-tidy (C23)..."
-find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name "*.c" -o -name "*.h" \) -print |
-	while IFS= read -r f; do
-		[ -n "$f" ] || continue
-		clang-tidy "$@" "$f"
-	done
-printf '%s\n' "[INFO] clang-tidy completed"
-exit 0
+main() {
+	require_cmd uname
+	require_cmd find
+	require_cmd sed
+	require_cmd grep
+	run_clang_tidy_all "$@"
+}
+
+main "$@"

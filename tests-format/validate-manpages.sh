@@ -23,54 +23,74 @@ usage() {
 	exit 2
 }
 
-ROOT_DIR=${1:-}
-[ "${ROOT_DIR#-}" = "$ROOT_DIR" ] || usage
-[ -n "$ROOT_DIR" ] || usage
-[ -d "$ROOT_DIR" ] || {
-	printf '%s\n' "[ERROR] ROOT_DIR is not a directory: $ROOT_DIR" >&2
-	exit 2
+require_cmd() {
+	command -v "$1" >/dev/null 2>&1 || {
+		printf '%s\n' "[ERROR] $1 not found in PATH" >&2
+		exit 1
+	}
 }
 
-OS_NAME=$(uname -s 2>/dev/null || printf '%s' unknown)
-if [ "$OS_NAME" = "OpenBSD" ]; then
-	printf '%s\n' "[INFO] OpenBSD detected: mandoc is in base"
-fi
+run_validate_manpages() {
 
-TMPDIR_BASE="${TMPDIR:-/tmp}"
-TMP_FAILS="$TMPDIR_BASE/validate-manpages-fails-$$.txt"
-trap 'rm -f "$TMP_FAILS"' EXIT
+	ROOT_DIR=${1:-}
+	[ "${ROOT_DIR#-}" = "$ROOT_DIR" ] || usage
+	[ -n "$ROOT_DIR" ] || usage
+	[ -d "$ROOT_DIR" ] || {
+		printf '%s\n' "[ERROR] ROOT_DIR is not a directory: $ROOT_DIR" >&2
+		exit 2
+	}
 
-if ! command -v mandoc >/dev/null 2>&1; then
-	printf '%s\n' "[ERROR] mandoc not found in PATH" >&2
-	exit 1
-fi
+	OS_NAME=$(uname -s 2>/dev/null || printf '%s' unknown)
+	if [ "$OS_NAME" = "OpenBSD" ]; then
+		printf '%s\n' "[INFO] OpenBSD detected: mandoc is in base"
+	fi
 
-# Find man pages and run mandoc lint.
-# - Prune .git to avoid scanning vendored stuff.
-# - Use -exec ... {} + instead of xargs (portable + safe with spaces/newlines).
-# - Match common man section suffixes: .1 .. .9 and variants like .1m, .3p, etc.
-if ! find "$ROOT_DIR" \
-	\( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o \
-	-type f \( \
-	-name '*.[1-9]' \
-	-o -name '*.[1-9][A-Za-z]' \
-	-o -name '*.[1-9][A-Za-z][A-Za-z]' \
-	\) -print | sed -n '1p' | grep -q .; then
-	printf '%s\n' "[INFO] No man pages found under: $ROOT_DIR"
+	TMPDIR_BASE="${TMPDIR:-/tmp}"
+	TMP_FAILS="$TMPDIR_BASE/validate-manpages-fails-$$.txt"
+	trap 'rm -f "$TMP_FAILS"' EXIT
+
+	if ! command -v mandoc >/dev/null 2>&1; then
+		printf '%s\n' "[ERROR] mandoc not found in PATH" >&2
+		exit 1
+	fi
+
+	# Find man pages and run mandoc lint.
+	# - Prune .git to avoid scanning vendored stuff.
+	# - Use -exec ... {} + instead of xargs (portable + safe with spaces/newlines).
+	# - Match common man section suffixes: .1 .. .9 and variants like .1m, .3p, etc.
+	if ! find "$ROOT_DIR" \
+		\( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o \
+		-type f \( \
+		-name '*.[1-9]' \
+		-o -name '*.[1-9][A-Za-z]' \
+		-o -name '*.[1-9][A-Za-z][A-Za-z]' \
+		\) -print | sed -n '1p' | grep -q .; then
+		printf '%s\n' "[INFO] No man pages found under: $ROOT_DIR"
+		exit 0
+	fi
+
+	printf '%s\n' "[INFO] Running mandoc lint (treat warnings as errors)..."
+	find "$ROOT_DIR" \
+		\( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o \
+		-type f \( \
+		-name '*.[1-9]' \
+		-o -name '*.[1-9][A-Za-z]' \
+		-o -name '*.[1-9][A-Za-z][A-Za-z]' \
+		\) -print | while IFS= read -r f; do
+		[ -n "$f" ] || continue
+		mandoc -Tlint -Werror "$f"
+	done
+
+	printf '%s\n' "[INFO] mandoc lint passed"
 	exit 0
-fi
+}
 
-printf '%s\n' "[INFO] Running mandoc lint (treat warnings as errors)..."
-find "$ROOT_DIR" \
-	\( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o \
-	-type f \( \
-	-name '*.[1-9]' \
-	-o -name '*.[1-9][A-Za-z]' \
-	-o -name '*.[1-9][A-Za-z][A-Za-z]' \
-	\) -print | while IFS= read -r f; do
-	[ -n "$f" ] || continue
-	mandoc -Tlint -Werror "$f"
-done
+main() {
+	require_cmd uname
+	require_cmd find
+	require_cmd sed
+	require_cmd grep
+	run_validate_manpages "$@"
+}
 
-printf '%s\n' "[INFO] mandoc lint passed"
-exit 0
+main "$@"

@@ -16,8 +16,37 @@ BIN_NAME="XD"
 ROOT_CMD=""
 SKIP_BUILD=0
 WAS_ACTIVE=0
+SKIP_SERVICE_AND_USER_SETUP=0
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SERVICE_SRC="${SCRIPT_DIR}/systemd/xd.service"
+
+usage() {
+	cat <<'EOF'
+Usage: update-xd-torrent.bash [--skip-service-and-user-setup]
+
+Options:
+  --skip-service-and-user-setup  Skip installing and enabling xd.service.
+  -h, --help                     Show this help message and exit.
+EOF
+}
+
+parse_args() {
+	while [ "$#" -gt 0 ]; do
+		case "$1" in
+		--skip-service-and-user-setup)
+			SKIP_SERVICE_AND_USER_SETUP=1
+			;;
+		-h | --help)
+			usage
+			exit 0
+			;;
+		*)
+			error "Unknown option: $1"
+			;;
+		esac
+		shift
+	done
+}
 
 # Colors
 if [ -t 1 ] && [ "${NO_COLOR:-0}" != "1" ]; then
@@ -180,7 +209,7 @@ install_user_service() {
 	fi
 }
 
-main() {
+check_prereqs() {
 	detect_root_cmd
 	ensure_git
 	ensure_go
@@ -190,17 +219,35 @@ main() {
 	if [ ! -f "$SERVICE_SRC" ]; then
 		error "service file not found at $SERVICE_SRC"
 	fi
+}
 
-	clone_or_update_repo
+build_if_needed() {
 	if [ "$SKIP_BUILD" -eq 1 ]; then
 		log "No build required. Continuing with user service setup."
 	else
 		build_and_install_XD
 	fi
+}
 
-	install_user_service
+maybe_setup_service() {
+	if [ "$SKIP_SERVICE_AND_USER_SETUP" -eq 0 ]; then
+		install_user_service
+	else
+		log "Skipping xd.service install/enable as requested."
+	fi
+}
 
+run_update() {
+	clone_or_update_repo
+	build_if_needed
+	maybe_setup_service
 	log "Done. Make sure /usr/local/bin is in your PATH."
+}
+
+main() {
+	parse_args "$@"
+	check_prereqs
+	run_update
 }
 
 main "$@"

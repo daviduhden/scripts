@@ -39,10 +39,11 @@ error() {
 	exit 1
 }
 
-# Ensure we run as root
-if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
-	error "This script must be run as root. Try: sudo $0"
-fi
+require_root() {
+	if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
+		error "This script must be run as root. Try: sudo $0"
+	fi
+}
 
 # Helper to ensure required commands exist
 require_cmd() {
@@ -50,9 +51,6 @@ require_cmd() {
 		error "required command '$1' is not installed or not in PATH."
 	fi
 }
-
-require_cmd curl
-require_cmd awk
 
 net_curl() {
 	curl -fLsS --retry 5 "$@"
@@ -62,9 +60,11 @@ has_cmd() {
 	command -v "$1" >/dev/null 2>&1
 }
 
-if ! command -v apt-get >/dev/null 2>&1 && ! command -v apt >/dev/null 2>&1; then
-	error "neither 'apt-get' nor 'apt' is available."
-fi
+ensure_apt() {
+	if ! command -v apt-get >/dev/null 2>&1 && ! command -v apt >/dev/null 2>&1; then
+		error "neither 'apt-get' nor 'apt' is available."
+	fi
+}
 
 # Get the latest version tag from GitHub releases
 get_latest_release() {
@@ -97,84 +97,21 @@ get_latest_release() {
 	awk -F'"' '/"tag_name":/ {print $4; exit}' <<<"$json"
 }
 
-log "Checking latest fastfetch release from GitHub..."
-LATEST_VERSION="$(get_latest_release || true)"
-
-if [[ -z ${LATEST_VERSION} ]]; then
-	error "could not fetch latest release version from GitHub."
-fi
-
-# Strip leading 'v' if present (tags are often like 'v2.55.1')
-LATEST_VERSION_STRIPPED="${LATEST_VERSION#v}"
-
-log "Latest release tag: ${LATEST_VERSION}"
-
-# Detect currently installed version (if any)
-CURRENT_VERSION=""
-if command -v fastfetch >/dev/null 2>&1; then
-	# Try to extract something like 2.55.1 from the version output
-	CURRENT_VERSION="$(fastfetch --version 2>/dev/null |
-		awk 'match($0,/[0-9]+\.[0-9]+\.[0-9]+/){print substr($0,RSTART,RLENGTH); exit}')"
-fi
-
-if [[ -n $CURRENT_VERSION ]]; then
-	log "Currently installed fastfetch version: ${CURRENT_VERSION}"
-	if [[ $CURRENT_VERSION == "$LATEST_VERSION" || $CURRENT_VERSION == "$LATEST_VERSION_STRIPPED" ]]; then
-		log "Fastfetch is already up to date. Nothing to do."
-		exit 0
-	fi
-else
-	log "Fastfetch is not currently installed."
-fi
-
-# Determine architecture
-ARCH="$(uname -m)"
-PKG_ARCH=""
-
-case "$ARCH" in
-# 64-bit x86
-x86_64 | amd64)
-	PKG_ARCH="amd64"
-	;;
-# 64-bit ARM
-aarch64 | arm64)
-	PKG_ARCH="aarch64"
-	;;
-# 32-bit ARM v6
-armv6l)
-	PKG_ARCH="armv6l"
-	;;
-# 32-bit ARM v7 (armhf en Debian)
-armv7l | armv7hl)
-	PKG_ARCH="armv7l"
-	;;
-# 32-bit x86
-i386 | i686)
-	PKG_ARCH="i686"
-	;;
-# PowerPC 64-bit little-endian (Debian usa ppc64el)
-ppc64le | ppc64el)
-	PKG_ARCH="ppc64le"
-	;;
-# RISC-V 64
-riscv64)
-	PKG_ARCH="riscv64"
-	;;
-# IBM Z (s390x)
-s390x)
-	PKG_ARCH="s390x"
-	;;
-*)
-	error "Unsupported architecture: ${ARCH}"
-	;;
-esac
-
-TMPDIR="$(mktemp -d /tmp/fastfetch-XXXXXX)"
-DEB_FILE="$TMPDIR/fastfetch-linux-${PKG_ARCH}.deb"
-cleanup() {
-	rm -rf "$TMPDIR" 2>/dev/null || true
+detect_pkg_arch() {
+	local arch
+	arch="$(uname -m)"
+	case "$arch" in
+	x86_64 | amd64) printf '%s\n' "amd64" ;;
+	aarch64 | arm64) printf '%s\n' "aarch64" ;;
+	armv6l) printf '%s\n' "armv6l" ;;
+	armv7l | armv7hl) printf '%s\n' "armv7l" ;;
+	i386 | i686) printf '%s\n' "i686" ;;
+	ppc64le | ppc64el) printf '%s\n' "ppc64le" ;;
+	riscv64) printf '%s\n' "riscv64" ;;
+	s390x) printf '%s\n' "s390x" ;;
+	*) error "Unsupported architecture: ${arch}" ;;
+	esac
 }
-trap cleanup EXIT
 
 download_deb() {
 	local version="$1" arch="$2" out_dir="$3" out_file="$4" url
@@ -191,27 +128,77 @@ download_deb() {
 	net_curl "$url" -o "$out_file"
 }
 
-log "Downloading fastfetch ${LATEST_VERSION} (${PKG_ARCH})..."
-if ! download_deb "$LATEST_VERSION" "$PKG_ARCH" "$TMPDIR" "$DEB_FILE"; then
-	error "download failed for fastfetch ${LATEST_VERSION} (${PKG_ARCH})"
-fi
-
-if [[ ! -f $DEB_FILE ]]; then
-	alt_file="$(find "$TMPDIR" -maxdepth 1 -type f -name 'fastfetch-linux-*.deb' | head -n1)"
-	if [[ -n $alt_file ]]; then
-		DEB_FILE="$alt_file"
-	else
-		error "download did not produce a .deb file"
+run_fastfetch_update() {
+	log "Checking latest fastfetch release from GitHub..."
+	LATEST_VERSION="$(get_latest_release || true)"
+	if [[ -z ${LATEST_VERSION} ]]; then
+		error "could not fetch latest release version from GitHub."
 	fi
-fi
+	LATEST_VERSION_STRIPPED="${LATEST_VERSION#v}"
+	log "Latest release tag: ${LATEST_VERSION}"
 
-log "Download complete: ${DEB_FILE}"
-log "Installing the package..."
+	CURRENT_VERSION=""
+	if command -v fastfetch >/dev/null 2>&1; then
+		CURRENT_VERSION="$(fastfetch --version 2>/dev/null | awk 'match($0,/[0-9]+\.[0-9]+\.[0-9]+/){print substr($0,RSTART,RLENGTH); exit}')"
+	fi
+	if [[ -n $CURRENT_VERSION ]]; then
+		log "Currently installed fastfetch version: ${CURRENT_VERSION}"
+		if [[ $CURRENT_VERSION == "$LATEST_VERSION" || $CURRENT_VERSION == "$LATEST_VERSION_STRIPPED" ]]; then
+			log "Fastfetch is already up to date. Nothing to do."
+			return 0
+		fi
+	else
+		log "Fastfetch is not currently installed."
+	fi
 
-if command -v apt-get >/dev/null 2>&1; then
-	apt-get install -y "$DEB_FILE"
-else
-	apt install -y "$DEB_FILE"
-fi
+	PKG_ARCH="$(detect_pkg_arch)"
+	TMPDIR="$(mktemp -d /tmp/fastfetch-XXXXXX)"
+	DEB_FILE="$TMPDIR/fastfetch-linux-${PKG_ARCH}.deb"
+	trap 'rm -rf "$TMPDIR" 2>/dev/null || true' EXIT
 
-log "Fastfetch installation finished successfully."
+	log "Downloading fastfetch ${LATEST_VERSION} (${PKG_ARCH})..."
+	if ! download_deb "$LATEST_VERSION" "$PKG_ARCH" "$TMPDIR" "$DEB_FILE"; then
+		error "download failed for fastfetch ${LATEST_VERSION} (${PKG_ARCH})"
+	fi
+
+	if [[ ! -f $DEB_FILE ]]; then
+		alt_file="$(find "$TMPDIR" -maxdepth 1 -type f -name 'fastfetch-linux-*.deb' | head -n1)"
+		if [[ -n $alt_file ]]; then
+			DEB_FILE="$alt_file"
+		else
+			error "download did not produce a .deb file"
+		fi
+	fi
+
+	log "Download complete: ${DEB_FILE}"
+	log "Installing the package..."
+	if command -v apt-get >/dev/null 2>&1; then
+		apt-get install -y "$DEB_FILE"
+	else
+		apt install -y "$DEB_FILE"
+	fi
+
+	log "Fastfetch installation finished successfully."
+}
+
+run_update() {
+	run_fastfetch_update
+}
+
+check_prereqs() {
+	require_root
+	require_cmd curl
+	require_cmd awk
+	require_cmd uname
+	require_cmd find
+	require_cmd mktemp
+	require_cmd head
+	ensure_apt
+}
+
+main() {
+	check_prereqs
+	run_update
+}
+
+main "$@"

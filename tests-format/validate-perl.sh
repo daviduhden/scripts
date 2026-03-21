@@ -21,92 +21,113 @@ usage() {
 	exit 2
 }
 
-ROOT_DIR=${1:-}
-[ "${ROOT_DIR#-}" = "$ROOT_DIR" ] || usage
-[ -n "$ROOT_DIR" ] || usage
-[ -d "$ROOT_DIR" ] || {
-	printf '%s\n' "[ERROR] ROOT_DIR is not a directory: $ROOT_DIR" >&2
-	exit 2
+require_cmd() {
+	command -v "$1" >/dev/null 2>&1 || {
+		printf '%s\n' "[ERROR] $1 not found in PATH" >&2
+		exit 1
+	}
 }
 
-OS_NAME=$(uname -s 2>/dev/null || printf '%s' unknown)
-if [ "$OS_NAME" = "OpenBSD" ]; then
-	printf '%s\n' "[INFO] OpenBSD detected: install perltidy"
-fi
+run_validate_perl() {
 
-TMPDIR_BASE="${TMPDIR:-/tmp}"
-TMP_FAILS="$TMPDIR_BASE/validate-perl-fails-$$.txt"
-trap 'rm -f "$TMP_FAILS"' EXIT
+	ROOT_DIR=${1:-}
+	[ "${ROOT_DIR#-}" = "$ROOT_DIR" ] || usage
+	[ -n "$ROOT_DIR" ] || usage
+	[ -d "$ROOT_DIR" ] || {
+		printf '%s\n' "[ERROR] ROOT_DIR is not a directory: $ROOT_DIR" >&2
+		exit 2
+	}
 
-note_fail() { printf '%s\n' "$1" >>"$TMP_FAILS"; }
+	OS_NAME=$(uname -s 2>/dev/null || printf '%s' unknown)
+	if [ "$OS_NAME" = "OpenBSD" ]; then
+		printf '%s\n' "[INFO] OpenBSD detected: install perltidy"
+	fi
 
-printf '%s\n' "[INFO] Formatting Perl files with perltidy..."
-if command -v perltidy >/dev/null 2>&1; then
-	UNFMT="$TMPDIR_BASE/unformatted-perl-$$.txt"
+	TMPDIR_BASE="${TMPDIR:-/tmp}"
+	TMP_FAILS="$TMPDIR_BASE/validate-perl-fails-$$.txt"
+	trap 'rm -f "$TMP_FAILS"' EXIT
 
-	# Detect files that would change formatting
+	note_fail() { printf '%s\n' "$1" >>"$TMP_FAILS"; }
+
+	printf '%s\n' "[INFO] Formatting Perl files with perltidy..."
+	if command -v perltidy >/dev/null 2>&1; then
+		UNFMT="$TMPDIR_BASE/unformatted-perl-$$.txt"
+
+		# Detect files that would change formatting
+		find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name '*.pl' -o -name '*.pm' -o -name '*.t' -o -name '*.psgi' \) -print |
+			while IFS= read -r f; do
+				[ -n "$f" ] || continue
+				if ! perltidy -ast -se -o /dev/null "$f" >/dev/null 2>&1; then
+					printf "%s\n" "$f"
+				fi
+			done >"$UNFMT" || true
+
+		if [ -s "$UNFMT" ]; then
+			printf '%s\n' "[INFO] perltidy will format the following files:"
+			sed -n '1,200p' "$UNFMT" | sed 's/^/  - /'
+
+			while IFS= read -r file; do
+				[ -n "$file" ] || continue
+				# Format in-place without backups (backup extension "/" disables backups)
+				if perltidy --backup-and-modify-in-place --backup-file-extension=/ -se "$file" >/dev/null 2>&1; then
+					note_fail "$file"
+				else
+					printf '%s\n' "[WARN] perltidy failed for: $file" 1>&2
+					note_fail "$file"
+				fi
+			done <"$UNFMT"
+		else
+			printf '%s\n' "[INFO] All Perl files already formatted"
+		fi
+
+		rm -f "$UNFMT"
+	else
+		printf '%s\n' "[INFO] perltidy not installed; skipping Perl formatting"
+	fi
+
+	printf '%s\n' "[INFO] Running Perl syntax checks..."
 	find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name '*.pl' -o -name '*.pm' -o -name '*.t' -o -name '*.psgi' \) -print |
 		while IFS= read -r f; do
 			[ -n "$f" ] || continue
-			if ! perltidy -ast -se -o /dev/null "$f" >/dev/null 2>&1; then
-				printf "%s\n" "$f"
+			set +e
+			perlc_out=$(perl -c "$f" 2>&1)
+			perlc_rc=$?
+			set -e
+			if [ "${perlc_rc:-0}" -ne 0 ]; then
+				if printf "%s" "$perlc_out" | grep -qi "Can.t locate"; then
+					printf '%s\n' "[WARN] Skipping syntax check for $f due to missing modules" 1>&2
+				else
+					printf '%s\n' "[ERROR] Perl syntax error in: $f" 1>&2
+					printf "%s\n" "$f"
+				fi
 			fi
-		done >"$UNFMT" || true
+		done | while IFS= read -r bad; do
+		[ -n "$bad" ] && note_fail "$bad"
+	done
 
-	if [ -s "$UNFMT" ]; then
-		printf '%s\n' "[INFO] perltidy will format the following files:"
-		sed -n '1,200p' "$UNFMT" | sed 's/^/  - /'
-
-		while IFS= read -r file; do
-			[ -n "$file" ] || continue
-			# Format in-place without backups (backup extension "/" disables backups)
-			if perltidy --backup-and-modify-in-place --backup-file-extension=/ -se "$file" >/dev/null 2>&1; then
-				note_fail "$file"
-			else
-				printf '%s\n' "[WARN] perltidy failed for: $file" 1>&2
-				note_fail "$file"
-			fi
-		done <"$UNFMT"
-	else
-		printf '%s\n' "[INFO] All Perl files already formatted"
+	issues=0
+	if [ -f "$TMP_FAILS" ]; then
+		issues=$(sort -u "$TMP_FAILS" | wc -l | tr -d ' ')
 	fi
 
-	rm -f "$UNFMT"
-else
-	printf '%s\n' "[INFO] perltidy not installed; skipping Perl formatting"
-fi
+	if [ "${issues:-0}" -ne 0 ]; then
+		printf '%s\n' "[INFO] Completed with $issues issue(s) (format changes and/or errors)"
+		printf '%s\n' "[INFO] Affected files (unique, first 200):"
+		sort -u "$TMP_FAILS" | sed -n '1,200p' | sed 's/^/  - /'
+		exit 2
+	fi
 
-printf '%s\n' "[INFO] Running Perl syntax checks..."
-find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name '*.pl' -o -name '*.pm' -o -name '*.t' -o -name '*.psgi' \) -print |
-	while IFS= read -r f; do
-		[ -n "$f" ] || continue
-		set +e
-		perlc_out=$(perl -c "$f" 2>&1)
-		perlc_rc=$?
-		set -e
-		if [ "${perlc_rc:-0}" -ne 0 ]; then
-			if printf "%s" "$perlc_out" | grep -qi "Can.t locate"; then
-				printf '%s\n' "[WARN] Skipping syntax check for $f due to missing modules" 1>&2
-			else
-				printf '%s\n' "[ERROR] Perl syntax error in: $f" 1>&2
-				printf "%s\n" "$f"
-			fi
-		fi
-	done | while IFS= read -r bad; do
-	[ -n "$bad" ] && note_fail "$bad"
-done
+	printf '%s\n' "[INFO] Perl checks passed"
+	exit 0
+}
 
-issues=0
-if [ -f "$TMP_FAILS" ]; then
-	issues=$(sort -u "$TMP_FAILS" | wc -l | tr -d ' ')
-fi
+main() {
+	require_cmd uname
+	require_cmd find
+	require_cmd sed
+	require_cmd grep
+	require_cmd perl
+	run_validate_perl "$@"
+}
 
-if [ "${issues:-0}" -ne 0 ]; then
-	printf '%s\n' "[INFO] Completed with $issues issue(s) (format changes and/or errors)"
-	printf '%s\n' "[INFO] Affected files (unique, first 200):"
-	sort -u "$TMP_FAILS" | sed -n '1,200p' | sed 's/^/  - /'
-	exit 2
-fi
-
-printf '%s\n' "[INFO] Perl checks passed"
-exit 0
+main "$@"

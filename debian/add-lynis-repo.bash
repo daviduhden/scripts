@@ -37,32 +37,30 @@ fetch_key() {
 	return 1
 }
 
-main() {
-	local OS_ID OS_LIKE RELEASE APT_CMD ARCH KEYRING TMPKEY TMPDEARMOR
+require_cmd() {
+	if ! command -v "$1" >/dev/null 2>&1; then
+		error "required command '$1' is not installed or not in PATH."
+	fi
+}
 
-	require_cmd() {
-		if ! command -v "$1" >/dev/null 2>&1; then
-			error "required command '$1' is not installed or not in PATH."
-		fi
-	}
-
+require_root() {
 	if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
 		error "This script must be run as root. Try: sudo $0"
 	fi
+}
 
-	require_cmd dpkg
-	require_cmd gpg
-
+load_os_release() {
 	if [[ -r /etc/os-release ]]; then
 		# shellcheck source=/dev/null
 		. /etc/os-release
 	else
 		error "/etc/os-release not found. Cannot detect distribution."
 	fi
+}
 
+normalize_os_id() {
 	OS_ID="${ID:-}"
 	OS_LIKE="${ID_LIKE:-}"
-	RELEASE=""
 
 	if [[ $OS_ID != "debian" && $OS_ID != "devuan" && $OS_ID != "raspbian" && $OS_ID != "ubuntu" && $OS_LIKE == *"ubuntu"* ]]; then
 		OS_ID="ubuntu"
@@ -71,7 +69,9 @@ main() {
 	if [[ $OS_ID != "debian" && $OS_ID != "devuan" && $OS_ID != "raspbian" && $OS_ID != "ubuntu" && $OS_LIKE != *"debian"* && $OS_LIKE != *"ubuntu"* ]]; then
 		error "This installer supports Debian/Devuan/Ubuntu derivatives (bookworm or newer)."
 	fi
+}
 
+detect_release_codename() {
 	if [[ -n ${DEBIAN_CODENAME:-} ]]; then
 		RELEASE="$DEBIAN_CODENAME"
 	elif [[ -n ${UBUNTU_CODENAME:-} ]]; then
@@ -81,41 +81,36 @@ main() {
 	else
 		error "could not detect distribution codename (DEBIAN_CODENAME/UBUNTU_CODENAME/VERSION_CODENAME)."
 	fi
+}
 
+map_devuan_release() {
 	if [[ $OS_ID == "devuan" ]]; then
 		case "$RELEASE" in
-		daedalus)
-			RELEASE="bookworm"
-			;;
-		excalibur)
-			RELEASE="trixie"
-			;;
-		*)
-			error "unsupported Devuan codename '$RELEASE'. Supported: daedalus (bookworm) or excalibur (trixie)."
-			;;
+		daedalus) RELEASE="bookworm" ;;
+		excalibur) RELEASE="trixie" ;;
+		*) error "unsupported Devuan codename '$RELEASE'. Supported: daedalus (bookworm) or excalibur (trixie)." ;;
 		esac
 	fi
+}
 
+validate_release() {
 	case "$OS_ID" in
 	ubuntu)
 		case "$RELEASE" in
 		jammy | noble) ;;
-		*)
-			error "unsupported Ubuntu release '$RELEASE'. Supported: jammy, noble."
-			;;
+		*) error "unsupported Ubuntu release '$RELEASE'. Supported: jammy, noble." ;;
 		esac
 		;;
 	*)
 		case "$RELEASE" in
 		bookworm | trixie | sid) ;;
-		*)
-			error "unsupported release '$RELEASE'. Supported: bookworm, trixie, sid (or Devuan daedalus/excalibur)."
-			;;
+		*) error "unsupported release '$RELEASE'. Supported: bookworm, trixie, sid (or Devuan daedalus/excalibur)." ;;
 		esac
 		;;
 	esac
+}
 
-	APT_CMD=""
+detect_apt_cmd() {
 	if command -v apt-get >/dev/null 2>&1; then
 		APT_CMD="apt-get"
 	elif command -v apt >/dev/null 2>&1; then
@@ -123,12 +118,16 @@ main() {
 	else
 		error "neither 'apt-get' nor 'apt' is available."
 	fi
+}
 
+detect_arch() {
 	ARCH="$(dpkg --print-architecture 2>/dev/null || true)"
 	if [[ -z $ARCH ]]; then
 		error "could not determine dpkg architecture."
 	fi
+}
 
+ensure_https_transport() {
 	log "Updating APT index for base repositories..."
 	"$APT_CMD" update
 
@@ -136,7 +135,9 @@ main() {
 		log "Installing apt-transport-https..."
 		"$APT_CMD" install -y apt-transport-https
 	fi
+}
 
+install_keyring() {
 	mkdir -p /etc/apt/keyrings && chmod 0755 /etc/apt/keyrings
 	KEYRING="/etc/apt/keyrings/cisofy-lynis-archive-keyring.gpg"
 	TMPKEY="$(mktemp)"
@@ -156,7 +157,9 @@ main() {
 	install -m 0644 "$TMPDEARMOR" "$KEYRING"
 	rm -f "$TMPKEY" "$TMPDEARMOR"
 	chmod go+r "$KEYRING"
+}
 
+write_repo_source() {
 	log "Writing APT deb822 source for Lynis..."
 	rm -f /etc/apt/sources.list.d/cisofy-lynis.list
 	cat >/etc/apt/sources.list.d/cisofy-lynis.sources <<EOF
@@ -167,14 +170,45 @@ Components: main
 Architectures: ${ARCH}
 Signed-By: ${KEYRING}
 EOF
+}
 
+install_lynis() {
 	log "Updating APT index (including Lynis repo)..."
 	"$APT_CMD" update
 
 	log "Installing lynis..."
 	"$APT_CMD" install -y lynis
-
 	log "Done. Lynis repository configured and lynis installed."
+}
+
+check_prereqs() {
+	require_root
+	require_cmd dpkg
+	require_cmd gpg
+}
+
+prepare_platform() {
+	load_os_release
+	normalize_os_id
+	detect_release_codename
+	map_devuan_release
+	validate_release
+	detect_apt_cmd
+	detect_arch
+}
+
+run_setup() {
+	ensure_https_transport
+	install_keyring
+	write_repo_source
+	install_lynis
+}
+
+main() {
+	local OS_ID OS_LIKE RELEASE APT_CMD ARCH KEYRING TMPKEY TMPDEARMOR
+	check_prereqs
+	prepare_platform
+	run_setup
 }
 
 main "$@"

@@ -42,10 +42,11 @@ error() {
 	exit 1
 }
 
-# Ensure we run as root
-if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
-	error "This script must be run as root. Try: sudo $0"
-fi
+require_root() {
+	if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
+		error "This script must be run as root. Try: sudo $0"
+	fi
+}
 
 # Helper to ensure required commands exist
 require_cmd() {
@@ -54,18 +55,9 @@ require_cmd() {
 	fi
 }
 
-require_cmd curl
-require_cmd tar
-require_cmd install
-
 net_curl() {
 	curl -fLsS --retry 5 "$@"
 }
-
-OS="$(uname -s)"
-if [[ $OS != "Linux" ]]; then
-	error "this script currently supports only Linux."
-fi
 
 # Get the latest stable Go version (e.g. go1.25.5) from go.dev
 get_latest_go_version() {
@@ -78,129 +70,27 @@ get_latest_go_version() {
 	printf '%s\n' "$ver"
 }
 
-log "Checking latest Go version from go.dev..."
-LATEST_VERSION="$(get_latest_go_version || true)"
-
-if [[ -z ${LATEST_VERSION} ]]; then
-	error "could not fetch latest Go version from ${VERSION_URL}."
-fi
-
-log "Latest available Go version: ${LATEST_VERSION}"
-
-# Detect currently installed version (if any)
-CURRENT_VERSION=""
-if command -v go >/dev/null 2>&1; then
-	# Example: 'go version' → go version go1.25.5 linux/amd64
-	CURRENT_VERSION="$(go version 2>/dev/null | awk '{print $3}')"
-fi
-
-if [[ -n $CURRENT_VERSION ]]; then
-	log "Currently installed Go version: ${CURRENT_VERSION}"
-	if [[ $CURRENT_VERSION == "$LATEST_VERSION" ]]; then
-		log "Go is already up to date. Nothing to do."
-		exit 0
-	fi
-else
-	log "Go is not currently installed."
-fi
-
-# Determine architecture
-ARCH="$(uname -m)"
-GO_ARCH=""
-
-case "$ARCH" in
-# 64-bit x86
-x86_64 | amd64)
-	GO_ARCH="amd64"
-	;;
-# 32-bit x86
-i386 | i486 | i586 | i686 | x86)
-	GO_ARCH="386"
-	;;
-# 64-bit ARM
-aarch64 | arm64)
-	GO_ARCH="arm64"
-	;;
-# 32-bit ARM
-armv6l)
-	# Go provides linux-armv6l tarball
-	GO_ARCH="armv6l"
-	;;
-armv7l | armv7hl | armv7)
-	# Go upstream recommends using the armv6l tarball for 32-bit ARM
-	GO_ARCH="armv6l"
-	;;
-# LoongArch
-loongarch64)
-	GO_ARCH="loong64"
-	;;
-# MIPS (big-endian 32/64)
-mips)
-	GO_ARCH="mips"
-	;;
-mips64)
-	GO_ARCH="mips64"
-	;;
-# MIPS (little-endian 32/64)
-mipsel | mipsle)
-	GO_ARCH="mipsle"
-	;;
-mips64el | mips64le)
-	GO_ARCH="mips64le"
-	;;
-# PowerPC 64-bit (big- and little-endian)
-ppc64)
-	GO_ARCH="ppc64"
-	;;
-ppc64le | ppc64el)
-	GO_ARCH="ppc64le"
-	;;
-# RISC-V 64
-riscv64)
-	GO_ARCH="riscv64"
-	;;
-# IBM Z (s390x)
-s390x)
-	GO_ARCH="s390x"
-	;;
-*)
-	error "Unsupported architecture: ${ARCH}. No matching official Go Linux tarball known for this arch."
-	;;
-esac
-
-TAR_NAME="${LATEST_VERSION}.linux-${GO_ARCH}.tar.gz"
-TAR_URL="${GO_BASE_URL}/${TAR_NAME}"
-
-# Create a temporary file for the tarball
-TAR_FILE="$(mktemp /tmp/go-XXXXXX.tar.gz)"
-cleanup() {
-	rm -f "$TAR_FILE" 2>/dev/null || true
+detect_go_arch() {
+	local arch
+	arch="$(uname -m)"
+	case "$arch" in
+	x86_64 | amd64) printf '%s\n' "amd64" ;;
+	i386 | i486 | i586 | i686 | x86) printf '%s\n' "386" ;;
+	aarch64 | arm64) printf '%s\n' "arm64" ;;
+	armv6l) printf '%s\n' "armv6l" ;;
+	armv7l | armv7hl | armv7) printf '%s\n' "armv6l" ;;
+	loongarch64) printf '%s\n' "loong64" ;;
+	mips) printf '%s\n' "mips" ;;
+	mips64) printf '%s\n' "mips64" ;;
+	mipsel | mipsle) printf '%s\n' "mipsle" ;;
+	mips64el | mips64le) printf '%s\n' "mips64le" ;;
+	ppc64) printf '%s\n' "ppc64" ;;
+	ppc64le | ppc64el) printf '%s\n' "ppc64le" ;;
+	riscv64) printf '%s\n' "riscv64" ;;
+	s390x) printf '%s\n' "s390x" ;;
+	*) error "Unsupported architecture: ${arch}. No matching official Go Linux tarball known for this arch." ;;
+	esac
 }
-trap cleanup EXIT
-
-log "Downloading ${TAR_NAME} from ${TAR_URL}..."
-if ! net_curl "$TAR_URL" -o "$TAR_FILE"; then
-	error "download failed from ${TAR_URL}"
-fi
-
-log "Download complete: ${TAR_FILE}"
-log "Installing Go into ${GO_ROOT}..."
-
-# Ensure the installation directory exists (using install)
-install -d -m 0755 "${INSTALL_DIR}"
-
-# Remove previous Go tree if present
-if [[ -d $GO_ROOT ]]; then
-	log "Removing previous Go installation at ${GO_ROOT}..."
-	rm -rf "$GO_ROOT"
-fi
-
-# Extract the new Go tree under /usr/local
-tar -C "$INSTALL_DIR" -xzf "$TAR_FILE"
-
-log "Go installation finished successfully."
-log "Installed version:"
-"${GO_ROOT}/bin/go" version || true
 
 # Ensure /usr/local/go/bin is in system-wide PATH via /etc/profile
 ensure_go_path_in_etc_profile() {
@@ -228,7 +118,78 @@ ensure_go_path_in_etc_profile() {
 	log "${profile_file} updated to include /usr/local/go/bin in PATH."
 }
 
-ensure_go_path_in_etc_profile
+run_golang_update() {
+	OS="$(uname -s)"
+	if [[ $OS != "Linux" ]]; then
+		error "this script currently supports only Linux."
+	fi
 
-log "Done."
-log "Log out and log back in (or source /etc/profile) to ensure the new PATH is applied."
+	log "Checking latest Go version from go.dev..."
+	LATEST_VERSION="$(get_latest_go_version || true)"
+	if [[ -z ${LATEST_VERSION} ]]; then
+		error "could not fetch latest Go version from ${VERSION_URL}."
+	fi
+	log "Latest available Go version: ${LATEST_VERSION}"
+
+	CURRENT_VERSION=""
+	if command -v go >/dev/null 2>&1; then
+		CURRENT_VERSION="$(go version 2>/dev/null | awk '{print $3}')"
+	fi
+	if [[ -n $CURRENT_VERSION ]]; then
+		log "Currently installed Go version: ${CURRENT_VERSION}"
+		if [[ $CURRENT_VERSION == "$LATEST_VERSION" ]]; then
+			log "Go is already up to date. Nothing to do."
+			return 0
+		fi
+	else
+		log "Go is not currently installed."
+	fi
+
+	GO_ARCH="$(detect_go_arch)"
+	TAR_NAME="${LATEST_VERSION}.linux-${GO_ARCH}.tar.gz"
+	TAR_URL="${GO_BASE_URL}/${TAR_NAME}"
+	TAR_FILE="$(mktemp /tmp/go-XXXXXX.tar.gz)"
+	trap 'rm -f "$TAR_FILE" 2>/dev/null || true' EXIT
+
+	log "Downloading ${TAR_NAME} from ${TAR_URL}..."
+	if ! net_curl "$TAR_URL" -o "$TAR_FILE"; then
+		error "download failed from ${TAR_URL}"
+	fi
+
+	log "Download complete: ${TAR_FILE}"
+	log "Installing Go into ${GO_ROOT}..."
+	install -d -m 0755 "${INSTALL_DIR}"
+	if [[ -d $GO_ROOT ]]; then
+		log "Removing previous Go installation at ${GO_ROOT}..."
+		rm -rf "$GO_ROOT"
+	fi
+	tar -C "$INSTALL_DIR" -xzf "$TAR_FILE"
+
+	log "Go installation finished successfully."
+	log "Installed version:"
+	"${GO_ROOT}/bin/go" version || true
+
+	ensure_go_path_in_etc_profile
+	log "Done."
+	log "Log out and log back in (or source /etc/profile) to ensure the new PATH is applied."
+}
+
+run_update() {
+	run_golang_update
+}
+
+check_prereqs() {
+	require_root
+	require_cmd curl
+	require_cmd tar
+	require_cmd install
+	require_cmd uname
+	require_cmd mktemp
+}
+
+main() {
+	check_prereqs
+	run_update
+}
+
+main "$@"

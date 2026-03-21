@@ -669,15 +669,7 @@ collect_system_info() {
 	fi
 }
 
-# ---- Main ------------------------------------------------------------------
-main() {
-	log "Starting update process..."
-
-	update_system_image
-	update_firmware
-	update_homebrew
-	update_flatpak
-	maintain_filesystems
+run_optional_phases() {
 	if [[ -z ${SKIP_AUDIT:-} ]]; then
 		run_security_audit
 	else
@@ -689,16 +681,28 @@ main() {
 	else
 		log "Skipping Secureblue information collection (flag set)."
 	fi
+}
 
+bootstrap() {
+	ensure_root "$@"
+	parse_args "$@"
+	require_cmd awk getent stat journalctl systemctl
+	validate_nonroot_user
+}
+
+# ---- Main ------------------------------------------------------------------
+main() {
+	log "Starting update process..."
+
+	update_system_image
+	update_firmware
+	update_homebrew
+	update_flatpak
+	maintain_filesystems
+	run_optional_phases
 	log "Update process completed."
 }
 
 # Entry point
-ensure_root "$@"
-# Parse CLI args (may set SKIP_AUDIT or SKIP_COLLECT)
-parse_args "$@"
-# Base tools we use without extra checks
-require_cmd awk getent stat journalctl systemctl
-# Ensure we have an explicit, stable non-root user for runuser actions
-validate_nonroot_user
+bootstrap "$@"
 main "$@"

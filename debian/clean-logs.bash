@@ -30,43 +30,59 @@ log() { printf '%s %b[INFO]%b ✅ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$GREEN" 
 warn() { printf '%s %b[WARN]%b ⚠️ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$YELLOW" "$RESET" "$*"; }
 error() { printf '%s %b[ERROR]%b ❌ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$RED" "$RESET" "$*" >&2; }
 
+require_cmd() {
+	command -v "$1" >/dev/null 2>&1 || {
+		error "Required command '$1' not found."
+		exit 1
+	}
+}
+
 # If DRY_RUN=1 is set in the environment, the script will only show
 # what would be deleted, without actually removing files.
 DRY_RUN="${DRY_RUN:-0}"
 
-# Also allow --dry-run or -n as a first argument
-case "${1:-}" in
---dry-run | -n)
-	DRY_RUN=1
-	shift
-	;;
-esac
-log "----------------------------------------"
-log "Log cleanup started"
+parse_args() {
+	case "${1:-}" in
+	--dry-run | -n)
+		DRY_RUN=1
+		shift
+		;;
+	esac
+}
+
+cleanup_gz_logs() {
+	if [ "$DRY_RUN" -eq 1 ]; then
+		log "DRY RUN: listing *.gz files under /var/log (no deletion will occur):"
+		find /var/log -xdev -type f -name '*.gz' -print || true
+	else
+		log "Deleting *.gz files under /var/log..."
+		find /var/log -xdev -type f -name '*.gz' -print -delete || true
+	fi
+}
+
+cleanup_old_files() {
+	if [ "$DRY_RUN" -eq 1 ]; then
+		log "DRY RUN: listing *.old files under / (no deletion will occur):"
+		find / -xdev -type f -name '*.old' -print || true
+	else
+		log "Deleting *.old files under / (use with care)..."
+		find / -xdev -type f -name '*.old' -print -delete || true
+	fi
+}
+
+main() {
+	parse_args "$@"
+	require_cmd find
+
+	log "----------------------------------------"
+	log "Log cleanup started"
+	cleanup_gz_logs
+	cleanup_old_files
+	log "Log cleanup finished"
+	log "----------------------------------------"
+}
 
 #######################################
 # Delete all .gz files under /var/log #
 #######################################
-if [ "$DRY_RUN" -eq 1 ]; then
-	log "DRY RUN: listing *.gz files under /var/log (no deletion will occur):"
-	find /var/log -xdev -type f -name '*.gz' -print || true
-else
-	log "Deleting *.gz files under /var/log..."
-	# -xdev avoids crossing into other filesystems
-	find /var/log -xdev -type f -name '*.gz' -print -delete || true
-fi
-
-################################################################
-# Delete all .old files in the root filesystem (USE WITH CARE) #
-################################################################
-if [ "$DRY_RUN" -eq 1 ]; then
-	log "DRY RUN: listing *.old files under / (no deletion will occur):"
-	find / -xdev -type f -name '*.old' -print || true
-else
-	log "Deleting *.old files under / (use with care)..."
-	# -xdev keeps us on the root filesystem only, so we skip /proc, /sys, etc.
-	find / -xdev -type f -name '*.old' -print -delete || true
-fi
-
-log "Log cleanup finished"
-log "----------------------------------------"
+main "$@"
