@@ -40,42 +40,43 @@ require_cmd() {
 	fi
 }
 
-if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
-	error "This script must be run as root. Try: sudo $0"
-fi
+require_root() {
+	if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
+		error "This script must be run as root. Try: sudo $0"
+	fi
+}
 
-require_cmd awk
-require_cmd cp
-require_cmd date
-require_cmd dpkg
-require_cmd ps
+detect_apt_cmd() {
+	if command -v apt-get >/dev/null 2>&1; then
+		APT_CMD="apt-get"
+	elif command -v apt >/dev/null 2>&1; then
+		APT_CMD="apt"
+	else
+		error "Neither apt-get nor apt found. This script targets Debian-based systems."
+	fi
+}
 
-APT_CMD=""
-if command -v apt-get >/dev/null 2>&1; then
-	APT_CMD="apt-get"
-elif command -v apt >/dev/null 2>&1; then
-	APT_CMD="apt"
-else
-	error "Neither apt-get nor apt found. This script targets Debian-based systems."
-fi
+install_tor_transport_packages() {
+	log "Updating APT index and installing tor transport packages..."
+	"$APT_CMD" update
+	"$APT_CMD" install -y apt-transport-tor tor
+}
 
-log "Updating APT index and installing tor transport packages..."
-"$APT_CMD" update
-"$APT_CMD" install -y apt-transport-tor tor
+backup_sources() {
+	local timestamp backup_dir
+	timestamp="$(date +%Y%m%d%H%M%S)"
+	backup_dir="/etc/apt/tor-transport-backup-${timestamp}"
+	mkdir -p "$backup_dir"
 
-timestamp="$(date +%Y%m%d%H%M%S)"
-backup_dir="/etc/apt/tor-transport-backup-${timestamp}"
-mkdir -p "$backup_dir"
+	if [[ -f /etc/apt/sources.list ]]; then
+		cp -a /etc/apt/sources.list "$backup_dir/"
+	fi
+	if [[ -d /etc/apt/sources.list.d ]]; then
+		cp -a /etc/apt/sources.list.d "$backup_dir/"
+	fi
 
-# Back up sources.list and sources.list.d
-if [[ -f /etc/apt/sources.list ]]; then
-	cp -a /etc/apt/sources.list "$backup_dir/"
-fi
-if [[ -d /etc/apt/sources.list.d ]]; then
-	cp -a /etc/apt/sources.list.d "$backup_dir/"
-fi
-
-log "Backups stored in ${backup_dir}"
+	log "Backups stored in ${backup_dir}"
+}
 
 convert_list_file() {
 	local file="$1" tmp
@@ -231,25 +232,50 @@ enable_and_start_tor() {
 	warn "tor is installed, but you must start and enable it manually."
 }
 
-if [[ -f /etc/apt/sources.list ]]; then
-	log "Converting /etc/apt/sources.list..."
-	convert_list_file /etc/apt/sources.list
-fi
+convert_sources_to_tor_transport() {
+	if [[ -f /etc/apt/sources.list ]]; then
+		log "Converting /etc/apt/sources.list..."
+		convert_list_file /etc/apt/sources.list
+	fi
 
-if [[ -d /etc/apt/sources.list.d ]]; then
-	shopt -s nullglob
-	for f in /etc/apt/sources.list.d/*.list; do
-		log "Converting ${f}..."
-		convert_list_file "$f"
-	done
-	for f in /etc/apt/sources.list.d/*.sources; do
-		log "Converting ${f}..."
-		convert_sources_file "$f"
-	done
-	shopt -u nullglob
-fi
+	if [[ -d /etc/apt/sources.list.d ]]; then
+		shopt -s nullglob
+		for f in /etc/apt/sources.list.d/*.list; do
+			log "Converting ${f}..."
+			convert_list_file "$f"
+		done
+		for f in /etc/apt/sources.list.d/*.sources; do
+			log "Converting ${f}..."
+			convert_sources_file "$f"
+		done
+		shopt -u nullglob
+	fi
+}
 
-log "Enabling and starting tor service..."
-enable_and_start_tor
+check_prereqs() {
+	require_root
+	require_cmd awk
+	require_cmd cp
+	require_cmd date
+	require_cmd dpkg
+	require_cmd ps
+	require_cmd install
+}
 
-log "Conversion complete. Run 'apt update' to refresh indexes over Tor."
+run_enable_tor_transport() {
+	detect_apt_cmd
+	install_tor_transport_packages
+	backup_sources
+	convert_sources_to_tor_transport
+
+	log "Enabling and starting tor service..."
+	enable_and_start_tor
+	log "Conversion complete. Run 'apt update' to refresh indexes over Tor."
+}
+
+main() {
+	check_prereqs
+	run_enable_tor_transport
+}
+
+main "$@"

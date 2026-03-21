@@ -54,6 +54,13 @@ require_root() {
 	fi
 }
 
+require_cmd() {
+	command -v "$1" >/dev/null 2>&1 || {
+		error "Required command '$1' not found."
+		exit 1
+	}
+}
+
 backup_etc() {
 	local ts backup_dir archive baseline_root baseline_etc changes_manifest
 	local old_umask
@@ -395,9 +402,17 @@ collect_system_info_and_upload() {
 	fi
 }
 
-main() {
-	require_root
+check_prereqs() {
+	require_cmd date
+	require_cmd tar
+	require_cmd mktemp
+	require_cmd find
+	require_cmd chmod
+	require_cmd apt-cache
+	require_cmd "$APT_BIN"
+}
 
+run_maintenance() {
 	log "Starting apt maintenance run..."
 	backup_etc
 	apt_update
@@ -407,6 +422,12 @@ main() {
 	run_security_audit
 	collect_system_info_and_upload
 	log "Debian maintenance run completed successfully."
+}
+
+main() {
+	require_root
+	check_prereqs
+	run_maintenance
 }
 
 main "$@"

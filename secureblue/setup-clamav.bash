@@ -33,6 +33,9 @@ error() {
 
 require_root() { [[ ${EUID:-$(id -u)} -eq 0 ]] || error "Root required"; }
 have_cmd() { command -v "$1" >/dev/null 2>&1; }
+require_cmd() {
+	command -v "$1" >/dev/null 2>&1 || error "Required command '$1' not found"
+}
 
 ########################
 # PACKAGE INSTALLATION #
@@ -217,12 +220,15 @@ EOF
 	systemctl enable --now clamav-target-scan.timer
 }
 
-########
-# MAIN #
-########
+check_prereqs() {
+	require_cmd install
+	require_cmd sed
+	require_cmd systemctl
+	require_cmd rpm-ostree
+	require_cmd rpm
+}
 
-main() {
-	require_root
+run_setup() {
 	install_packages
 	fix_permissions
 	fix_selinux
@@ -232,6 +238,16 @@ main() {
 	configure_clamonacc
 	configure_periodic_scan
 	log "ClamAV installation and configuration completed successfully 🎉"
+}
+
+########
+# MAIN #
+########
+
+main() {
+	require_root
+	check_prereqs
+	run_setup
 }
 
 main "$@"

@@ -56,12 +56,16 @@ run_root() {
 	fi
 }
 
+require_cmd() {
+	command -v "$1" >/dev/null 2>&1 || {
+		error "Required command '$1' not found."
+		exit 1
+	}
+}
+
 ensure_cmd() {
 	for cmd in "$@"; do
-		if ! command -v "$cmd" >/dev/null 2>&1; then
-			error "Required command '$cmd' not found."
-			exit 1
-		fi
+		require_cmd "$cmd"
 	done
 }
 
@@ -134,10 +138,7 @@ install_msedit() {
 	run_root install -m 0755 "$bin" "$INSTALL_DIR/edit"
 }
 
-main() {
-	detect_root_cmd
-	ensure_cmd curl tar grep awk sort uname
-
+run_update() {
 	local installed latest arch asset
 	installed="$(get_installed_version || true)"
 	latest="$(get_latest_version)"
@@ -152,7 +153,7 @@ main() {
 
 	if [[ -n $installed ]] && version_is_up_to_date "$installed" "$latest"; then
 		log "edit is already up to date. Nothing to do."
-		exit 0
+		return 0
 	fi
 
 	arch="$(detect_arch)"
@@ -164,9 +165,18 @@ main() {
 	fi
 
 	install_msedit "$asset"
-
 	rm -rf "$TMPDIR"
 	log "edit successfully installed or updated to version $latest."
+}
+
+check_prereqs() {
+	detect_root_cmd
+	ensure_cmd curl tar grep awk sort uname
+}
+
+main() {
+	check_prereqs
+	run_update
 }
 
 main "$@"

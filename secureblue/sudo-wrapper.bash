@@ -44,93 +44,72 @@ error() {
 	exit 1
 }
 
-# Detect how this script was called (sudo vs visudo vs sudoedit, etc.)
-prog_name="$(basename -- "$0")"
+require_cmd() {
+	command -v "$1" >/dev/null 2>&1 || error "Required command '$1' not found in PATH."
+}
 
-# Optional: fail fast if run0 is not available in PATH.
-if ! command -v run0 >/dev/null 2>&1; then
-	error "${prog_name}-wrapper error: 'run0' is not installed or not in PATH. Please install or enable run0 before using this wrapper."
-fi
-
-##########################################
-# Special handling when called as visudo #
-##########################################
-if [[ $prog_name == "visudo" ]]; then
-	#
-	# We want to execute the real visudo binary with elevated privileges
-	# using run0, while avoiding recursive calls back into this wrapper.
-	#
-
-	# Preferred hard-coded path to the real visudo
-	real_visudo="/usr/sbin/visudo"
-
-	# If for some reason that path doesn't exist, fall back to command -v,
-	# but try to avoid picking up /usr/local/bin/visudo (this wrapper).
+handle_visudo() {
+	local real_visudo="$1"
 	if [[ ! -x $real_visudo ]]; then
-		# Look up visudo in PATH
-		real_visudo_found="$(command -v visudo 2>/dev/null || true)"
+		error "sudo-wrapper error: could not locate the real 'visudo' binary. Expected /usr/sbin/visudo or another executable visudo in PATH."
+	fi
+	export VISUDO_VIA_RUN0=1
+	exec run0 "$real_visudo" "$@"
+}
 
-		# If command -v returned our own path, we still have a problem,
-		# so double-check that it is not this script.
+resolve_real_visudo() {
+	local real_visudo="/usr/sbin/visudo"
+	if [[ ! -x $real_visudo ]]; then
+		local real_visudo_found
+		real_visudo_found="$(command -v visudo 2>/dev/null || true)"
 		if [[ -n $real_visudo_found && $real_visudo_found != "$0" ]]; then
 			real_visudo="$real_visudo_found"
 		fi
 	fi
+	printf '%s\n' "$real_visudo"
+}
 
-	# Final sanity check
-	if [[ ! -x $real_visudo ]]; then
-		error "sudo-wrapper error: could not locate the real 'visudo' binary. Expected /usr/sbin/visudo or another executable visudo in PATH."
-	fi
-
-	# Optional hint variable
-	export VISUDO_VIA_RUN0=1
-
-	# Execute real visudo via run0 as root
-	exec run0 "$real_visudo" "$@"
-	# We should never reach here
-	exit 1
-fi
-
-############################################
-# Special handling when called as sudoedit #
-############################################
-if [[ $prog_name == "sudoedit" ]]; then
-	#
-	# Use run0edit for graphical/safe editing as root.
-	#
+handle_sudoedit() {
 	if [[ $# -lt 1 ]]; then
 		error "Usage: sudoedit FILE..."
 	fi
 
-	# Determine preferred editor (pass to run0edit)
+	local editor
 	editor="${SUDO_EDITOR:-${VISUAL:-${EDITOR:-}}}"
-	run0edit_args=()
+	local run0edit_args=()
 	if [[ -n $editor ]]; then
 		run0edit_args+=(--editor "$editor")
 	fi
 
 	export SUDOEDIT_VIA_RUN0=1
 	exec run0edit "${run0edit_args[@]}" "$@"
-	exit 1
-fi
+}
 
-################################
-# Default path: called as sudo #
-################################
+handle_default_sudo() {
+	export SUDO_VIA_RUN0=1
+	export SUDO_PREFER_RUN0=1
+	exec run0 "$@"
+}
 
-# Export a variable so scripts can detect that sudo is being redirected to run0.
-# This is purely informational and has no effect on run0 itself.
-export SUDO_VIA_RUN0=1
+dispatch_by_prog_name() {
+	local prog_name="$1"
+	shift
 
-# Export variable indicating that run0 is preferred over sudo.
-# This can also be set globally (e.g. /etc/profile.d), but setting it here
-# ensures it is present in environments spawned via this wrapper.
-export SUDO_PREFER_RUN0=1
+	if [[ $prog_name == "visudo" ]]; then
+		handle_visudo "$(resolve_real_visudo)" "$@"
+	fi
+	if [[ $prog_name == "sudoedit" ]]; then
+		handle_sudoedit "$@"
+	fi
+	handle_default_sudo "$@"
+}
 
-# Optional: log when this wrapper is used, for auditing or debugging.
-# Comment this line out if you do not want extra log entries.
-# logger -t sudo-wrapper "sudo invoked as run0 by user '${USER:-unknown}' with args: $*"
+main() {
+	local prog_name
+	prog_name="$(basename -- "$0")"
 
-# Finally, exec run0 with all the arguments passed to sudo.
-# 'exec' replaces the current shell process with run0, keeping PID behavior clean.
-exec run0 "$@"
+	require_cmd run0
+	dispatch_by_prog_name "$prog_name" "$@"
+}
+
+main "$@"

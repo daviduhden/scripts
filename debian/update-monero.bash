@@ -33,6 +33,35 @@ MONERO_USER="monero"
 MONERO_DATA_DIR="/var/lib/monero"
 MONERO_LOG_DIR="/var/log/monero"
 MONEROD_CONF="/etc/monerod.conf"
+SKIP_SERVICE_AND_USER_SETUP=0
+
+usage() {
+	cat <<'EOF'
+Usage: update-monero.bash [--skip-service-and-user-setup]
+
+Options:
+  --skip-service-and-user-setup  Skip monero user creation and systemd install/enable steps.
+  -h, --help                     Show this help message and exit.
+EOF
+}
+
+parse_args() {
+	while [ "$#" -gt 0 ]; do
+		case "$1" in
+		--skip-service-and-user-setup)
+			SKIP_SERVICE_AND_USER_SETUP=1
+			;;
+		-h | --help)
+			usage
+			exit 0
+			;;
+		*)
+			error "Unknown option: $1"
+			;;
+		esac
+		shift
+	done
+}
 
 # Simple colors for messages
 if [ -t 1 ] && [ "${NO_COLOR:-0}" != "1" ]; then
@@ -54,10 +83,11 @@ error() {
 	exit 1
 }
 
-# Ensure we run as root
-if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
-	error "This script must be run as root. Try: sudo $0"
-fi
+require_root() {
+	if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
+		error "This script must be run as root. Try: sudo $0"
+	fi
+}
 
 # Helper to ensure required commands exist
 require_cmd() {
@@ -66,13 +96,18 @@ require_cmd() {
 	fi
 }
 
-require_cmd curl
-require_cmd tar
-require_cmd awk
-require_cmd systemctl
-require_cmd install
-require_cmd sha256sum
-require_cmd gpg
+check_prereqs() {
+	require_cmd curl
+	require_cmd tar
+	require_cmd awk
+	require_cmd systemctl
+	require_cmd install
+	require_cmd sha256sum
+	require_cmd gpg
+	if [[ ${SKIP_SERVICE_AND_USER_SETUP} -eq 0 ]]; then
+		require_cmd useradd
+	fi
+}
 
 net_curl() {
 	curl -fLsS --retry 5 "$@"
@@ -107,166 +142,171 @@ get_latest_release() {
 	awk -F'"' '/"tag_name":/ {print $4; exit}' <<<"$json"
 }
 
-log "Checking latest Monero CLI release from GitHub..."
-LATEST_TAG="$(get_latest_release || true)"
+run_update() {
+	log "Checking latest Monero CLI release from GitHub..."
+	LATEST_TAG="$(get_latest_release || true)"
 
-if [[ -z ${LATEST_TAG} ]]; then
-	error "could not fetch latest release tag from GitHub."
-fi
-
-log "Latest available tag: ${LATEST_TAG}"
-
-# Detect currently installed version (if any)
-CURRENT_VERSION_RAW=""
-if command -v monerod >/dev/null 2>&1; then
-	CURRENT_VERSION_RAW="$(monerod --version 2>/dev/null | awk 'NR==1{print}')"
-	log "Current monerod version line: ${CURRENT_VERSION_RAW:-unknown}"
-
-	# If current version string contains the latest tag, assume it's up to date
-	if [[ -n ${CURRENT_VERSION_RAW} && ${CURRENT_VERSION_RAW} == *"${LATEST_TAG}"* ]]; then
-		log "Monero CLI already at latest version (${LATEST_TAG})."
-		exit 0
+	if [[ -z ${LATEST_TAG} ]]; then
+		error "could not fetch latest release tag from GitHub."
 	fi
-else
-	log "Monero CLI is not currently installed (or not in PATH)."
-fi
 
-# Map architecture to CLI tarball platform name
-ARCH="$(uname -m)"
-PLATFORM=""
-case "$ARCH" in
-x86_64 | amd64)
-	PLATFORM="linux-x64"
-	;;
-i386 | i686)
-	PLATFORM="linux-x86"
-	;;
-aarch64 | arm64)
-	PLATFORM="linux-armv8"
-	;;
-armv7l | armv7*)
-	PLATFORM="linux-armv7"
-	;;
-riscv64)
-	PLATFORM="linux-riscv64"
-	;;
-*)
-	error "Unsupported architecture: ${ARCH}"
-	;;
-esac
+	log "Latest available tag: ${LATEST_TAG}"
 
-TARBALL="monero-${PLATFORM}-${LATEST_TAG}.tar.bz2"
-DOWNLOAD_URL="${DOWNLOAD_BASE}/${TARBALL}"
+	# Detect currently installed version (if any)
+	CURRENT_VERSION_RAW=""
+	if command -v monerod >/dev/null 2>&1; then
+		CURRENT_VERSION_RAW="$(monerod --version 2>/dev/null | awk 'NR==1{print}')"
+		log "Current monerod version line: ${CURRENT_VERSION_RAW:-unknown}"
 
-log "Detected architecture: ${ARCH} -> ${PLATFORM}"
-log "Tarball to download: ${TARBALL}"
-log "Download URL: ${DOWNLOAD_URL}"
+		# If current version string contains the latest tag, assume it's up to date
+		if [[ -n ${CURRENT_VERSION_RAW} && ${CURRENT_VERSION_RAW} == *"${LATEST_TAG}"* ]]; then
+			log "Monero CLI already at latest version (${LATEST_TAG})."
+			exit 0
+		fi
+	else
+		log "Monero CLI is not currently installed (or not in PATH)."
+	fi
 
-# Temporary working directory
-TMPDIR="$(mktemp -d /tmp/monero-cli-XXXXXX)"
-GPG_HOME="$(mktemp -d /tmp/monero-gpg-XXXXXX)"
-cleanup() {
-	rm -rf "$TMPDIR" "$GPG_HOME" 2>/dev/null || true
-}
-trap cleanup EXIT
+	# Map architecture to CLI tarball platform name
+	ARCH="$(uname -m)"
+	PLATFORM=""
+	case "$ARCH" in
+	x86_64 | amd64)
+		PLATFORM="linux-x64"
+		;;
+	i386 | i686)
+		PLATFORM="linux-x86"
+		;;
+	aarch64 | arm64)
+		PLATFORM="linux-armv8"
+		;;
+	armv7l | armv7*)
+		PLATFORM="linux-armv7"
+		;;
+	riscv64)
+		PLATFORM="linux-riscv64"
+		;;
+	*)
+		error "Unsupported architecture: ${ARCH}"
+		;;
+	esac
 
-log "Downloading Monero CLI ${LATEST_TAG}..."
-if ! net_curl "${DOWNLOAD_URL}" -o "${TMPDIR}/${TARBALL}"; then
-	error "download failed from ${DOWNLOAD_URL}"
-fi
+	TARBALL="monero-${PLATFORM}-${LATEST_TAG}.tar.bz2"
+	DOWNLOAD_URL="${DOWNLOAD_BASE}/${TARBALL}"
 
-log "Fetching reference hashes for verification..."
-HASHES_ASC="${TMPDIR}/hashes.txt"
-HASHES_PLAIN="${TMPDIR}/hashes-plain.txt"
-BINARYFATE_KEY="${TMPDIR}/binaryfate.asc"
+	log "Detected architecture: ${ARCH} -> ${PLATFORM}"
+	log "Tarball to download: ${TARBALL}"
+	log "Download URL: ${DOWNLOAD_URL}"
 
-if ! net_curl "${HASHES_URL}" -o "${HASHES_ASC}"; then
-	error "failed to download hash list from ${HASHES_URL}"
-fi
+	# Temporary working directory
+	TMPDIR="$(mktemp -d /tmp/monero-cli-XXXXXX)"
+	GPG_HOME="$(mktemp -d /tmp/monero-gpg-XXXXXX)"
+	cleanup() {
+		rm -rf "$TMPDIR" "$GPG_HOME" 2>/dev/null || true
+	}
+	trap cleanup EXIT
 
-log "Importing binaryFate signing key for hash verification..."
-if ! net_curl "${BINARYFATE_KEY_URL}" -o "${BINARYFATE_KEY}"; then
-	error "failed to download binaryFate GPG key"
-fi
+	log "Downloading Monero CLI ${LATEST_TAG}..."
+	if ! net_curl "${DOWNLOAD_URL}" -o "${TMPDIR}/${TARBALL}"; then
+		error "download failed from ${DOWNLOAD_URL}"
+	fi
 
-if ! gpg --homedir "$GPG_HOME" --batch --import "${BINARYFATE_KEY}" >/dev/null 2>&1; then
-	error "failed to import binaryFate GPG key"
-fi
+	log "Fetching reference hashes for verification..."
+	HASHES_ASC="${TMPDIR}/hashes.txt"
+	HASHES_PLAIN="${TMPDIR}/hashes-plain.txt"
+	BINARYFATE_KEY="${TMPDIR}/binaryfate.asc"
 
-log "Verifying hashes file signature..."
-if ! gpg --homedir "$GPG_HOME" --batch --verify "${HASHES_ASC}" >/dev/null 2>&1; then
-	error "hash file signature verification failed"
-fi
+	if ! net_curl "${HASHES_URL}" -o "${HASHES_ASC}"; then
+		error "failed to download hash list from ${HASHES_URL}"
+	fi
 
-if ! gpg --homedir "$GPG_HOME" --batch --output "${HASHES_PLAIN}" --decrypt "${HASHES_ASC}" >/dev/null 2>&1; then
-	error "failed to decrypt (strip signature from) hashes file"
-fi
+	log "Importing binaryFate signing key for hash verification..."
+	if ! net_curl "${BINARYFATE_KEY_URL}" -o "${BINARYFATE_KEY}"; then
+		error "failed to download binaryFate GPG key"
+	fi
 
-EXPECTED_HASH="$(awk -v fname="${TARBALL}" '$1 ~ /^[0-9a-f]{64}$/ && $2==fname{print $1; exit}' "${HASHES_PLAIN}")"
-if [[ -z ${EXPECTED_HASH} ]]; then
-	error "could not find expected hash for ${TARBALL} in downloaded hash list"
-fi
+	if ! gpg --homedir "$GPG_HOME" --batch --import "${BINARYFATE_KEY}" >/dev/null 2>&1; then
+		error "failed to import binaryFate GPG key"
+	fi
 
-ACTUAL_HASH="$(sha256sum "${TMPDIR}/${TARBALL}" | awk '{print $1}')"
-if [[ ${EXPECTED_HASH} != "${ACTUAL_HASH}" ]]; then
-	error "hash mismatch for ${TARBALL} (expected ${EXPECTED_HASH}, got ${ACTUAL_HASH})"
-fi
+	log "Verifying hashes file signature..."
+	if ! gpg --homedir "$GPG_HOME" --batch --verify "${HASHES_ASC}" >/dev/null 2>&1; then
+		error "hash file signature verification failed"
+	fi
 
-log "Hash verified for ${TARBALL}."
+	if ! gpg --homedir "$GPG_HOME" --batch --output "${HASHES_PLAIN}" --decrypt "${HASHES_ASC}" >/dev/null 2>&1; then
+		error "failed to decrypt (strip signature from) hashes file"
+	fi
 
-log "Extracting tarball..."
-tar -xjf "${TMPDIR}/${TARBALL}" -C "$TMPDIR"
+	EXPECTED_HASH="$(awk -v fname="${TARBALL}" '$1 ~ /^[0-9a-f]{64}$/ && $2==fname{print $1; exit}' "${HASHES_PLAIN}")"
+	if [[ -z ${EXPECTED_HASH} ]]; then
+		error "could not find expected hash for ${TARBALL} in downloaded hash list"
+	fi
 
-EXTRACTED_DIR="$(find "$TMPDIR" -maxdepth 1 -type d -name 'monero-*' | head -n1)"
-if [[ -z ${EXTRACTED_DIR} ]]; then
-	error "could not find extracted Monero directory."
-fi
+	ACTUAL_HASH="$(sha256sum "${TMPDIR}/${TARBALL}" | awk '{print $1}')"
+	if [[ ${EXPECTED_HASH} != "${ACTUAL_HASH}" ]]; then
+		error "hash mismatch for ${TARBALL} (expected ${EXPECTED_HASH}, got ${ACTUAL_HASH})"
+	fi
 
-log "Extracted directory: ${EXTRACTED_DIR}"
+	log "Hash verified for ${TARBALL}."
 
-# Stop monerod if it is running
-log "Stopping monerod service if it is running..."
-WAS_ACTIVE=0
-if systemctl is-active --quiet monerod; then
-	WAS_ACTIVE=1
-	systemctl stop monerod
-fi
+	log "Extracting tarball..."
+	tar -xjf "${TMPDIR}/${TARBALL}" -C "$TMPDIR"
 
-# Install binaries
-log "Installing binaries into ${INSTALL_DIR}..."
+	EXTRACTED_DIR="$(find "$TMPDIR" -maxdepth 1 -type d -name 'monero-*' | head -n1)"
+	if [[ -z ${EXTRACTED_DIR} ]]; then
+		error "could not find extracted Monero directory."
+	fi
 
-install -d "${INSTALL_DIR}"
+	log "Extracted directory: ${EXTRACTED_DIR}"
 
-installed_bins=0
-while IFS= read -r -d '' bin; do
-	log " -> installing $(basename "$bin")"
-	install -m 0755 "$bin" "${INSTALL_DIR}/"
-	installed_bins=$((installed_bins + 1))
-done < <(
-	find "$EXTRACTED_DIR" -maxdepth 2 -type f \
-		\( -name 'monerod' -o -name 'monero*' \) \
-		-perm -111 -print0 2>/dev/null | sort -z
-)
+	# Stop monerod if it is running
+	log "Stopping monerod service if it is running..."
+	WAS_ACTIVE=0
+	if systemctl is-active --quiet monerod; then
+		WAS_ACTIVE=1
+		systemctl stop monerod
+	fi
 
-if [[ $installed_bins -eq 0 ]]; then
-	error "no Monero binaries found under extracted directory: ${EXTRACTED_DIR}"
-fi
+	# Install binaries
+	log "Installing binaries into ${INSTALL_DIR}..."
 
-# Ensure monero user and directories
-log "Ensuring monero system user and directories exist..."
+	install -d "${INSTALL_DIR}"
 
-if ! id -u "${MONERO_USER}" >/dev/null 2>&1; then
-	log "Creating system user '${MONERO_USER}'..."
-	useradd --system --home-dir "${MONERO_DATA_DIR}" --shell /usr/sbin/nologin "${MONERO_USER}"
-fi
+	installed_bins=0
+	while IFS= read -r -d '' bin; do
+		log " -> installing $(basename "$bin")"
+		install -m 0755 "$bin" "${INSTALL_DIR}/"
+		installed_bins=$((installed_bins + 1))
+	done < <(
+		find "$EXTRACTED_DIR" -maxdepth 2 -type f \
+			\( -name 'monerod' -o -name 'monero*' \) \
+			-perm -111 -print0 2>/dev/null | sort -z
+	)
 
-mkdir -p "${MONERO_DATA_DIR}" "${MONERO_LOG_DIR}"
-chown -R "${MONERO_USER}:${MONERO_USER}" "${MONERO_DATA_DIR}" "${MONERO_LOG_DIR}"
+	if [[ $installed_bins -eq 0 ]]; then
+		error "no Monero binaries found under extracted directory: ${EXTRACTED_DIR}"
+	fi
 
-# Create a basic config file if it does not exist
-if [[ ! -f ${MONEROD_CONF} ]]; then
-	log "Creating basic monerod config at ${MONEROD_CONF}..."
-	cat >"${MONEROD_CONF}" <<EOF
+	# Ensure monero user and directories
+	if [[ ${SKIP_SERVICE_AND_USER_SETUP} -eq 0 ]]; then
+		log "Ensuring monero system user and directories exist..."
+
+		if ! id -u "${MONERO_USER}" >/dev/null 2>&1; then
+			log "Creating system user '${MONERO_USER}'..."
+			useradd --system --home-dir "${MONERO_DATA_DIR}" --shell /usr/sbin/nologin "${MONERO_USER}"
+		fi
+
+		mkdir -p "${MONERO_DATA_DIR}" "${MONERO_LOG_DIR}"
+		chown -R "${MONERO_USER}:${MONERO_USER}" "${MONERO_DATA_DIR}" "${MONERO_LOG_DIR}"
+	else
+		log "Skipping monero user creation and systemd setup as requested."
+	fi
+
+	# Create a basic config file if it does not exist
+	if [[ ! -f ${MONEROD_CONF} ]]; then
+		log "Creating basic monerod config at ${MONEROD_CONF}..."
+		cat >"${MONEROD_CONF}" <<EOF
 # Basic configuration for monerod generated by update script.
 # Adjust to your needs. Check 'monerod --help' for more options.
 
@@ -279,60 +319,72 @@ db-sync-mode=safe
 max-log-file-size=10485760
 max-log-files=5
 EOF
-	chmod 644 "${MONEROD_CONF}"
-fi
-
-# Update systemd unit from the official repository (always replace)
-log "Updating systemd unit: /etc/systemd/system/monerod.service..."
-install -d /etc/systemd/system
-
-UNIT_TMP="${TMPDIR}/monerod.service"
-download_systemd_unit() {
-	local out_file="$1"
-
-	# Preferred method: use git to fetch the file contents.
-	if has_cmd git; then
-		local git_tmp
-		git_tmp="$(mktemp -d /tmp/monero-unit-git-XXXXXX)"
-		(
-			cd "$git_tmp"
-			git init -q
-			git remote add origin "$REPO_URL"
-			# Shallow fetch only the default branch tip (master in upstream repo)
-			git fetch -q --depth 1 origin master
-			git show "FETCH_HEAD:utils/systemd/monerod.service" >"$out_file"
-		) >/dev/null 2>&1 && rm -rf -- "$git_tmp" && return 0
-		rm -rf -- "$git_tmp" 2>/dev/null || true
-		warn "git fetch/show for systemd unit failed; falling back to curl."
+		chmod 644 "${MONEROD_CONF}"
 	fi
 
-	net_curl "${SYSTEMD_UNIT_URL}" -o "$out_file"
+	if [[ ${SKIP_SERVICE_AND_USER_SETUP} -eq 0 ]]; then
+		# Update systemd unit from the official repository (always replace)
+		log "Updating systemd unit: /etc/systemd/system/monerod.service..."
+		install -d /etc/systemd/system
+
+		UNIT_TMP="${TMPDIR}/monerod.service"
+		download_systemd_unit() {
+			local out_file="$1"
+
+			# Preferred method: use git to fetch the file contents.
+			if has_cmd git; then
+				local git_tmp
+				git_tmp="$(mktemp -d /tmp/monero-unit-git-XXXXXX)"
+				(
+					cd "$git_tmp"
+					git init -q
+					git remote add origin "$REPO_URL"
+					# Shallow fetch only the default branch tip (master in upstream repo)
+					git fetch -q --depth 1 origin master
+					git show "FETCH_HEAD:utils/systemd/monerod.service" >"$out_file"
+				) >/dev/null 2>&1 && rm -rf -- "$git_tmp" && return 0
+				rm -rf -- "$git_tmp" 2>/dev/null || true
+				warn "git fetch/show for systemd unit failed; falling back to curl."
+			fi
+
+			net_curl "${SYSTEMD_UNIT_URL}" -o "$out_file"
+		}
+
+		if ! download_systemd_unit "${UNIT_TMP}"; then
+			error "failed to download systemd unit (git/curl chain)"
+		fi
+
+		# This always overwrites the target file, whether it exists or not
+		install -m 0644 "${UNIT_TMP}" /etc/systemd/system/monerod.service
+
+		log "Reloading systemd daemon..."
+		systemctl daemon-reload
+
+		log "Enabling monerod service at boot..."
+		systemctl enable monerod >/dev/null 2>&1 || true
+
+		if [[ $WAS_ACTIVE -eq 1 ]]; then
+			log "Restarting monerod..."
+			systemctl restart monerod
+		else
+			log "monerod was not running before."
+			log "You can start it now with: systemctl start monerod"
+		fi
+	fi
+
+	# Show final version
+	if command -v monerod >/dev/null 2>&1; then
+		log "Installed Monero CLI version: $(monerod --version | head -n1 || true)"
+	fi
+
+	log "Monero CLI install/update completed successfully."
 }
 
-if ! download_systemd_unit "${UNIT_TMP}"; then
-	error "failed to download systemd unit (git/curl chain)"
-fi
+main() {
+	require_root
+	parse_args "$@"
+	check_prereqs
+	run_update
+}
 
-# This always overwrites the target file, whether it exists or not
-install -m 0644 "${UNIT_TMP}" /etc/systemd/system/monerod.service
-
-log "Reloading systemd daemon..."
-systemctl daemon-reload
-
-log "Enabling monerod service at boot..."
-systemctl enable monerod >/dev/null 2>&1 || true
-
-if [[ $WAS_ACTIVE -eq 1 ]]; then
-	log "Restarting monerod..."
-	systemctl restart monerod
-else
-	log "monerod was not running before."
-	log "You can start it now with: systemctl start monerod"
-fi
-
-# Show final version
-if command -v monerod >/dev/null 2>&1; then
-	log "Installed Monero CLI version: $(monerod --version | head -n1 || true)"
-fi
-
-log "Monero CLI install/update completed successfully."
+main "$@"

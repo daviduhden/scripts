@@ -68,8 +68,6 @@ parse_args() {
 	done
 }
 
-parse_args "$@"
-
 # Simple colors for messages
 if [ -t 1 ] && [ "${NO_COLOR:-0}" != "1" ]; then
 	GREEN="\033[32m"
@@ -96,6 +94,13 @@ require_root() {
 		error "This script must be run as root (sudo)."
 		exit 1
 	fi
+}
+
+require_cmd() {
+	command -v "$1" >/dev/null 2>&1 || {
+		error "Required command '$1' not found."
+		exit 1
+	}
 }
 
 net_curl() {
@@ -156,19 +161,28 @@ ask_reboot() {
 	esac
 }
 
+check_prereqs() {
+	require_root
+	require_cmd curl
+	require_cmd bash
+	require_cmd reboot
+	check_network
+}
+
+run_update() {
+	run_eeprom_update
+	run_control_update
+	log "All Argon One V3 update steps completed."
+	ask_reboot
+}
+
 # ---- Main ------------------------------------------------------------------
 
 main() {
+	parse_args "$@"
 	log "Argon One V3 maintenance: EEPROM + control script update"
-
-	require_root
-	check_network
-
-	run_eeprom_update
-	run_control_update
-
-	log "All Argon One V3 update steps completed."
-	ask_reboot
+	check_prereqs
+	run_update
 }
 
 main "$@"

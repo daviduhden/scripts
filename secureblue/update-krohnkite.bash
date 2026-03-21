@@ -31,12 +31,16 @@ log() { printf '%s %b[INFO]%b ✅ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$GREEN" 
 warn() { printf '%s %b[WARN]%b ⚠️ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$YELLOW" "$RESET" "$*"; }
 error() { printf '%s %b[ERROR]%b ❌ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$RED" "$RESET" "$*" >&2; }
 
+require_cmd() {
+	command -v "$1" >/dev/null 2>&1 || {
+		error "Required command '$1' not found."
+		exit 1
+	}
+}
+
 ensure_cmd() {
 	for cmd in "$@"; do
-		if ! command -v "$cmd" >/dev/null 2>&1; then
-			error "Required command '$cmd' not found."
-			exit 1
-		fi
+		require_cmd "$cmd"
 	done
 }
 
@@ -100,15 +104,22 @@ install_krohnkite() {
 	fi
 }
 
-main() {
+check_prereqs() {
 	ensure_cmd git task npm 7z kpackagetool6
+}
 
+run_update() {
 	prepare_repo
 	build_krohnkite
 	install_krohnkite
 
 	log "Krohnkite successfully built and installed."
 	log "Restart KWin or log out/in if required."
+}
+
+main() {
+	check_prereqs
+	run_update
 }
 
 main "$@"

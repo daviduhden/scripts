@@ -62,6 +62,105 @@ net_curl() {
 	curl -fLsS --retry 5 "$@"
 }
 
+require_root() {
+	if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
+		error "This script must be run as root. Try: sudo $0"
+	fi
+}
+
+detect_apt_cmd() {
+	if command -v apt-get >/dev/null 2>&1; then
+		APT_CMD="apt-get"
+	elif command -v apt >/dev/null 2>&1; then
+		APT_CMD="apt"
+	else
+		error "neither 'apt-get' nor 'apt' is available. This script supports only Debian-like/Ubuntu-like systems."
+	fi
+}
+
+load_os_release() {
+	if [[ -r /etc/os-release ]]; then
+		# shellcheck source=/dev/null
+		source /etc/os-release
+	else
+		error "/etc/os-release not found. Cannot detect distribution."
+	fi
+}
+
+normalize_os_id() {
+	OS_ID="${ID:-}"
+	if [[ $OS_ID != "debian" && $OS_ID != "devuan" && $OS_ID != "raspbian" && $OS_ID != "ubuntu" && ${ID_LIKE:-} == *"ubuntu"* ]]; then
+		OS_ID="ubuntu"
+	fi
+}
+
+validate_supported_base() {
+	if [[ ${ID_LIKE:-} != *"debian"* && ${ID_LIKE:-} != *"ubuntu"* && $OS_ID != "debian" && $OS_ID != "devuan" && $OS_ID != "raspbian" && $OS_ID != "ubuntu" ]]; then
+		error "this script is intended for Debian/Devuan/Ubuntu-based systems (bookworm or newer)."
+	fi
+}
+
+log_detected_platform() {
+	log "Detected OS ID: ${OS_ID}"
+	log "Detected OS codename: ${OS_CODENAME}"
+	log "Using Tor repo suite codename: ${SUITE_CODENAME}"
+	log "Using native APT architecture: ${ARCH_FILTER}"
+}
+
+install_tor_key() {
+	log "Importing Tor Project signing key..."
+	install -d -m 0755 /usr/share/keyrings
+	net_curl "https://deb.torproject.org/torproject.org/A3C4F0F979CAA22CDBA8F512EE8CBC9E886DDD89.asc" |
+		gpg --dearmor -o /usr/share/keyrings/deb.torproject.org-keyring.gpg
+}
+
+write_tor_sources() {
+	log "Writing APT deb822 sources file for Tor..."
+	rm -f /etc/apt/sources.list.d/tor.list
+	cat >/etc/apt/sources.list.d/tor.sources <<EOF
+Types: deb deb-src
+URIs: ${REPO_URL}
+Suites: ${SUITE_CODENAME}
+Components: main
+Architectures: ${ARCH_FILTER}
+Signed-By: /usr/share/keyrings/deb.torproject.org-keyring.gpg
+EOF
+
+	cat >>/etc/apt/sources.list.d/tor.sources <<EOF
+
+Enabled: no
+Types: deb deb-src
+URIs: ${REPO_URL}
+Suites: tor-nightly-main-${SUITE_CODENAME}
+Components: main
+Architectures: ${ARCH_FILTER}
+Signed-By: /usr/share/keyrings/deb.torproject.org-keyring.gpg
+EOF
+}
+
+install_tor_packages() {
+	log "Updating APT index (including Tor repository)..."
+	"$APT_CMD" update
+
+	log "Installing tor, torsocks, obfs4proxy and deb.torproject.org-keyring..."
+	"$APT_CMD" install -y tor torsocks obfs4proxy deb.torproject.org-keyring
+}
+
+run_setup() {
+	get_suite_codename
+	detect_architecture
+	ensure_base_dependencies
+	choose_repo_transport
+	log_detected_platform
+	install_tor_key
+	write_tor_sources
+	install_tor_packages
+
+	log "Enabling and starting tor service..."
+	enable_and_start_tor
+	log "Done. Tor should now be installed and (where supported) enabled and running."
+}
+
 get_suite_codename() {
 	# Detect OS codename
 	if [[ -n ${DEBIAN_CODENAME:-} ]]; then
@@ -300,87 +399,15 @@ enable_and_start_tor() {
 }
 
 main() {
-	if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
-		error "This script must be run as root. Try: sudo $0"
-	fi
-
+	require_root
 	require_cmd curl
 	require_cmd dpkg
 	require_cmd ps
-
-	if command -v apt-get >/dev/null 2>&1; then
-		APT_CMD="apt-get"
-	elif command -v apt >/dev/null 2>&1; then
-		APT_CMD="apt"
-	else
-		error "neither 'apt-get' nor 'apt' is available. This script supports only Debian-like/Ubuntu-like systems."
-	fi
-
-	if [[ -r /etc/os-release ]]; then
-		# shellcheck source=/dev/null
-		source /etc/os-release
-	else
-		error "/etc/os-release not found. Cannot detect distribution."
-	fi
-
-	OS_ID="${ID:-}"
-
-	# Normalize Ubuntu-like derivatives to ubuntu for support checks
-	if [[ $OS_ID != "debian" && $OS_ID != "devuan" && $OS_ID != "raspbian" && $OS_ID != "ubuntu" && ${ID_LIKE:-} == *"ubuntu"* ]]; then
-		OS_ID="ubuntu"
-	fi
-
-	if [[ ${ID_LIKE:-} != *"debian"* && ${ID_LIKE:-} != *"ubuntu"* && $OS_ID != "debian" && $OS_ID != "devuan" && $OS_ID != "raspbian" && $OS_ID != "ubuntu" ]]; then
-		error "this script is intended for Debian/Devuan/Ubuntu-based systems (bookworm or newer)."
-	fi
-
-	get_suite_codename
-	detect_architecture
-	ensure_base_dependencies
-	choose_repo_transport
-
-	log "Detected OS ID: ${OS_ID}"
-	log "Detected OS codename: ${OS_CODENAME}"
-	log "Using Tor repo suite codename: ${SUITE_CODENAME}"
-	log "Using native APT architecture: ${ARCH_FILTER}"
-
-	log "Importing Tor Project signing key..."
-	install -d -m 0755 /usr/share/keyrings
-	net_curl "https://deb.torproject.org/torproject.org/A3C4F0F979CAA22CDBA8F512EE8CBC9E886DDD89.asc" |
-		gpg --dearmor -o /usr/share/keyrings/deb.torproject.org-keyring.gpg
-
-	log "Writing APT deb822 sources file for Tor..."
-	rm -f /etc/apt/sources.list.d/tor.list
-	cat >/etc/apt/sources.list.d/tor.sources <<EOF
-Types: deb deb-src
-URIs: ${REPO_URL}
-Suites: ${SUITE_CODENAME}
-Components: main
-Architectures: ${ARCH_FILTER}
-Signed-By: /usr/share/keyrings/deb.torproject.org-keyring.gpg
-EOF
-
-	cat >>/etc/apt/sources.list.d/tor.sources <<EOF
-
-Enabled: no
-Types: deb deb-src
-URIs: ${REPO_URL}
-Suites: tor-nightly-main-${SUITE_CODENAME}
-Components: main
-Architectures: ${ARCH_FILTER}
-Signed-By: /usr/share/keyrings/deb.torproject.org-keyring.gpg
-EOF
-
-	log "Updating APT index (including Tor repository)..."
-	"$APT_CMD" update
-
-	log "Installing tor, torsocks, obfs4proxy and deb.torproject.org-keyring..."
-	"$APT_CMD" install -y tor torsocks obfs4proxy deb.torproject.org-keyring
-
-	log "Enabling and starting tor service..."
-	enable_and_start_tor
-
-	log "Done. Tor should now be installed and (where supported) enabled and running."
+	detect_apt_cmd
+	load_os_release
+	normalize_os_id
+	validate_supported_base
+	run_setup
 }
 
 main "$@"

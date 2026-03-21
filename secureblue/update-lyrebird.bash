@@ -36,6 +36,10 @@ error() {
 	exit 1
 }
 
+require_cmd() {
+	command -v "$1" >/dev/null 2>&1 || error "Required command '$1' not found."
+}
+
 detect_root_cmd() {
 	if [ "${EUID:-$(id -u)}" -eq 0 ]; then
 		ROOT_CMD=""
@@ -57,7 +61,7 @@ run_root() {
 }
 
 ensure_git() {
-	command -v git >/dev/null 2>&1 || error "git is required but not installed."
+	require_cmd git
 }
 
 ensure_go() {
@@ -78,7 +82,7 @@ ensure_go() {
 		error "Go is not installed and Homebrew is not available. Please install Go manually."
 	fi
 
-	command -v go >/dev/null 2>&1 || error "Go installation failed."
+	require_cmd go
 	log "Using Go at: $(command -v go)"
 }
 
@@ -128,21 +132,33 @@ install_lyrebird() {
 	log "Lyrebird installed successfully."
 }
 
-main() {
+check_prereqs() {
 	detect_root_cmd
 	ensure_git
 	ensure_go
+}
 
-	clone_or_update_repo
+maybe_skip_build() {
 	if [ "$SKIP_BUILD" -eq 1 ]; then
 		log "No build required. Exiting."
 		return 0
 	fi
+	return 1
+}
 
+run_update() {
+	clone_or_update_repo
+	if maybe_skip_build; then
+		return 0
+	fi
 	build_lyrebird
 	install_lyrebird
-
 	log "Done. Make sure $INSTALL_PATH is in your PATH."
+}
+
+main() {
+	check_prereqs
+	run_update
 }
 
 main "$@"

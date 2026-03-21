@@ -63,17 +63,13 @@ net_curl() {
 	curl -fLsS --retry 5 "$@"
 }
 
-main() {
-	# Ensure we run as root
+require_root() {
 	if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
 		error "This script must be run as root. Try: sudo $0"
 	fi
+}
 
-	require_cmd curl
-	require_cmd dpkg
-	require_cmd ps
-
-	# Detect apt/apt-get
+detect_apt_cmd() {
 	if command -v apt-get >/dev/null 2>&1; then
 		APT_CMD="apt-get"
 	elif command -v apt >/dev/null 2>&1; then
@@ -81,44 +77,51 @@ main() {
 	else
 		error "neither 'apt-get' nor 'apt' is available. This script supports only Debian-like/Ubuntu-like systems."
 	fi
+}
 
-	# Load system release information
+load_os_release() {
 	if [[ -r /etc/os-release ]]; then
 		# shellcheck source=/dev/null
 		source /etc/os-release
 	else
 		error "/etc/os-release not found. Cannot detect distribution."
 	fi
+}
 
+normalize_dist() {
 	DIST="${ID:-}"
-
 	if [[ $DIST != "debian" && $DIST != "devuan" && $DIST != "raspbian" && $DIST != "ubuntu" && ${ID_LIKE:-} == *"ubuntu"* ]]; then
 		DIST="ubuntu"
 	fi
+}
 
+validate_supported_base() {
 	if [[ ${ID_LIKE:-} != *"debian"* && ${ID_LIKE:-} != *"ubuntu"* && $DIST != "debian" && $DIST != "devuan" && $DIST != "raspbian" && $DIST != "ubuntu" ]]; then
 		error "This installer supports Debian/Devuan/Ubuntu-based systems (bookworm or newer)."
 	fi
+}
 
-	get_release
-	detect_arch_filter
-	ensure_base_dependencies
-
-	# Compute repo release codename (Raspbian uses <release>-rpi)
+compute_repo_release() {
 	REPO_RELEASE="$RELEASE"
 	if [[ $DIST == "raspbian" ]]; then
 		REPO_RELEASE="${RELEASE}-rpi"
 	fi
+}
 
+log_detected_platform() {
 	log "Detected distribution: ${DIST}"
 	log "Detected release codename: ${RELEASE}"
 	log "Using repo release codename: ${REPO_RELEASE}"
 	log "Using native APT architecture: ${ARCH_FILTER}"
+}
 
+install_repo_key() {
 	log "Importing signing key..."
 	install -d -m 0755 /usr/share/keyrings
 	net_curl https://repo.i2pd.xyz/r4sas.gpg | gpg --dearmor -o /usr/share/keyrings/purplei2p.gpg
+}
 
+write_i2pd_sources() {
 	log "Writing APT deb822 sources file for Purple I2P..."
 	rm -f /etc/apt/sources.list.d/purplei2p.list
 	cat >/etc/apt/sources.list.d/purplei2p.sources <<EOF
@@ -130,7 +133,6 @@ Architectures: ${ARCH_FILTER}
 Signed-By: /usr/share/keyrings/purplei2p.gpg
 EOF
 
-	# Optional deb-src stanza, disabled by default. Set Enabled: yes to use.
 	cat >>/etc/apt/sources.list.d/purplei2p.sources <<EOF
 
 Enabled: no
@@ -141,17 +143,41 @@ Components: main
 Architectures: ${ARCH_FILTER}
 Signed-By: /usr/share/keyrings/purplei2p.gpg
 EOF
+}
 
+install_i2pd() {
 	log "Updating APT index..."
 	"$APT_CMD" update
 
 	log "Installing i2pd..."
 	"$APT_CMD" install -y i2pd
+}
+
+run_setup() {
+	get_release
+	detect_arch_filter
+	ensure_base_dependencies
+	compute_repo_release
+	log_detected_platform
+	install_repo_key
+	write_i2pd_sources
+	install_i2pd
 
 	log "Enabling and starting i2pd service..."
 	enable_and_start_i2pd
-
 	log "Done. i2pd should now be installed and (where supported) enabled and running."
+}
+
+main() {
+	require_root
+	require_cmd curl
+	require_cmd dpkg
+	require_cmd ps
+	detect_apt_cmd
+	load_os_release
+	normalize_dist
+	validate_supported_base
+	run_setup
 }
 
 get_release() {

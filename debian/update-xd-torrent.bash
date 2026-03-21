@@ -31,6 +31,35 @@ XD_HOME_DIR="/var/lib/XD"
 # Control: set when the local copy is already on the latest tag
 SKIP_BUILD=0
 WAS_ACTIVE=0
+SKIP_SERVICE_AND_USER_SETUP=0
+
+usage() {
+	cat <<'EOF'
+Usage: update-xd-torrent.bash [--skip-service-and-user-setup]
+
+Options:
+  --skip-service-and-user-setup  Skip xd user/group creation and systemd install/enable steps.
+  -h, --help                     Show this help message and exit.
+EOF
+}
+
+parse_args() {
+	while [ "$#" -gt 0 ]; do
+		case "$1" in
+		--skip-service-and-user-setup)
+			SKIP_SERVICE_AND_USER_SETUP=1
+			;;
+		-h | --help)
+			usage
+			exit 0
+			;;
+		*)
+			error "Unknown option: $1"
+			;;
+		esac
+		shift
+	done
+}
 
 # Colors
 if [ -t 1 ] && [ "${NO_COLOR:-0}" != "1" ]; then
@@ -162,25 +191,54 @@ install_systemd_service() {
 	fi
 }
 
-main() {
+check_prereqs() {
 	require_root
 	require_cmd git
 	require_cmd curl
 	require_cmd systemctl
 	require_cmd install
 	require_cmd getent
-	require_cmd useradd
-	require_cmd groupadd
-	ensure_go
-	clone_or_update_repo
-	ensure_xd_user_group_and_home
-	stop_xd_if_running
+	if [ "$SKIP_SERVICE_AND_USER_SETUP" -eq 0 ]; then
+		require_cmd useradd
+		require_cmd groupadd
+	fi
+}
+
+prepare_service_state() {
+	if [ "$SKIP_SERVICE_AND_USER_SETUP" -eq 0 ]; then
+		ensure_xd_user_group_and_home
+		stop_xd_if_running
+	else
+		log "Skipping xd user/group creation and systemd setup as requested."
+	fi
+}
+
+build_if_needed() {
 	if [ "$SKIP_BUILD" -eq 1 ]; then
 		log "No build required. Continuing with system setup."
 	else
 		build_and_install_XD
 	fi
-	install_systemd_service
+}
+
+finalize_service_setup() {
+	if [ "$SKIP_SERVICE_AND_USER_SETUP" -eq 0 ]; then
+		install_systemd_service
+	fi
+}
+
+run_update() {
+	ensure_go
+	clone_or_update_repo
+	prepare_service_state
+	build_if_needed
+	finalize_service_setup
+}
+
+main() {
+	parse_args "$@"
+	check_prereqs
+	run_update
 }
 
 main "$@"

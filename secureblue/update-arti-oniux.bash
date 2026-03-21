@@ -34,6 +34,13 @@ log() { printf '%s %b[INFO]%b ✅ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$GREEN" 
 warn() { printf '%s %b[WARN]%b ⚠️ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$YELLOW" "$RESET" "$*"; }
 error() { printf '%s %b[ERROR]%b ❌ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$RED" "$RESET" "$*" >&2; }
 
+require_cmd() {
+	command -v "$1" >/dev/null 2>&1 || {
+		error "Required command '$1' not found."
+		exit 1
+	}
+}
+
 detect_root_cmd() {
 	if [ "${EUID:-$(id -u)}" -eq 0 ]; then
 		ROOT_CMD=""
@@ -210,17 +217,25 @@ install_or_update_oniux() {
 	fi
 }
 
-main() {
+check_prereqs() {
 	detect_root_cmd
+	require_cmd install
+	require_cmd mkdir
+	require_cmd awk
 	ensure_rust
 	ensure_git
+}
 
+run_update() {
 	mkdir -p "$CARGO_BIN_DIR"
-
 	install_or_update_arti
 	install_or_update_oniux
-
 	log "Done. Make sure /usr/local/bin is in your PATH."
+}
+
+main() {
+	check_prereqs
+	run_update
 }
 
 main "$@"

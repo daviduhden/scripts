@@ -41,6 +41,12 @@ sub die_tool {
     exit 1;
 }
 
+sub require_cmd {
+    my ($cmd) = @_;
+    return if defined $cmd && length $cmd && find_in_path($cmd);
+    die_tool("Required command '$cmd' not found in PATH.");
+}
+
 my $known_hosts = $ENV{SSH_MENU_KNOWN_HOSTS} // "$ENV{HOME}/.ssh/known_hosts";
 my $freq_file   = $ENV{SSH_MENU_FREQ_FILE}
   // "$ENV{HOME}/.cache/ssh-menu/frequencies";
@@ -531,6 +537,8 @@ sub update_frequency {
 }
 
 sub main {
+
+    require_cmd('ssh');
 
     ensure_known_hosts_exists();
     setup_ssh_askpass();

@@ -104,17 +104,32 @@ install_lyrebird() {
 	log "Lyrebird installed successfully."
 }
 
-main() {
+check_prereqs() {
 	require_root
 	require_cmd git
 	ensure_go
-	clone_or_update_repo
+}
+
+maybe_skip_build() {
 	if [ "$SKIP_BUILD" -eq 1 ]; then
 		log "No build required. Exiting."
+		return 0
+	fi
+	return 1
+}
+
+run_update() {
+	clone_or_update_repo
+	if maybe_skip_build; then
 		exit 0
 	fi
 	build_lyrebird
 	install_lyrebird
+}
+
+main() {
+	check_prereqs
+	run_update
 }
 
 main "$@"
