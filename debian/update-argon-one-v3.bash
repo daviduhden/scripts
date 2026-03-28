@@ -45,17 +45,22 @@ EOF
 }
 
 parse_args() {
+	local flag_used=0
 	while [[ $# -gt 0 ]]; do
 		case "$1" in
 		-r | --auto-reboot)
+			flag_used=1
 			AUTO_REBOOT="yes"
 			shift
 			;;
 		-N | --no-reboot)
+			flag_used=1
 			AUTO_REBOOT="no"
 			shift
 			;;
 		-h | --help)
+			flag_used=1
+			warn "CLI flag detected; using non-default options instead of standard behavior."
 			usage
 			exit 0
 			;;
@@ -66,6 +71,9 @@ parse_args() {
 			;;
 		esac
 	done
+	if [[ $flag_used -eq 1 ]]; then
+		warn "CLI flag detected; using non-default options instead of standard behavior."
+	fi
 }
 
 # Simple colors for messages

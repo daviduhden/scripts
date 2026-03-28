@@ -222,9 +222,11 @@ USAGE
 
 # Parse CLI arguments (set SKIP_AUDIT and SKIP_COLLECT)
 parse_args() {
+	local flag_used=0
 	while [[ ${1:-} != "" ]]; do
 		case "$1" in
 		--user)
+			flag_used=1
 			shift
 			if [[ -z ${1:-} ]]; then
 				error "--user requires a username argument."
@@ -234,14 +236,18 @@ parse_args() {
 			shift
 			;;
 		--skip-audit)
+			flag_used=1
 			SKIP_AUDIT=1
 			shift
 			;;
 		--skip-collect)
+			flag_used=1
 			SKIP_COLLECT=1
 			shift
 			;;
 		--help | -h)
+			flag_used=1
+			warn "CLI flag detected; using non-default options instead of standard behavior."
 			usage
 			;;
 		*)
@@ -250,6 +256,9 @@ parse_args() {
 			;;
 		esac
 	done
+	if [[ $flag_used -eq 1 ]]; then
+		warn "CLI flag detected; using non-default options instead of standard behavior."
+	fi
 }
 
 # ---- Maintenance phases ----------------------------------------------------
@@ -339,7 +348,7 @@ update_homebrew() {
 
 	log "Running brew as configured user: $NONROOT_USER"
 	run_as_user "$NONROOT_USER" brew update || warn "brew update failed (continuing)."
-	run_as_user "$NONROOT_USER" brew upgrade || warn "brew upgrade failed (continuing)."
+	run_as_user "$NONROOT_USER" brew upgrade --greedy || warn "brew upgrade failed (continuing)."
 	run_as_user "$NONROOT_USER" brew cleanup || warn "brew cleanup failed (continuing)."
 }
 
