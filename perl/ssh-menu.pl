@@ -5,6 +5,7 @@
 #  - Parses known_hosts and de-duplicates hosts (including custom ports)
 #  - Presents a numbered menu to choose a server
 #  - Prompts for the SSH username (default from SSH_MENU_USER or $USER)
+#  - Remembers the last SSH username used and reuses it as default
 #  - Persists usage frequencies to sort frequently used hosts to the top
 #  - Supports custom aliases via a separate alias file
 #  - Supports known_hosts entry deletion and alias management via menus
@@ -52,6 +53,8 @@ my $freq_file   = $ENV{SSH_MENU_FREQ_FILE}
   // "$ENV{HOME}/.cache/ssh-menu/frequencies";
 my $alias_file = $ENV{SSH_MENU_ALIAS_FILE}
   // "$ENV{HOME}/.cache/ssh-menu/aliases";
+my $last_user_file = $ENV{SSH_MENU_LAST_USER_FILE}
+  // "$ENV{HOME}/.cache/ssh-menu/last-user";
 
 my @entries;
 my %seen;
@@ -60,6 +63,7 @@ my %freq;
 my $freq_file_exists;
 my %alias;
 my $alias_file_exists;
+my $last_user = '';
 
 ########################
 # 0. Small helper bits #
@@ -120,10 +124,12 @@ sub setup_openbsd_sandbox {
     my $known_hosts_dir = parent_dir($known_hosts);
     my $freq_dir        = parent_dir($freq_file);
     my $alias_dir       = parent_dir($alias_file);
+    my $last_user_dir   = parent_dir($last_user_file);
 
     push @rw_dirs, $known_hosts_dir if defined $known_hosts_dir;
     push @rw_dirs, $freq_dir        if defined $freq_dir;
     push @rw_dirs, $alias_dir       if defined $alias_dir;
+    push @rw_dirs, $last_user_dir   if defined $last_user_dir;
 
     my %uniq;
     @rw_dirs = grep { defined $_ && length $_ && !$uniq{$_}++ } @rw_dirs;
@@ -183,12 +189,29 @@ sub write_freq_file {
     }
 }
 
+sub write_last_user_file {
+    my ($user) = @_;
+    return unless defined $user && length $user;
+
+    my ($dir) = $last_user_file =~ m{^(.*)/[^/]+$};
+    make_path($dir) if defined $dir && length $dir;
+
+    if ( open my $ufh, '>', $last_user_file ) {
+        print {$ufh} "$user\n";
+        close $ufh;
+    }
+    else {
+        logw("Could not write last user file $last_user_file: $!");
+    }
+}
+
 sub reset_state {
     @entries           = ();
     %seen              = ();
     $hashed_count      = 0;
     %freq              = ();
     %alias             = ();
+    $last_user         = '';
     $freq_file_exists  = -f $freq_file  ? 1 : 0;
     $alias_file_exists = -f $alias_file ? 1 : 0;
 }
@@ -230,10 +253,30 @@ sub load_alias_file {
     }
 }
 
+sub load_last_user_file {
+    return unless -f $last_user_file;
+
+    if ( open my $ufh, '<', $last_user_file ) {
+        my $line = <$ufh>;
+        close $ufh;
+
+        if ( defined $line ) {
+            chomp $line;
+            if ( $line =~ /\S/ ) {
+                $last_user = $line;
+            }
+        }
+    }
+    else {
+        logw("Could not read last user file $last_user_file: $!");
+    }
+}
+
 sub load_state_from_disk {
     reset_state();
     load_freq_file();
     load_alias_file();
+    load_last_user_file();
 }
 
 ###########################
@@ -487,7 +530,7 @@ sub select_entry_menu {
 #####################
 
 sub prompt_ssh_user {
-    my $default_user = $ENV{SSH_MENU_USER} // $ENV{USER} // '';
+    my $default_user = $last_user || $ENV{SSH_MENU_USER} || $ENV{USER} || '';
 
     print "${BOLD}SSH user${RESET}"
       . ( length $default_user ? " [${CYAN}$default_user${RESET}]" : '' )
@@ -508,6 +551,9 @@ sub prompt_ssh_user {
     if ( $ssh_user =~ /^\s+$/ ) {
         die_tool("Empty user. Aborting.");
     }
+
+    $last_user = $ssh_user;
+    write_last_user_file($last_user);
 
     return $ssh_user;
 }
