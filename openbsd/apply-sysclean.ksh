@@ -54,6 +54,7 @@ parse_args() {
 	case "${1:-}" in
 	--dry-run | -n)
 		DRY_RUN=1
+		warn "CLI flag detected; using non-default options instead of standard behavior."
 		shift
 		;;
 	esac

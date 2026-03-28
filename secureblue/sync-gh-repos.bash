@@ -104,13 +104,17 @@ EOF
 }
 
 parse_args() {
+	local flag_used=0
 	while [ $# -gt 0 ]; do
 		case "$1" in
 		-n | --non-interactive)
+			flag_used=1
 			NON_INTERACTIVE=1
 			shift
 			;;
 		-h | --help)
+			flag_used=1
+			warn "CLI flag detected; using non-default options instead of standard behavior."
 			usage
 			exit 0
 			;;
@@ -120,6 +124,9 @@ parse_args() {
 			;;
 		esac
 	done
+	if [ "$flag_used" -eq 1 ]; then
+		warn "CLI flag detected; using non-default options instead of standard behavior."
+	fi
 }
 
 resolve_base_dir() {

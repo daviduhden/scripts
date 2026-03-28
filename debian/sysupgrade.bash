@@ -153,6 +153,22 @@ backup_etc() {
 	log "Backup completed (incremental)."
 }
 
+cleanup_old_backups() {
+	if [[ ! -d "$BACKUP_ROOT" ]]; then
+		return 0
+	fi
+
+	# Keep baseline data and remove only timestamped backup directories older than 7 days.
+	if find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d \
+		! -name '.baseline' \
+		-regextype posix-extended -regex '.*/[0-9]{8}-[0-9]{6}' \
+		-mtime +7 -print0 2>/dev/null | xargs -0r rm -rf --; then
+		log "Old /etc backups older than 7 days removed (if any)."
+	else
+		warn "Failed to clean old /etc backups in ${BACKUP_ROOT}."
+	fi
+}
+
 apt_update() {
 	log "Updating package lists..."
 	"$APT_BIN" update
@@ -160,7 +176,6 @@ apt_update() {
 
 apt_full_upgrade() {
 	local codename target
-	log "Running full-upgrade using backports (when available)..."
 
 	codename="$(
 		. /etc/os-release 2>/dev/null || true
@@ -169,37 +184,31 @@ apt_full_upgrade() {
 	if [[ -z "$codename" ]] && command -v lsb_release >/dev/null 2>&1; then
 		codename="$(lsb_release -sc 2>/dev/null || true)"
 	fi
-	if [[ -z "$codename" ]]; then
-		warn "Could not determine Debian codename; running full-upgrade without backports."
-		"$APT_BIN" -y \
-			-o Dpkg::Options::="--force-confdef" \
-			-o Dpkg::Options::="--force-confnew" \
-			-o Dpkg::Options::="--force-confmiss" \
-			-o APT::Get::Assume-Yes=true \
-			full-upgrade
-		return 0
-	fi
 
-	target="${codename}-backports"
-
-	# Only use -t if backports is actually configured.
-	if apt-cache policy 2>/dev/null | grep -Fq "$target"; then
-		log "Using target release: ${target}"
-		"$APT_BIN" -y \
-			-o Dpkg::Options::="--force-confdef" \
-			-o Dpkg::Options::="--force-confnew" \
-			-o Dpkg::Options::="--force-confmiss" \
-			-o APT::Get::Assume-Yes=true \
-			full-upgrade -t "$target"
+	if [[ -n "$codename" ]]; then
+		target="${codename}-backports"
+		if apt-cache policy 2>/dev/null | grep -Fq "$target"; then
+			log "Running full-upgrade prioritizing backports (${target})..."
+			"$APT_BIN" -y \
+				-o Dpkg::Options::="--force-confdef" \
+				-o Dpkg::Options::="--force-confnew" \
+				-o Dpkg::Options::="--force-confmiss" \
+				-o APT::Get::Assume-Yes=true \
+				full-upgrade -t "$target"
+		else
+			warn "Backports (${target}) not found in APT policy; skipping backports-priority pass."
+		fi
 	else
-		warn "Backports (${target}) not found in APT policy; running full-upgrade without -t."
-		"$APT_BIN" -y \
-			-o Dpkg::Options::="--force-confdef" \
-			-o Dpkg::Options::="--force-confnew" \
-			-o Dpkg::Options::="--force-confmiss" \
-			-o APT::Get::Assume-Yes=true \
-			full-upgrade
+		warn "Could not determine Debian codename; skipping backports-priority pass."
 	fi
+
+	log "Running second full-upgrade pass using all configured APT repositories..."
+	"$APT_BIN" -y \
+		-o Dpkg::Options::="--force-confdef" \
+		-o Dpkg::Options::="--force-confnew" \
+		-o Dpkg::Options::="--force-confmiss" \
+		-o APT::Get::Assume-Yes=true \
+		full-upgrade
 }
 
 apt_cleanup() {
@@ -415,6 +424,7 @@ check_prereqs() {
 run_maintenance() {
 	log "Starting apt maintenance run..."
 	backup_etc
+	cleanup_old_backups
 	apt_update
 	apt_full_upgrade
 	apt_cleanup

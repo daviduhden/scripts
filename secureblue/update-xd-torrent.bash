@@ -31,12 +31,16 @@ EOF
 }
 
 parse_args() {
+	local flag_used=0
 	while [ "$#" -gt 0 ]; do
 		case "$1" in
 		--skip-service-and-user-setup)
+			flag_used=1
 			SKIP_SERVICE_AND_USER_SETUP=1
 			;;
 		-h | --help)
+			flag_used=1
+			warn "CLI flag detected; using non-default options instead of standard behavior."
 			usage
 			exit 0
 			;;
@@ -46,6 +50,9 @@ parse_args() {
 		esac
 		shift
 	done
+	if [ "$flag_used" -eq 1 ]; then
+		warn "CLI flag detected; using non-default options instead of standard behavior."
+	fi
 }
 
 # Colors
