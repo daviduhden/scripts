@@ -28,7 +28,6 @@ alias chmod='chmod --preserve-root'
 # --------------------------------------------------
 # Editors
 # --------------------------------------------------
-alias edit='msedit'
 alias nano='nano -l'
 alias vi='vim'
 alias svi='run0 vim'
