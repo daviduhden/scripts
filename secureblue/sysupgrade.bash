@@ -282,7 +282,36 @@ update_system_image() {
 	log "Updating system via rpm-ostree (non-interactive)..."
 	rpm-ostree update || warn "rpm-ostree update failed (continuing)."
 	rpm-ostree upgrade || warn "rpm-ostree upgrade failed (continuing)."
+	cleanup_inactive_rpm_ostree_requests
 	rpm-ostree cleanup -bm || warn "rpm-ostree cleanup failed (continuing)."
+}
+
+cleanup_inactive_rpm_ostree_requests() {
+	local inactive_line
+	inactive_line="$(
+		rpm-ostree status --verbose 2>/dev/null |
+			awk '/InactiveRequests:/ {
+				sub(/.*InactiveRequests:[[:space:]]*/, "", $0)
+				print
+				exit
+			}'
+	)"
+
+	if [[ -z ${inactive_line:-} || ${inactive_line} == "(none)" ]]; then
+		log "No inactive rpm-ostree requests detected."
+		return
+	fi
+
+	inactive_line="${inactive_line//,/ }"
+	# shellcheck disable=SC2206
+	local inactive_requests=($inactive_line)
+	if ((${#inactive_requests[@]} == 0)); then
+		log "No inactive rpm-ostree requests detected."
+		return
+	fi
+
+	log "Removing inactive rpm-ostree requests: ${inactive_requests[*]}"
+	rpm-ostree uninstall "${inactive_requests[@]}" || warn "Failed to remove one or more inactive rpm-ostree requests (continuing)."
 }
 
 update_firmware() {

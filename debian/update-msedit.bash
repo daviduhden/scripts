@@ -69,9 +69,17 @@ ensure_cmd() {
 	done
 }
 
+cleanup() {
+	rm -rf "$TMPDIR" 2>/dev/null || true
+}
+
+net_curl() {
+	curl -fLsS --retry 5 "$@"
+}
+
 detect_arch() {
 	case "$(uname -m)" in
-	x86_64) echo "x86_64" ;;
+	x86_64 | amd64) echo "x86_64" ;;
 	aarch64) echo "aarch64" ;;
 	*)
 		error "Unsupported architecture."
@@ -81,18 +89,30 @@ detect_arch() {
 }
 
 get_installed_version() {
+	local version
+
 	if ! command -v edit >/dev/null 2>&1; then
 		return 1
 	fi
 
-	edit -v 2>/dev/null | awk '{print $3}'
+	version="$(
+		edit --version 2>/dev/null |
+			awk 'match($0,/[0-9]+\.[0-9]+\.[0-9]+/){print substr($0,RSTART,RLENGTH); exit}'
+	)"
+	if [[ -z ${version:-} ]]; then
+		version="$(
+			edit -v 2>/dev/null |
+				awk 'match($0,/[0-9]+\.[0-9]+\.[0-9]+/){print substr($0,RSTART,RLENGTH); exit}'
+		)"
+	fi
+
+	[[ -n ${version:-} ]] || return 1
+	printf '%s\n' "$version"
 }
 
-get_latest_version() {
-	curl -fsSL "$GITHUB_API" |
-		grep -Eo '"tag_name":[^"]+' |
-		cut -d'"' -f4 |
-		sed 's/^v//'
+get_latest_version_from_json() {
+	local json="$1"
+	awk -F'"' '/"tag_name":/ {print $4; exit}' <<<"$json" | sed 's/^v//'
 }
 
 version_is_up_to_date() {
@@ -102,15 +122,14 @@ version_is_up_to_date() {
 	[[ "$(printf '%s\n%s\n' "$latest" "$installed" | sort -V | tail -n1)" == "$installed" ]]
 }
 
-get_release_asset() {
-	local arch="$1"
+get_release_asset_from_json() {
+	local json="$1"
+	local arch="$2"
 
-	curl -fsSL "$GITHUB_API" |
-		grep -Eo '"browser_download_url":[^"]+' |
-		cut -d'"' -f4 |
-		grep linux |
-		grep "$arch" |
-		grep '\.tar\.gz$' |
+	awk -F'"' '/"browser_download_url":/ {print $4}' <<<"$json" |
+		grep -F linux |
+		grep -F "$arch" |
+		grep -E '\.tar\.gz$' |
 		head -n1
 }
 
@@ -139,9 +158,15 @@ install_msedit() {
 }
 
 run_update() {
-	local installed latest arch asset
+	local installed latest arch asset release_json
 	installed="$(get_installed_version || true)"
-	latest="$(get_latest_version)"
+	release_json="$(net_curl "$GITHUB_API")"
+	latest="$(get_latest_version_from_json "$release_json")"
+
+	if [[ -z ${latest:-} ]]; then
+		error "Could not determine latest version from GitHub release metadata."
+		exit 1
+	fi
 
 	if [[ -n $installed ]]; then
 		log "Installed version: $installed"
@@ -157,7 +182,7 @@ run_update() {
 	fi
 
 	arch="$(detect_arch)"
-	asset="$(get_release_asset "$arch")"
+	asset="$(get_release_asset_from_json "$release_json" "$arch")"
 
 	if [[ -z $asset ]]; then
 		error "No suitable binary found for this architecture."
@@ -171,10 +196,11 @@ run_update() {
 
 check_prereqs() {
 	detect_root_cmd
-	ensure_cmd curl tar grep awk sort uname
+	ensure_cmd curl tar grep awk sort uname find mktemp head install sed
 }
 
 main() {
+	trap cleanup EXIT
 	check_prereqs
 	run_update
 }
