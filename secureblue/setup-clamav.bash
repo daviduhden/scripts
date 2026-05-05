@@ -37,6 +37,27 @@ require_cmd() {
 	command -v "$1" >/dev/null 2>&1 || error "Required command '$1' not found"
 }
 
+# Fedora's ClamAV account naming has varied across releases/packages.
+# Resolve a usable service account dynamically for Atomic 44+.
+CLAMAV_USER=""
+CLAMAV_GROUP=""
+
+resolve_clamav_account() {
+	for candidate in clamav clamscan; do
+		if id -u "$candidate" >/dev/null 2>&1; then
+			CLAMAV_USER="$candidate"
+			break
+		fi
+	done
+
+	[[ -n "$CLAMAV_USER" ]] || error "No ClamAV service user found (tried: clamav, clamscan)"
+
+	CLAMAV_GROUP="$(id -gn "$CLAMAV_USER")"
+	[[ -n "$CLAMAV_GROUP" ]] || error "Could not resolve primary group for $CLAMAV_USER"
+
+	log "Using ClamAV service account: ${CLAMAV_USER}:${CLAMAV_GROUP}"
+}
+
 ########################
 # PACKAGE INSTALLATION #
 ########################
@@ -44,7 +65,7 @@ require_cmd() {
 install_packages() {
 	log "Installing ClamAV packages"
 
-	for pkg in clamd clamav clamav-data clamav-lib clamav-filesystem clamav-freshclam; do
+	for pkg in clamd clamav clamav-freshclam policycoreutils-python-utils; do
 		if ! rpm -q "$pkg" >/dev/null 2>&1; then
 			rpm-ostree install -y "$pkg" || warn "Failed to layer $pkg (may already be installed)"
 		else
@@ -60,13 +81,13 @@ install_packages() {
 fix_permissions() {
 	log "Fixing filesystem permissions"
 
-	install -d -m 0775 -o clamscan -g clamscan /var/lib/clamav
-	install -d -m 0775 -o clamscan -g clamscan /var/log/clamav
-	install -d -m 0775 -o clamscan -g clamscan /run/clamd.scan
+	install -d -m 0775 -o "$CLAMAV_USER" -g "$CLAMAV_GROUP" /var/lib/clamav
+	install -d -m 0775 -o "$CLAMAV_USER" -g "$CLAMAV_GROUP" /var/log/clamav
+	install -d -m 0775 -o "$CLAMAV_USER" -g "$CLAMAV_GROUP" /run/clamd.scan
 	install -d -m 0770 -o root -g root /var/spool/quarantine
 
 	touch /var/log/freshclam.log
-	chown clamscan:clamscan /var/log/freshclam.log
+	chown "$CLAMAV_USER:$CLAMAV_GROUP" /var/log/freshclam.log
 	chmod 0664 /var/log/freshclam.log
 }
 
@@ -127,9 +148,11 @@ configure_clamd() {
 		-e 's/^Example/#Example/' \
 		-e 's|^#LocalSocket .*|LocalSocket /run/clamd.scan/clamd.sock|' \
 		-e 's|^#LocalSocketMode .*|LocalSocketMode 0660|' \
-		-e 's|^#User .*|User clamav|' \
+		-e "s|^#User .*|User $CLAMAV_USER|" \
 		-e 's|^#LogFile .*|LogFile /var/log/clamav/clamd.log|' \
 		-e 's|^#ScanOnAccess .*|ScanOnAccess yes|' \
+		-e 's|^#OnAccessIncludePath .*|OnAccessIncludePath /var/home|' \
+		-e 's|^#OnAccessExcludeRootUID .*|OnAccessExcludeRootUID yes|' \
 		/etc/clamd.d/scan.conf
 
 	systemctl enable --now clamd@scan.service
@@ -151,6 +174,7 @@ Requires=clamd@scan.service
 [Service]
 ExecStart=/usr/sbin/clamonacc \
   --fdpass \
+	--config-file=/etc/clamd.d/scan.conf \
   --log=/var/log/clamav/clamonacc.log \
   --exclude-dir=/proc \
   --exclude-dir=/sys \
@@ -158,6 +182,7 @@ ExecStart=/usr/sbin/clamonacc \
   --exclude-dir=/tmp \
   --exclude-dir=/var/lib/containers
 Restart=always
+RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
@@ -226,10 +251,13 @@ check_prereqs() {
 	require_cmd systemctl
 	require_cmd rpm-ostree
 	require_cmd rpm
+	require_cmd restorecon
+	require_cmd semanage
 }
 
 run_setup() {
 	install_packages
+	resolve_clamav_account
 	fix_permissions
 	fix_selinux
 	configure_freshclam
