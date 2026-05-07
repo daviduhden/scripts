@@ -330,36 +330,80 @@ ensure_base_dependencies() {
 	fi
 }
 
+service_action() {
+	local action_desc="$1"
+	shift
+	if "$@"; then
+		return 0
+	fi
+	warn "Failed to ${action_desc}."
+	return 1
+}
+
+systemd_unit_exists() {
+	systemctl list-unit-files | grep -q "^$1[[:space:]]"
+}
+
+ensure_systemd_unit_active() {
+	local unit="$1"
+
+	service_action "enable ${unit} with systemd" systemctl enable "$unit" || return 1
+
+	if ! systemctl restart "$unit"; then
+		warn "Failed to restart ${unit} with systemd; trying start instead."
+		service_action "start ${unit} with systemd" systemctl start "$unit" || return 1
+	fi
+
+	if ! systemctl is-active --quiet "$unit"; then
+		warn "systemd reports ${unit} is not active after start/restart."
+		return 1
+	fi
+
+	log "Verified ${unit} is active."
+}
+
 enable_i2pd_shepherd() {
 	log "Detected GNU Shepherd. Enabling and starting i2pd via shepherd..."
-	herd enable i2pd || true
-	herd start i2pd || true
+	service_action "enable i2pd with shepherd" herd enable i2pd || return 1
+	service_action "start i2pd with shepherd" herd start i2pd
 }
 
 enable_i2pd_openrc() {
 	log "Detected OpenRC. Enabling and starting i2pd via OpenRC..."
-	rc-update add i2pd default || true
-	rc-service i2pd restart || rc-service i2pd start || true
+	service_action "enable i2pd with OpenRC" rc-update add i2pd default || return 1
+
+	if rc-service i2pd restart; then
+		return 0
+	fi
+	warn "Failed to restart i2pd with OpenRC; trying start instead."
+	service_action "start i2pd with OpenRC" rc-service i2pd start
 }
 
 enable_i2pd_runit() {
 	log "Detected runit. Enabling and starting i2pd via runit..."
 	if [[ -d /etc/sv/i2pd && ! -e /etc/service/i2pd ]]; then
 		mkdir -p /etc/service
-		ln -s /etc/sv/i2pd /etc/service/i2pd || true
+		service_action "link i2pd into runit service directory" ln -s /etc/sv/i2pd /etc/service/i2pd || return 1
 	fi
-	sv restart i2pd || sv start i2pd || true
+
+	if sv restart i2pd; then
+		return 0
+	fi
+	warn "Failed to restart i2pd with runit; trying start instead."
+	service_action "start i2pd with runit" sv start i2pd
 }
 
 enable_i2pd_systemd() {
 	log "Detected systemd. Enabling and starting i2pd.service..."
-	systemctl daemon-reload || true
+	if ! systemctl daemon-reload; then
+		warn "Failed to reload systemd daemon. Continuing with service management."
+	fi
 
-	if systemctl list-unit-files | grep -q '^i2pd\.service[[:space:]]'; then
-		systemctl enable i2pd.service
-		systemctl restart i2pd.service
+	if systemd_unit_exists 'i2pd.service'; then
+		ensure_systemd_unit_active 'i2pd.service'
 	else
-		warn "i2pd systemd service not found; you may need to enable/start it manually."
+		warn "i2pd systemd service not found; cannot verify active state."
+		return 1
 	fi
 }
 
@@ -369,18 +413,34 @@ enable_i2pd_s6() {
 }
 
 enable_i2pd_sysv() {
+	local failed=0
+
 	log "Detected SysV-style init. Enabling and starting i2pd via init scripts..."
 	if command -v update-rc.d >/dev/null 2>&1; then
-		update-rc.d i2pd defaults || true
+		service_action "enable i2pd with update-rc.d" update-rc.d i2pd defaults || failed=1
 	elif command -v chkconfig >/dev/null 2>&1; then
-		chkconfig i2pd on || true
+		service_action "enable i2pd with chkconfig" chkconfig i2pd on || failed=1
+	else
+		warn "No SysV enable helper (update-rc.d/chkconfig) found for i2pd."
+		failed=1
 	fi
 
 	if command -v service >/dev/null 2>&1; then
-		service i2pd restart || service i2pd start || true
+		if ! service i2pd restart; then
+			warn "Failed to restart i2pd via service; trying start instead."
+			service_action "start i2pd via service" service i2pd start || failed=1
+		fi
 	elif [[ -x /etc/init.d/i2pd ]]; then
-		/etc/init.d/i2pd restart || /etc/init.d/i2pd start || true
+		if ! /etc/init.d/i2pd restart; then
+			warn "Failed to restart i2pd via /etc/init.d/i2pd; trying start instead."
+			service_action "start i2pd via /etc/init.d/i2pd" /etc/init.d/i2pd start || failed=1
+		fi
+	else
+		warn "No SysV i2pd service script found."
+		failed=1
 	fi
+
+	return "$failed"
 }
 
 enable_and_start_i2pd() {
@@ -445,6 +505,7 @@ enable_and_start_i2pd() {
 
 	warn "could not detect a known service manager (systemd, SysV, OpenRC, runit, s6, shepherd)."
 	warn "i2pd is installed, but you must start and enable it manually."
+	return 1
 }
 
 main "$@"

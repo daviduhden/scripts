@@ -47,6 +47,61 @@ log() { printf '%s %b[INFO]%b ✅ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$GREEN" 
 warn() { printf '%s %b[WARN]%b ⚠️ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$YELLOW" "$RESET" "$*"; }
 error() { printf '%s %b[ERROR]%b ❌ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$RED" "$RESET" "$*" >&2; }
 
+declare -a PHASE_ORDER=()
+declare -A PHASE_STATUS=()
+declare -A PHASE_KIND=()
+declare -A PHASE_LABEL=()
+
+record_phase_status() {
+	local phase="$1" kind="$2" label="$3" status="$4"
+	PHASE_ORDER+=("$phase")
+	PHASE_KIND["$phase"]="$kind"
+	PHASE_LABEL["$phase"]="$label"
+	PHASE_STATUS["$phase"]="$status"
+}
+
+run_phase() {
+	local phase="$1" kind="$2" label="$3" phase_fn="$4"
+	if "$phase_fn"; then
+		record_phase_status "$phase" "$kind" "$label" "SUCCESS"
+	else
+		record_phase_status "$phase" "$kind" "$label" "FAILED"
+		if [[ $kind == "mandatory" ]]; then
+			error "Mandatory phase failed: ${label}"
+		else
+			warn "Optional phase failed: ${label}"
+		fi
+	fi
+}
+
+print_phase_summary() {
+	local phase status kind mandatory_failures=0 optional_failures=0 successes=0 skipped=0
+
+	printf '\nPhase summary:\n'
+	for phase in "${PHASE_ORDER[@]}"; do
+		status="${PHASE_STATUS[$phase]}"
+		kind="${PHASE_KIND[$phase]}"
+		printf ' - %s [%s]: %s\n' "${PHASE_LABEL[$phase]}" "$kind" "$status"
+		case "$status" in
+		SUCCESS) ((successes += 1)) ;;
+		SKIPPED) ((skipped += 1)) ;;
+		FAILED)
+			if [[ $kind == "mandatory" ]]; then
+				((mandatory_failures += 1))
+			else
+				((optional_failures += 1))
+			fi
+			;;
+		esac
+	done
+
+	log "Phase totals: success=${successes}, skipped=${skipped}, optional_failed=${optional_failures}, mandatory_failed=${mandatory_failures}"
+	if ((mandatory_failures > 0)); then
+		return 1
+	fi
+	return 0
+}
+
 require_root() {
 	if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
 		error "This script must be run as root (sudo)."
@@ -423,15 +478,26 @@ check_prereqs() {
 
 run_maintenance() {
 	log "Starting apt maintenance run..."
-	backup_etc
-	cleanup_old_backups
-	apt_update
-	apt_full_upgrade
-	apt_cleanup
-	restart_services
-	run_security_audit
-	collect_system_info_and_upload
-	log "Debian maintenance run completed successfully."
+	PHASE_ORDER=()
+	PHASE_STATUS=()
+	PHASE_KIND=()
+	PHASE_LABEL=()
+
+	run_phase "backup-etc" "mandatory" "Backup /etc" backup_etc
+	run_phase "cleanup-old-backups" "optional" "Cleanup old /etc backups" cleanup_old_backups
+	run_phase "apt-update" "mandatory" "APT update" apt_update
+	run_phase "apt-full-upgrade" "mandatory" "APT full-upgrade" apt_full_upgrade
+	run_phase "apt-cleanup" "mandatory" "APT cleanup" apt_cleanup
+	run_phase "restart-services" "optional" "Restart services" restart_services
+	run_phase "security-audit" "optional" "Security audit" run_security_audit
+	run_phase "collect-system-info" "optional" "Collect system info" collect_system_info_and_upload
+
+	if print_phase_summary; then
+		log "Debian maintenance run completed."
+	else
+		error "Debian maintenance run completed with mandatory phase failures."
+		return 1
+	fi
 }
 
 main() {

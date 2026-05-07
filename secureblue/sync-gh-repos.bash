@@ -132,7 +132,10 @@ parse_args() {
 resolve_base_dir() {
 	if [ -z "${BASE_DIR+x}" ]; then
 		if [ $NON_INTERACTIVE -eq 0 ] && [ -t 0 ]; then
-			read -r -p "BASE_DIR [${DEFAULT_BASE_DIR}]: " BASE_DIR || true
+			if ! read -r -p "BASE_DIR [${DEFAULT_BASE_DIR}]: " BASE_DIR; then
+				warn "Could not read BASE_DIR from input; using default: $DEFAULT_BASE_DIR"
+				BASE_DIR="$DEFAULT_BASE_DIR"
+			fi
 			BASE_DIR="${BASE_DIR:-$DEFAULT_BASE_DIR}"
 		else
 			BASE_DIR="$DEFAULT_BASE_DIR"
@@ -166,11 +169,22 @@ sync_single_repo() {
 	restored=0
 
 	cleanup_on_error() {
+		local restore_failed=0
+
 		if [ -n "${backup_dir:-}" ] && [ -d "$backup_dir" ] && [ "$restored" -eq 0 ]; then
 			warn "Restoring previous directory for $name from $backup_dir"
-			rm -rf -- "$target" 2>/dev/null || true
-			mv -- "$backup_dir" "$target" 2>/dev/null || true
+			if [ -e "$target" ] && ! rm -rf -- "$target"; then
+				error "Failed to remove partially synced directory: $target"
+				restore_failed=1
+			fi
+			if ! mv -- "$backup_dir" "$target"; then
+				error "Failed to restore backup directory $backup_dir to $target"
+				restore_failed=1
+			fi
 			restored=1
+			if [ "$restore_failed" -ne 0 ]; then
+				error "Automatic restore failed for $name; manual recovery may be required."
+			fi
 		fi
 	}
 
@@ -184,7 +198,7 @@ sync_single_repo() {
 	log "Cloning $name -> $target"
 	git clone "$ssh_url" "$target"
 	if [ -n "${default_branch:-}" ]; then
-		git -C "$target" checkout "$default_branch" || true
+		git -C "$target" checkout "$default_branch"
 	fi
 
 	if ! repo_has_content "$target"; then
@@ -192,7 +206,10 @@ sync_single_repo() {
 		rm -rf -- "$target"
 		if [ -n "${backup_dir:-}" ] && [ -d "$backup_dir" ]; then
 			warn "Restoring previous directory for $name from $backup_dir"
-			mv -- "$backup_dir" "$target" 2>/dev/null || true
+			if ! mv -- "$backup_dir" "$target"; then
+				error "Failed to restore backup directory $backup_dir to $target"
+				return 1
+			fi
 		fi
 		trap - ERR
 		return 0

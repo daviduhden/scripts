@@ -121,6 +121,67 @@ error() { printf '%s %b[ERROR]%b ❌ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$RED"
 
 trap 'error "Execution interrupted."; exit 1' INT
 
+declare -a PHASE_ORDER=()
+declare -A PHASE_STATUS=()
+declare -A PHASE_KIND=()
+declare -A PHASE_LABEL=()
+
+record_phase_status() {
+	local phase="$1" kind="$2" label="$3" status="$4"
+	PHASE_ORDER+=("$phase")
+	PHASE_KIND["$phase"]="$kind"
+	PHASE_LABEL["$phase"]="$label"
+	PHASE_STATUS["$phase"]="$status"
+}
+
+run_phase() {
+	local phase="$1" kind="$2" label="$3" phase_fn="$4"
+	if "$phase_fn"; then
+		record_phase_status "$phase" "$kind" "$label" "SUCCESS"
+	else
+		record_phase_status "$phase" "$kind" "$label" "FAILED"
+		if [[ $kind == "mandatory" ]]; then
+			error "Mandatory phase failed: ${label}"
+		else
+			warn "Optional phase failed: ${label}"
+		fi
+	fi
+}
+
+mark_phase_skipped() {
+	local phase="$1" kind="$2" label="$3" reason="$4"
+	record_phase_status "$phase" "$kind" "$label" "SKIPPED"
+	log "Skipping ${label}: ${reason}"
+}
+
+print_phase_summary() {
+	local phase status kind mandatory_failures=0 optional_failures=0 successes=0 skipped=0
+
+	printf '\nPhase summary:\n'
+	for phase in "${PHASE_ORDER[@]}"; do
+		status="${PHASE_STATUS[$phase]}"
+		kind="${PHASE_KIND[$phase]}"
+		printf ' - %s [%s]: %s\n' "${PHASE_LABEL[$phase]}" "$kind" "$status"
+		case "$status" in
+		SUCCESS) ((successes += 1)) ;;
+		SKIPPED) ((skipped += 1)) ;;
+		FAILED)
+			if [[ $kind == "mandatory" ]]; then
+				((mandatory_failures += 1))
+			else
+				((optional_failures += 1))
+			fi
+			;;
+		esac
+	done
+
+	log "Phase totals: success=${successes}, skipped=${skipped}, optional_failed=${optional_failures}, mandatory_failed=${mandatory_failures}"
+	if ((mandatory_failures > 0)); then
+		return 1
+	fi
+	return 0
+}
+
 # ---- Helpers ---------------------------------------------------------------
 
 # Usage:
@@ -264,9 +325,10 @@ parse_args() {
 # ---- Maintenance phases ----------------------------------------------------
 
 update_system_image() {
+	local phase_failed=0
 	if ! require_cmd --check rpm-ostree; then
-		warn "rpm-ostree not found, skipping system image update."
-		return
+		warn "rpm-ostree not found, cannot update system image."
+		return 1
 	fi
 	disk_usage=$(
 		{
@@ -280,10 +342,24 @@ update_system_image() {
 	)
 
 	log "Updating system via rpm-ostree (non-interactive)..."
-	rpm-ostree update || warn "rpm-ostree update failed (continuing)."
-	rpm-ostree upgrade || warn "rpm-ostree upgrade failed (continuing)."
-	cleanup_inactive_rpm_ostree_requests
-	rpm-ostree cleanup -bm || warn "rpm-ostree cleanup failed (continuing)."
+	if ! rpm-ostree update; then
+		warn "rpm-ostree update failed."
+		phase_failed=1
+	fi
+	if ! rpm-ostree upgrade; then
+		warn "rpm-ostree upgrade failed."
+		phase_failed=1
+	fi
+	if ! cleanup_inactive_rpm_ostree_requests; then
+		warn "Inactive rpm-ostree request cleanup failed."
+		phase_failed=1
+	fi
+	if ! rpm-ostree cleanup -bm; then
+		warn "rpm-ostree cleanup failed."
+		phase_failed=1
+	fi
+
+	((phase_failed == 0))
 }
 
 cleanup_inactive_rpm_ostree_requests() {
@@ -295,7 +371,10 @@ cleanup_inactive_rpm_ostree_requests() {
 				print
 				exit
 			}'
-	)"
+	)" || {
+		warn "Could not query rpm-ostree status for inactive requests."
+		return 1
+	}
 
 	if [[ -z ${inactive_line:-} || ${inactive_line} == "(none)" ]]; then
 		log "No inactive rpm-ostree requests detected."
@@ -311,22 +390,39 @@ cleanup_inactive_rpm_ostree_requests() {
 	fi
 
 	log "Removing inactive rpm-ostree requests: ${inactive_requests[*]}"
-	rpm-ostree uninstall "${inactive_requests[@]}" || warn "Failed to remove one or more inactive rpm-ostree requests (continuing)."
+	if ! rpm-ostree uninstall "${inactive_requests[@]}"; then
+		warn "Failed to remove one or more inactive rpm-ostree requests."
+		return 1
+	fi
+	return 0
 }
 
 update_firmware() {
+	local phase_failed=0
 	if ! require_cmd --check fwupdmgr; then
-		warn "fwupdmgr not found, skipping firmware."
-		return
+		warn "fwupdmgr not found, cannot update firmware."
+		return 1
 	fi
 
 	log "Updating firmware via fwupdmgr (non-interactive)..."
-	fwupdmgr refresh --force || warn "fwupdmgr refresh failed (continuing)."
-	fwupdmgr get-updates || warn "fwupdmgr get-updates failed (continuing)."
-	fwupdmgr update -y --no-reboot-check || warn "fwupdmgr update failed (continuing)."
+	if ! fwupdmgr refresh --force; then
+		warn "fwupdmgr refresh failed."
+		phase_failed=1
+	fi
+	if ! fwupdmgr get-updates; then
+		warn "fwupdmgr get-updates failed."
+		phase_failed=1
+	fi
+	if ! fwupdmgr update -y --no-reboot-check; then
+		warn "fwupdmgr update failed."
+		phase_failed=1
+	fi
+
+	((phase_failed == 0))
 }
 
 update_homebrew() {
+	local phase_failed=0
 	log "Updating Homebrew applications..."
 
 	# Never run "brew" as root. Determine a primary non-root user and
@@ -334,86 +430,120 @@ update_homebrew() {
 	local BREW_PREFIX PREFIX_UID PREFIX_GID BREW_USER
 
 	if ! require_cmd --check runuser; then
-		warn "'runuser' not available; skipping Homebrew update to avoid running brew as root."
-		return
+		warn "'runuser' not available; cannot safely run Homebrew update."
+		return 1
 	fi
 
 	# Check that the user actually has brew available and query its prefix
 	if ! runuser -u "$NONROOT_USER" -- bash -lc 'command -v brew >/dev/null 2>&1'; then
-		warn "brew not available for configured user '$NONROOT_USER'; skipping Homebrew update."
-		return
+		warn "brew not available for configured user '$NONROOT_USER'."
+		return 1
 	fi
 
 	BREW_PREFIX="$(runuser -u "$NONROOT_USER" -- brew --prefix 2>/dev/null || true)"
 	if [[ -z ${BREW_PREFIX:-} || ! -d $BREW_PREFIX ]]; then
-		warn "Could not determine a valid Homebrew prefix for configured user '$NONROOT_USER'; skipping Homebrew update."
-		return
+		warn "Could not determine a valid Homebrew prefix for configured user '$NONROOT_USER'."
+		return 1
 	fi
 
 	PREFIX_UID="$(stat -c '%u' "$BREW_PREFIX" 2>/dev/null || printf '')"
 	PREFIX_GID="$(stat -c '%g' "$BREW_PREFIX" 2>/dev/null || printf '')"
 
 	if [[ -z $PREFIX_UID || -z $PREFIX_GID ]]; then
-		warn "Could not read UID/GID for '$BREW_PREFIX'; skipping Homebrew update to avoid running as root."
-		return
+		warn "Could not read UID/GID for '$BREW_PREFIX'."
+		return 1
 	fi
 
 	BREW_USER="$(getent passwd "$PREFIX_UID" | cut -d: -f1 || true)"
 	if [[ -z ${BREW_USER:-} ]]; then
-		warn "Could not map UID=$PREFIX_UID to a username; skipping Homebrew update to avoid running as root."
-		return
+		warn "Could not map UID=$PREFIX_UID to a username."
+		return 1
 	fi
 
 	if [[ $BREW_USER == "root" ]]; then
-		warn "Homebrew prefix at '$BREW_PREFIX' is owned by root; skipping Homebrew update because running brew as root is unsafe."
-		return
+		warn "Homebrew prefix at '$BREW_PREFIX' is owned by root; running brew as root is unsafe."
+		return 1
 	fi
 
 	if [[ $BREW_USER != "$NONROOT_USER" ]]; then
 		warn "Homebrew prefix owner is '$BREW_USER' but configured non-root user is '$NONROOT_USER'."
-		warn "Skipping Homebrew update to keep runuser actions stable. Configure --user '$BREW_USER' or fix prefix ownership."
-		return
+		warn "Configure --user '$BREW_USER' or fix prefix ownership."
+		return 1
 	fi
 
 	log "Running brew as configured user: $NONROOT_USER"
-	run_as_user "$NONROOT_USER" brew update || warn "brew update failed (continuing)."
-	run_as_user "$NONROOT_USER" brew upgrade --greedy || warn "brew upgrade failed (continuing)."
-	run_as_user "$NONROOT_USER" brew cleanup || warn "brew cleanup failed (continuing)."
+	if ! run_as_user "$NONROOT_USER" brew update; then
+		warn "brew update failed."
+		phase_failed=1
+	fi
+	if ! run_as_user "$NONROOT_USER" brew upgrade --greedy; then
+		warn "brew upgrade failed."
+		phase_failed=1
+	fi
+	if ! run_as_user "$NONROOT_USER" brew cleanup; then
+		warn "brew cleanup failed."
+		phase_failed=1
+	fi
+
+	((phase_failed == 0))
 }
 
 update_flatpak() {
+	local phase_failed=0
 	if ! require_cmd --check flatpak; then
-		warn "flatpak not found, skipping Flatpak."
-		return
+		warn "flatpak not found, cannot update Flatpak."
+		return 1
 	fi
 
 	log "Updating and repairing Flatpak system installation..."
-	flatpak repair --system || warn "flatpak system repair failed (continuing)."
-	flatpak update --system -y || warn "flatpak system update failed (continuing)."
-	flatpak uninstall --system --unused -y || warn "flatpak system cleanup failed (continuing)."
+	if ! flatpak repair --system; then
+		warn "flatpak system repair failed."
+		phase_failed=1
+	fi
+	if ! flatpak update --system -y; then
+		warn "flatpak system update failed."
+		phase_failed=1
+	fi
+	if ! flatpak uninstall --system --unused -y; then
+		warn "flatpak system cleanup failed."
+		phase_failed=1
+	fi
 
 	# Per-user updates
 	if ! require_cmd --check runuser; then
-		warn "'runuser' not available; skipping per-user Flatpak updates/repairs."
-		return
+		warn "'runuser' not available; cannot run per-user Flatpak updates/repairs."
+		return 1
 	fi
 
 	log "Updating and repairing Flatpak user installation for configured user: ${NONROOT_USER}"
 	local home
 	home="$(user_home_dir "$NONROOT_USER" || true)"
 	if [[ -n ${home:-} && -d $home && -d "$home/.local/share/flatpak" ]]; then
-		run_as_user_env "$NONROOT_USER" flatpak repair --user || warn "flatpak user repair failed for $NONROOT_USER (continuing)."
-		run_as_user_env "$NONROOT_USER" flatpak update --user -y || warn "flatpak user update failed for $NONROOT_USER (continuing)."
-		run_as_user_env "$NONROOT_USER" flatpak uninstall --user --unused -y || warn "flatpak user cleanup failed for $NONROOT_USER (continuing)."
+		if ! run_as_user_env "$NONROOT_USER" flatpak repair --user; then
+			warn "flatpak user repair failed for $NONROOT_USER."
+			phase_failed=1
+		fi
+		if ! run_as_user_env "$NONROOT_USER" flatpak update --user -y; then
+			warn "flatpak user update failed for $NONROOT_USER."
+			phase_failed=1
+		fi
+		if ! run_as_user_env "$NONROOT_USER" flatpak uninstall --user --unused -y; then
+			warn "flatpak user cleanup failed for $NONROOT_USER."
+			phase_failed=1
+		fi
 	else
-		warn "No per-user Flatpak installation detected for '${NONROOT_USER}' (missing ${home:-<unknown>}/.local/share/flatpak); skipping per-user Flatpak maintenance."
+		warn "No per-user Flatpak installation detected for '${NONROOT_USER}' (missing ${home:-<unknown>}/.local/share/flatpak)."
+		phase_failed=1
 	fi
+
+	((phase_failed == 0))
 }
 
 maintain_filesystems() {
+	local phase_failed=0
 	if ! require_cmd --check lsblk; then
-		warn "lsblk not found; skipping filesystem maintenance."
-		return
+		warn "lsblk not found; cannot run filesystem maintenance."
+		return 1
 	fi
 
 	log "Scanning mounted block devices for ext4 and btrfs filesystems..."
@@ -454,7 +584,8 @@ maintain_filesystems() {
 	# ----------------- btrfs maintenance -----------------
 	if ((${#btrfs_dev_mp[@]} > 0)); then
 		if ! require_cmd --check btrfs; then
-			warn "btrfs-progs not found; skipping btrfs maintenance."
+			warn "btrfs-progs not found; cannot run btrfs maintenance."
+			phase_failed=1
 		else
 			local dev mp
 			for dev in "${!btrfs_dev_mp[@]}"; do
@@ -462,16 +593,22 @@ maintain_filesystems() {
 				log "Running non-destructive maintenance on btrfs filesystem $dev (mounted at $mp)..."
 
 				# Scrub: verify data and repair using redundancy if possible
-				btrfs scrub start -Bd "$mp" ||
-					warn "btrfs scrub failed for $mp (continuing)."
+				if ! btrfs scrub start -Bd "$mp"; then
+					warn "btrfs scrub failed for $mp."
+					phase_failed=1
+				fi
 
 				# Full balance: reorganize all chunks (can be heavy on large disks, but non-destructive)
-				btrfs balance start --full-balance "$mp" ||
-					warn "btrfs balance failed for $mp (continuing)."
+				if ! btrfs balance start --full-balance "$mp"; then
+					warn "btrfs balance failed for $mp."
+					phase_failed=1
+				fi
 
 				# Recursive defragmentation (can take a while, but non-destructive)
-				btrfs filesystem defragment -r "$mp" ||
-					warn "btrfs filesystem defragment failed for $mp (continuing)."
+				if ! btrfs filesystem defragment -r "$mp"; then
+					warn "btrfs filesystem defragment failed for $mp."
+					phase_failed=1
+				fi
 			done
 		fi
 	fi
@@ -479,7 +616,8 @@ maintain_filesystems() {
 	# ----------------- ext4 maintenance ------------------
 	if ((${#ext4_dev_mp[@]} > 0)); then
 		if ! require_cmd --check e4defrag; then
-			warn "e4defrag not found; skipping ext4 online defragmentation."
+			warn "e4defrag not found; cannot run ext4 defragmentation."
+			phase_failed=1
 		else
 			local dev mp
 			for dev in "${!ext4_dev_mp[@]}"; do
@@ -487,15 +625,21 @@ maintain_filesystems() {
 				log "Running non-destructive maintenance on ext4 filesystem $dev (mounted at $mp)..."
 
 				# Check fragmentation level (non-destructive)
-				e4defrag -c "$mp" ||
-					warn "e4defrag check failed for $mp (continuing)."
+				if ! e4defrag -c "$mp"; then
+					warn "e4defrag check failed for $mp."
+					phase_failed=1
+				fi
 
 				# Online defragmentation (non-destructive, but can take some time)
-				e4defrag "$mp" ||
-					warn "e4defrag defragmentation failed for $mp (continuing)."
+				if ! e4defrag "$mp"; then
+					warn "e4defrag defragmentation failed for $mp."
+					phase_failed=1
+				fi
 			done
 		fi
 	fi
+
+	((phase_failed == 0))
 }
 
 run_security_audit() {
@@ -527,8 +671,8 @@ run_security_audit() {
 
 collect_system_info() {
 	if ! require_cmd --check ujust fpaste; then
-		warn "ujust or fpaste not found; skipping Secureblue information collection."
-		return
+		warn "ujust or fpaste not found; cannot collect Secureblue information."
+		return 1
 	fi
 
 	local info_log_dir info_log
@@ -709,15 +853,15 @@ collect_system_info() {
 
 run_optional_phases() {
 	if [[ -z ${SKIP_AUDIT:-} ]]; then
-		run_security_audit
+		run_phase "security-audit" "optional" "Security audit" run_security_audit
 	else
-		log "Skipping security audit (flag set)."
+		mark_phase_skipped "security-audit" "optional" "Security audit" "flag set"
 	fi
 
 	if [[ -z ${SKIP_COLLECT:-} ]]; then
-		collect_system_info
+		run_phase "collect-system-info" "optional" "Collect Secureblue info" collect_system_info
 	else
-		log "Skipping Secureblue information collection (flag set)."
+		mark_phase_skipped "collect-system-info" "optional" "Collect Secureblue info" "flag set"
 	fi
 }
 
@@ -731,14 +875,24 @@ bootstrap() {
 # ---- Main ------------------------------------------------------------------
 main() {
 	log "Starting update process..."
+	PHASE_ORDER=()
+	PHASE_STATUS=()
+	PHASE_KIND=()
+	PHASE_LABEL=()
 
-	update_system_image
-	update_firmware
-	update_homebrew
-	update_flatpak
-	maintain_filesystems
+	run_phase "system-image" "mandatory" "System image update" update_system_image
+	run_phase "firmware" "mandatory" "Firmware update" update_firmware
+	run_phase "homebrew" "mandatory" "Homebrew update" update_homebrew
+	run_phase "flatpak" "mandatory" "Flatpak update" update_flatpak
+	run_phase "filesystems" "mandatory" "Filesystem maintenance" maintain_filesystems
 	run_optional_phases
-	log "Update process completed."
+
+	if print_phase_summary; then
+		log "Update process completed."
+	else
+		error "Update process completed with mandatory phase failures."
+		return 1
+	fi
 }
 
 # Entry point

@@ -16,6 +16,7 @@ export PATH
 
 EEPROM_URL="https://download.argon40.com/argon-eeprom.sh"
 CONTROL_URL="https://download.argon40.com/argon1.sh"
+TMP_FILES=()
 
 # Reboot mode:
 #   "question" -> ask (default in interactive mode)
@@ -95,6 +96,15 @@ error() { printf '%s %b[ERROR]%b ❌ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$RED"
 
 trap 'error "Execution interrupted."; exit 1' INT
 
+cleanup_tmp_files() {
+	local file
+	for file in "${TMP_FILES[@]}"; do
+		[[ -n "$file" && -f "$file" ]] && rm -f -- "$file"
+	done
+}
+
+trap cleanup_tmp_files EXIT
+
 # ---- Helpers ---------------------------------------------------------------
 
 require_root() {
@@ -124,15 +134,30 @@ check_network() {
 	log "Network looks OK."
 }
 
+download_remote_script() {
+	local url="$1"
+	local tmp_script="$2"
+	log "Downloading script from $url to temporary file..."
+	net_curl -o "$tmp_script" "$url"
+}
+
 run_eeprom_update() {
+	local script_path
 	log "Running EEPROM update script from Argon40..."
-	net_curl "$EEPROM_URL" | bash
+	script_path="$(mktemp argon40-update.XXXXXX.bash)"
+	TMP_FILES+=("$script_path")
+	download_remote_script "$EEPROM_URL" "$script_path"
+	bash "$script_path"
 	log "EEPROM update script finished."
 }
 
 run_control_update() {
+	local script_path
 	log "Running Argon One V3 control script installer..."
-	net_curl "$CONTROL_URL" | bash
+	script_path="$(mktemp argon40-update.XXXXXX.bash)"
+	TMP_FILES+=("$script_path")
+	download_remote_script "$CONTROL_URL" "$script_path"
+	bash "$script_path"
 	log "Argon One V3 control script finished."
 }
 
@@ -173,6 +198,7 @@ check_prereqs() {
 	require_root
 	require_cmd curl
 	require_cmd bash
+	require_cmd mktemp
 	require_cmd reboot
 	check_network
 }

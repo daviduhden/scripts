@@ -14,6 +14,7 @@ LOG_FILE="${HOME}/postinstall_$(date +%F_%H%M%S).log"
 declare -a QUEUE_NOW=()
 declare -a QUEUE_LATE=() # reboot-likely
 declare -a FAILURES=()
+declare -a CRITICAL_FAILURES=()
 
 # ---------- helpers ----------
 have() { command -v "$1" >/dev/null 2>&1; }
@@ -35,11 +36,18 @@ confirm() {
 	local def="${2:-y}" # y/n
 	local ans=""
 	while true; do
+		ans=""
 		if [[ $def == "y" ]]; then
-			read -r -p "$question [Y/n] " ans || true
+			if ! read -r -p "$question [Y/n] " ans; then
+				warn2 "Input unavailable; defaulting to yes for: $question"
+				ans="Y"
+			fi
 			ans="${ans:-Y}"
 		else
-			read -r -p "$question [y/N] " ans || true
+			if ! read -r -p "$question [y/N] " ans; then
+				warn2 "Input unavailable; defaulting to no for: $question"
+				ans="N"
+			fi
 			ans="${ans:-N}"
 		fi
 		case "$ans" in
@@ -99,6 +107,22 @@ run_ujust_string() {
 	run_cmd "$desc" bash -lc -- "$ucmd"
 }
 
+run_selected_step() {
+	local item="$1"
+	local ucmd desc critical rest rc
+
+	ucmd="${item%%||*}"
+	rest="${item#*||}"
+	desc="${rest%%||*}"
+	critical="${item##*||}"
+	rc=0
+
+	run_ujust_string "$ucmd" "$desc" || rc=$?
+	if [[ "$critical" == "1" && "$rc" -ne 0 ]]; then
+		CRITICAL_FAILURES+=("${desc}: ${ucmd} (rc=$rc)")
+	fi
+}
+
 run_postinstall_flow() {
 	# ---------- preflight ----------
 	hr
@@ -115,12 +139,12 @@ run_postinstall_flow() {
 	# ---------- interactive walk-through ----------
 	# Essential — Enroll Secure Boot key (queue late)
 	if confirm "Run: ujust enroll-secureblue-secure-boot-key? (often needs a reboot; queued for the end)" "y"; then
-		enqueue_late "ujust enroll-secureblue-secure-boot-key||Enroll Secure Boot key"
+		enqueue_late "ujust enroll-secureblue-secure-boot-key||Enroll Secure Boot key||1"
 	fi
 
 	# Essential — Validation (can run now)
 	if confirm "Run validation now: ujust audit-secureblue? (recommended; results may change after reboot)" "y"; then
-		enqueue_now "ujust audit-secureblue||Validation (audit-secureblue)"
+		enqueue_now "ujust audit-secureblue||Validation (audit-secureblue)||1"
 	fi
 
 	# Recommended — Disable booting from USB (BIOS)
@@ -135,12 +159,12 @@ run_postinstall_flow() {
 
 	# Recommended — USBGuard
 	if confirm "Run: ujust setup-usbguard? (generates policy from currently attached USB devices, blocks others)" "y"; then
-		enqueue_now "ujust setup-usbguard||Setup USBGuard"
+		enqueue_now "ujust setup-usbguard||Setup USBGuard||0"
 	fi
 
 	# Recommended — Create admin wheel account
 	if confirm "Run: ujust create-admin? (creates a dedicated admin account; interactive)" "y"; then
-		enqueue_now "ujust create-admin||Create separate wheel/admin account"
+		enqueue_now "ujust create-admin||Create separate wheel/admin account||0"
 	fi
 
 	# Recommended — DNS selector (with VPN warning)
@@ -151,7 +175,7 @@ run_postinstall_flow() {
 		say "or use systemd-resolved (depending on your setup) to avoid DNS leaks."
 		say "Avoid forcing Trivalent DNS-over-HTTPS when using a VPN."
 		if confirm "Continue with dns-selector anyway?" "y"; then
-			enqueue_now "ujust dns-selector||Configure system DNS (dns-selector)"
+			enqueue_now "ujust dns-selector||Configure system DNS (dns-selector)||0"
 		else
 			say "Skipping dns-selector."
 		fi
@@ -159,12 +183,12 @@ run_postinstall_flow() {
 
 	# Recommended — MAC randomization
 	if confirm "Run: ujust toggle-mac-randomization ? (toggles random/permanent MAC in NetworkManager)" "y"; then
-		enqueue_now "ujust toggle-mac-randomization||Toggle MAC address randomization"
+		enqueue_now "ujust toggle-mac-randomization||Toggle MAC address randomization||0"
 	fi
 
 	# Recommended — Bash environment lockdown
 	if confirm "Run: ujust toggle-bash-environment-lockdown? (mitigates LD_PRELOAD-style attacks)" "y"; then
-		enqueue_now "ujust toggle-bash-environment-lockdown||Bash environment lockdown"
+		enqueue_now "ujust toggle-bash-environment-lockdown||Bash environment lockdown||0"
 	fi
 
 	# Recommended — LUKS Hardware Unlock (queue late)
@@ -175,7 +199,7 @@ run_postinstall_flow() {
 	hr
 
 	if confirm "Configure LUKS FIDO2 unlock? (ujust setup-luks-fido2-unlock; often needs reboot; queued for the end)" "n"; then
-		enqueue_late "ujust setup-luks-fido2-unlock||LUKS FIDO2 unlock"
+		enqueue_late "ujust setup-luks-fido2-unlock||LUKS FIDO2 unlock||0"
 	else
 		if confirm "Configure LUKS TPM2 unlock? (ujust setup-luks-tpm-unlock; often needs reboot; queued for the end)" "n"; then
 			hr
@@ -183,7 +207,7 @@ run_postinstall_flow() {
 			say "If your AMD system uses fTPM (firmware TPM) instead of a dedicated TPM/Pluton,"
 			say "the guide recommends skipping TPM2 enrollment."
 			if confirm "Continue with TPM2 anyway?" "n"; then
-				enqueue_late "ujust setup-luks-tpm-unlock||LUKS TPM2 unlock"
+				enqueue_late "ujust setup-luks-tpm-unlock||LUKS TPM2 unlock||0"
 			else
 				say "Skipping TPM2 unlock."
 			fi
@@ -219,9 +243,7 @@ run_postinstall_flow() {
 
 	# Run NOW queue
 	for item in "${QUEUE_NOW[@]}"; do
-		ucmd="${item%%||*}"
-		desc="${item#*||}"
-		run_ujust_string "$ucmd" "$desc" || true
+		run_selected_step "$item"
 	done
 
 	# Run LATE queue (reboot-likely)
@@ -230,9 +252,7 @@ run_postinstall_flow() {
 		say "⏭️ Running the likely-reboot steps saved for the end…"
 
 		for item in "${QUEUE_LATE[@]}"; do
-			ucmd="${item%%||*}"
-			desc="${item#*||}"
-			run_ujust_string "$ucmd" "$desc" || true
+			run_selected_step "$item"
 		done
 
 		hr
@@ -255,10 +275,17 @@ run_postinstall_flow() {
 		for f in "${FAILURES[@]}"; do
 			say "  - $f"
 		done
-		exit 1
 	else
-		say "✅ Completed with no detected errors."
+		say "✅ No command failures were detected."
 	fi
+	if ((${#CRITICAL_FAILURES[@]})); then
+		say "❌ Critical selected steps failed:"
+		for f in "${CRITICAL_FAILURES[@]}"; do
+			say "  - $f"
+		done
+		exit 1
+	fi
+	say "✅ Completed with no critical step failures."
 }
 
 main() {

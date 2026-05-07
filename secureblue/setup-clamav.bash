@@ -183,6 +183,13 @@ ExecStart=/usr/sbin/clamonacc \
   --exclude-dir=/var/lib/containers
 Restart=always
 RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=read-only
+PrivateTmp=true
+RestrictAddressFamilies=AF_UNIX
+LockPersonality=true
+RestrictSUIDSGID=true
 
 [Install]
 WantedBy=multi-user.target
@@ -227,6 +234,13 @@ Description=ClamAV periodic scan
 Type=oneshot
 ExecStart=/usr/local/sbin/clamav-target-scan.bash
 SuccessExitStatus=0 1 2
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=read-only
+PrivateTmp=true
+RestrictAddressFamilies=AF_UNIX
+LockPersonality=true
+RestrictSUIDSGID=true
 EOF
 
 	cat >/etc/systemd/system/clamav-target-scan.timer <<'EOF'

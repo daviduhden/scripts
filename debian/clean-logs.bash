@@ -54,20 +54,32 @@ parse_args() {
 cleanup_gz_logs() {
 	if [ "$DRY_RUN" -eq 1 ]; then
 		log "DRY RUN: listing *.gz files under /var/log (no deletion will occur):"
-		find /var/log -xdev -type f -name '*.gz' -print || true
+		if ! find /var/log -xdev -type f -name '*.gz' -print; then
+			error "Failed to list *.gz files under /var/log."
+			return 1
+		fi
 	else
 		log "Deleting *.gz files under /var/log..."
-		find /var/log -xdev -type f -name '*.gz' -print -delete || true
+		if ! find /var/log -xdev -type f -name '*.gz' -print -delete; then
+			error "Failed while deleting *.gz files under /var/log."
+			return 1
+		fi
 	fi
 }
 
 cleanup_old_files() {
 	if [ "$DRY_RUN" -eq 1 ]; then
 		log "DRY RUN: listing *.old files under / (no deletion will occur):"
-		find / -xdev -type f -name '*.old' -print || true
+		if ! find / -xdev -type f -name '*.old' -print; then
+			error "Failed to list *.old files under /."
+			return 1
+		fi
 	else
 		log "Deleting *.old files under / (use with care)..."
-		find / -xdev -type f -name '*.old' -print -delete || true
+		if ! find / -xdev -type f -name '*.old' -print -delete; then
+			error "Failed while deleting *.old files under /."
+			return 1
+		fi
 	fi
 }
 

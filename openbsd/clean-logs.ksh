@@ -48,26 +48,38 @@ parse_args() {
 clean_gz_logs() {
 	if [ "$DRY_RUN" -eq 1 ]; then
 		log "DRY RUN: listing *.gz files under /var/log (no deletion will occur):"
-		find /var/log -xdev -type f -name '*.gz' -print || true
+		if ! find /var/log -xdev -type f -name '*.gz' -print; then
+			error "Failed to list *.gz files under /var/log."
+			return 1
+		fi
 		return
 	fi
 
 	log "Deleting *.gz files under /var/log..."
 	# -xdev avoids crossing into other filesystems
 	# Use -exec rm instead of -delete for better portability
-	find /var/log -xdev -type f -name '*.gz' -print -exec rm -f {} + || true
+	if ! find /var/log -xdev -type f -name '*.gz' -print -exec rm -f {} +; then
+		error "Failed while deleting *.gz files under /var/log."
+		return 1
+	fi
 }
 
 clean_old_files() {
 	if [ "$DRY_RUN" -eq 1 ]; then
 		log "DRY RUN: listing *.old files under / (no deletion will occur):"
-		find / -xdev -type f -name '*.old' -print || true
+		if ! find / -xdev -type f -name '*.old' -print; then
+			error "Failed to list *.old files under /."
+			return 1
+		fi
 		return
 	fi
 
 	log "Deleting *.old files under / (use with care)..."
 	# -xdev keeps us on the root filesystem only
-	find / -xdev -type f -name '*.old' -print -exec rm -f {} + || true
+	if ! find / -xdev -type f -name '*.old' -print -exec rm -f {} +; then
+		error "Failed while deleting *.old files under /."
+		return 1
+	fi
 }
 
 main() {

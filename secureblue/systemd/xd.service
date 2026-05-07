@@ -10,6 +10,14 @@ Description=Standalone I2P BitTorrent Client
 WorkingDirectory=%h/.local/share/XD
 ExecStart=/usr/local/bin/XD %h/.local/share/XD/xd.ini
 Restart=on-failure
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=false
+PrivateTmp=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+LockPersonality=true
+RestrictSUIDSGID=true
 
 [Install]
 WantedBy=default.target

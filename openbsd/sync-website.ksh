@@ -1,6 +1,9 @@
 #!/bin/ksh
 
-set -u
+set -eu
+if (set -o pipefail) >/dev/null 2>&1; then
+	set -o pipefail
+fi
 
 # OpenBSD website synchronization script
 # Synchronizes a deployed website directory with a GitHub repository:
@@ -90,16 +93,24 @@ stage_from_source() {
 	typeset srcdir="$1"
 	if [ -d "$WWW_DIR/.git" ]; then rm -rf "$WWW_DIR/.git"; fi
 	if [ -d "$WWW_DIR/.github" ]; then rm -rf "$WWW_DIR/.github"; fi
-	if [ -d "$WWW_DIR/.gitattributes" ]; then rm -rf "$WWW_DIR/.gitattributes"; fi
+	if [ -e "$WWW_DIR/.gitattributes" ]; then rm -f "$WWW_DIR/.gitattributes"; fi
 
 	if command -v rsync >/dev/null 2>&1; then
-		rsync -a --delete --exclude=".git" --exclude=".github" --exclude=".gitattributes" "$srcdir"/ "$WWW_DIR"/
+		if ! rsync -a --delete --exclude=".git" --exclude=".github" --exclude=".gitattributes" "$srcdir"/ "$WWW_DIR"/; then
+			return 1
+		fi
 	else
-		find "$WWW_DIR" -mindepth 1 -maxdepth 1 ! -name ".git" ! -name ".github" ! -name ".gitattributes" -exec rm -rf {} +
-		cp -a "$srcdir"/. "$WWW_DIR"/
+		if ! find "$WWW_DIR" -mindepth 1 -maxdepth 1 ! -name ".git" ! -name ".github" ! -name ".gitattributes" -exec rm -rf {} +; then
+			return 1
+		fi
+		if ! cp -a "$srcdir"/. "$WWW_DIR"/; then
+			return 1
+		fi
 	fi
 
-	rm -rf "$WWW_DIR/.git" "$WWW_DIR/.github" "$WWW_DIR/.gitattributes"
+	if ! rm -rf "$WWW_DIR/.git" "$WWW_DIR/.github" "$WWW_DIR/.gitattributes"; then
+		return 1
+	fi
 	return 0
 }
 
@@ -127,7 +138,7 @@ sync_with_gh_cli() {
 	[ -f "${GH_CONFIG_DIR}/hosts.yml" ] || return 1
 	run_as_gh_user env GH_CONFIG_DIR="$GH_CONFIG_DIR" GH_HOST="$GH_HOST" gh auth status --hostname "$GH_HOST" >/dev/null 2>&1 || return 1
 
-	tmpdir="$(run_as_gh_user mktemp -d "/tmp/site-sync.XXXXXX")"
+	tmpdir="$(run_as_gh_user mktemp -d "/tmp/site-sync.XXXXXX")" || return 1
 	stagedir="$tmpdir/src"
 
 	while [ "$attempt" -le 5 ]; do
@@ -152,7 +163,10 @@ sync_with_gh_cli() {
 	# Fetch LFS
 	fetch_lfs_files "$stagedir"
 
-	stage_from_source "$stagedir"
+	if ! stage_from_source "$stagedir"; then
+		rm -rf "$tmpdir"
+		return 1
+	fi
 	rm -rf "$tmpdir"
 	log "Repository successfully updated via GitHub CLI."
 	return 0
@@ -171,17 +185,29 @@ sync_with_git() {
 	[ -z "$origin_url" ] && [ -n "$REPO_SLUG" ] && origin_url="https://${GH_HOST}/${REPO_SLUG}.git"
 	[ -z "$origin_url" ] && return 1
 
-	tmpdir=$(mktemp -d "/tmp/site-sync.XXXXXX")
+	tmpdir=$(mktemp -d "/tmp/site-sync.XXXXXX") || return 1
 	stagedir="$tmpdir/src"
 
-	git clone --branch "$BRANCH" --single-branch "$origin_url" "$stagedir" >/dev/null 2>&1
-	[ ! -d "$stagedir" ] && return 1
-	[ ! -d "$stagedir" ] && return 1
+	if ! git clone --branch "$BRANCH" --single-branch "$origin_url" "$stagedir" >/dev/null 2>&1; then
+		rm -rf "$tmpdir"
+		return 1
+	fi
+	[ ! -d "$stagedir" ] && {
+		rm -rf "$tmpdir"
+		return 1
+	}
+	[ ! -d "$stagedir" ] && {
+		rm -rf "$tmpdir"
+		return 1
+	}
 
 	# Fetch LFS
 	fetch_lfs_files "$stagedir"
 
-	stage_from_source "$stagedir"
+	if ! stage_from_source "$stagedir"; then
+		rm -rf "$tmpdir"
+		return 1
+	fi
 	rm -rf "$tmpdir"
 	log "Repository successfully staged via git clone."
 	return 0
@@ -192,23 +218,41 @@ sync_with_git() {
 #######################
 sync_with_github_zip() {
 	typeset tmpdir zipfile unpack_dir srcdir
-	tmpdir=$(mktemp -d "/tmp/site-sync.XXXXXX")
+	tmpdir=$(mktemp -d "/tmp/site-sync.XXXXXX") || return 1
 	zipfile="$tmpdir/source.zip"
 
 	if command -v curl >/dev/null 2>&1; then
-		curl -fLsS --retry 5 "$ZIP_URL" -o "$zipfile"
+		if ! curl -fLsS --retry 5 "$ZIP_URL" -o "$zipfile"; then
+			rm -rf "$tmpdir"
+			return 1
+		fi
 	else
-		wget -qO "$zipfile" "$ZIP_URL"
+		if ! wget -qO "$zipfile" "$ZIP_URL"; then
+			rm -rf "$tmpdir"
+			return 1
+		fi
 	fi
 
 	unpack_dir="$tmpdir/unpacked"
-	mkdir -p "$unpack_dir"
-	unzip -q "$zipfile" -d "$unpack_dir"
+	if ! mkdir -p "$unpack_dir"; then
+		rm -rf "$tmpdir"
+		return 1
+	fi
+	if ! unzip -q "$zipfile" -d "$unpack_dir"; then
+		rm -rf "$tmpdir"
+		return 1
+	fi
 	srcdir=$(find "$unpack_dir" -mindepth 1 -maxdepth 1 -type d | head -n 1)
 
-	[ -d "$srcdir" ] || return 1
+	[ -d "$srcdir" ] || {
+		rm -rf "$tmpdir"
+		return 1
+	}
 
-	stage_from_source "$srcdir"
+	if ! stage_from_source "$srcdir"; then
+		rm -rf "$tmpdir"
+		return 1
+	fi
 	rm -rf "$tmpdir"
 	log "Repository updated via GitHub ZIP fallback."
 	return 0

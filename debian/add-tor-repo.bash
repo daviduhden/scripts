@@ -278,39 +278,82 @@ choose_repo_transport() {
 	done
 }
 
+service_action() {
+	local action_desc="$1"
+	shift
+	if "$@"; then
+		return 0
+	fi
+	warn "Failed to ${action_desc}."
+	return 1
+}
+
+systemd_unit_exists() {
+	systemctl list-unit-files | grep -q "^$1[[:space:]]"
+}
+
+ensure_systemd_unit_active() {
+	local unit="$1"
+
+	service_action "enable ${unit} with systemd" systemctl enable "$unit" || return 1
+
+	if ! systemctl restart "$unit"; then
+		warn "Failed to restart ${unit} with systemd; trying start instead."
+		service_action "start ${unit} with systemd" systemctl start "$unit" || return 1
+	fi
+
+	if ! systemctl is-active --quiet "$unit"; then
+		warn "systemd reports ${unit} is not active after start/restart."
+		return 1
+	fi
+
+	log "Verified ${unit} is active."
+}
+
 enable_tor_shepherd() {
 	log "Detected GNU Shepherd. Enabling and starting tor via shepherd..."
-	herd enable tor || true
-	herd start tor || true
+	service_action "enable tor with shepherd" herd enable tor || return 1
+	service_action "start tor with shepherd" herd start tor
 }
 
 enable_tor_openrc() {
 	log "Detected OpenRC. Enabling and starting tor via OpenRC..."
-	rc-update add tor default || true
-	rc-service tor restart || rc-service tor start || true
+	service_action "enable tor with OpenRC" rc-update add tor default || return 1
+
+	if rc-service tor restart; then
+		return 0
+	fi
+	warn "Failed to restart tor with OpenRC; trying start instead."
+	service_action "start tor with OpenRC" rc-service tor start
 }
 
 enable_tor_runit() {
 	log "Detected runit. Enabling and starting tor via runit..."
 	if [[ -d /etc/sv/tor && ! -e /etc/service/tor ]]; then
 		mkdir -p /etc/service
-		ln -s /etc/sv/tor /etc/service/tor || true
+		service_action "link tor into runit service directory" ln -s /etc/sv/tor /etc/service/tor || return 1
 	fi
-	sv restart tor || sv start tor || true
+
+	if sv restart tor; then
+		return 0
+	fi
+	warn "Failed to restart tor with runit; trying start instead."
+	service_action "start tor with runit" sv start tor
 }
 
 enable_tor_systemd() {
-	log "Detected systemd. Enabling and starting tor.service..."
-	systemctl daemon-reload || true
+	log "Detected systemd. Enabling and starting tor service..."
+	if ! systemctl daemon-reload; then
+		warn "Failed to reload systemd daemon. Continuing with service management."
+	fi
 
-	if systemctl list-unit-files | grep -q '^tor\.service[[:space:]]'; then
-		systemctl enable tor.service
-		systemctl restart tor.service
-	elif systemctl list-unit-files | grep -q '^tor@default\.service[[:space:]]'; then
-		systemctl enable tor@default.service
-		systemctl restart tor@default.service
+	if systemd_unit_exists 'tor.service'; then
+		ensure_systemd_unit_active 'tor.service'
+	elif systemd_unit_exists 'tor@default.service'; then
+		ensure_systemd_unit_active 'tor@default.service'
 	else
-		warn "tor systemd service not found; you may need to enable/start it manually."
+		warn "tor systemd service not found; cannot verify active state."
+		return 1
 	fi
 }
 
@@ -320,18 +363,34 @@ enable_tor_s6() {
 }
 
 enable_tor_sysv() {
+	local failed=0
+
 	log "Detected SysV-style init. Enabling and starting tor via init scripts..."
 	if command -v update-rc.d >/dev/null 2>&1; then
-		update-rc.d tor defaults || true
+		service_action "enable tor with update-rc.d" update-rc.d tor defaults || failed=1
 	elif command -v chkconfig >/dev/null 2>&1; then
-		chkconfig tor on || true
+		service_action "enable tor with chkconfig" chkconfig tor on || failed=1
+	else
+		warn "No SysV enable helper (update-rc.d/chkconfig) found for tor."
+		failed=1
 	fi
 
 	if command -v service >/dev/null 2>&1; then
-		service tor restart || service tor start || true
+		if ! service tor restart; then
+			warn "Failed to restart tor via service; trying start instead."
+			service_action "start tor via service" service tor start || failed=1
+		fi
 	elif [[ -x /etc/init.d/tor ]]; then
-		/etc/init.d/tor restart || /etc/init.d/tor start || true
+		if ! /etc/init.d/tor restart; then
+			warn "Failed to restart tor via /etc/init.d/tor; trying start instead."
+			service_action "start tor via /etc/init.d/tor" /etc/init.d/tor start || failed=1
+		fi
+	else
+		warn "No SysV tor service script found."
+		failed=1
 	fi
+
+	return "$failed"
 }
 
 enable_and_start_tor() {
@@ -396,6 +455,7 @@ enable_and_start_tor() {
 
 	warn "could not detect a known service manager (systemd, SysV, OpenRC, runit, s6, shepherd)."
 	warn "tor is installed, but you must start and enable it manually."
+	return 1
 }
 
 main() {

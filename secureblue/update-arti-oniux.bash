@@ -17,6 +17,7 @@ REPO_ONIUX="https://gitlab.torproject.org/tpo/core/oniux.git"
 
 CARGO_BIN_DIR="${CARGO_HOME:-$HOME/.cargo}/bin"
 ROOT_CMD=""
+TMP_FILES=()
 
 if [ -t 1 ] && [ "${NO_COLOR:-0}" != "1" ]; then
 	GREEN="\033[32m"
@@ -33,6 +34,15 @@ fi
 log() { printf '%s %b[INFO]%b ✅ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$GREEN" "$RESET" "$*"; }
 warn() { printf '%s %b[WARN]%b ⚠️ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$YELLOW" "$RESET" "$*"; }
 error() { printf '%s %b[ERROR]%b ❌ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$RED" "$RESET" "$*" >&2; }
+
+cleanup_tmp_files() {
+	local file
+	for file in "${TMP_FILES[@]}"; do
+		[[ -n "$file" && -f "$file" ]] && rm -f -- "$file"
+	done
+}
+
+trap cleanup_tmp_files EXIT
 
 require_cmd() {
 	command -v "$1" >/dev/null 2>&1 || {
@@ -85,7 +95,13 @@ ensure_rust() {
 			error "curl is required to install rustup but is not installed."
 			exit 1
 		fi
-		curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+		local rustup_script
+		rustup_script="$(mktemp rustup-init.XXXXXX.sh)"
+		TMP_FILES+=("$rustup_script")
+		log "Downloading rustup installer..."
+		curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o "$rustup_script"
+		log "Running rustup installer..."
+		sh "$rustup_script" -y
 
 		if [ -f "$HOME/.cargo/env" ]; then
 			# shellcheck source=/dev/null
@@ -222,6 +238,7 @@ check_prereqs() {
 	require_cmd install
 	require_cmd mkdir
 	require_cmd awk
+	require_cmd mktemp
 	ensure_rust
 	ensure_git
 }
