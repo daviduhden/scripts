@@ -65,7 +65,7 @@ sysupgrade-all() {
 	update-krohnkite &&
 		update-arti-oniux &&
 		update-lyrebird &&
-		update-xd-torrent &&
+		update-xd-torrent --skip-service-and-user-setup &&
 		pipx upgrade-all &&
 		echo "✅ System upgrade completed successfully."
 }

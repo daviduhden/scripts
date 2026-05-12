@@ -416,8 +416,7 @@ update_firmware() {
 			log "No firmware updates available."
 			updates_available=0
 		else
-			warn "fwupdmgr get-updates failed."
-			phase_failed=1
+			warn "fwupdmgr get-updates failed (rc=${rc}); continuing with fwupdmgr update as authoritative step."
 		fi
 	fi
 	if ((updates_available == 1)); then
