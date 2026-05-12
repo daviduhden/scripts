@@ -220,11 +220,13 @@ check_prereqs() {
 	detect_root_cmd
 	ensure_git
 	ensure_go
-	require_cmd systemctl
 	require_cmd install
 
-	if [ ! -f "$SERVICE_SRC" ]; then
-		error "service file not found at $SERVICE_SRC"
+	if [ "$SKIP_SERVICE_AND_USER_SETUP" -eq 0 ]; then
+		require_cmd systemctl
+		if [ ! -f "$SERVICE_SRC" ]; then
+			error "service file not found at $SERVICE_SRC"
+		fi
 	fi
 }
 

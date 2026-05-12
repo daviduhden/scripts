@@ -399,6 +399,7 @@ cleanup_inactive_rpm_ostree_requests() {
 
 update_firmware() {
 	local phase_failed=0
+	local updates_available=1
 	if ! require_cmd --check fwupdmgr; then
 		warn "fwupdmgr not found, cannot update firmware."
 		return 1
@@ -410,12 +411,27 @@ update_firmware() {
 		phase_failed=1
 	fi
 	if ! fwupdmgr get-updates; then
-		warn "fwupdmgr get-updates failed."
-		phase_failed=1
+		local rc=$?
+		if [[ $rc -eq 2 ]]; then
+			log "No firmware updates available."
+			updates_available=0
+		else
+			warn "fwupdmgr get-updates failed."
+			phase_failed=1
+		fi
 	fi
-	if ! fwupdmgr update -y --no-reboot-check; then
-		warn "fwupdmgr update failed."
-		phase_failed=1
+	if ((updates_available == 1)); then
+		if ! fwupdmgr update -y --no-reboot-check; then
+			local rc=$?
+			if [[ $rc -eq 2 ]]; then
+				log "No firmware updates to apply."
+			else
+				warn "fwupdmgr update failed."
+				phase_failed=1
+			fi
+		fi
+	else
+		log "Skipping firmware apply step because no updates are available."
 	fi
 
 	((phase_failed == 0))

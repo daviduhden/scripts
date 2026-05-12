@@ -54,9 +54,15 @@ alias wget='wget -c'
 
 # Full system upgrade helper
 sysupgrade-all() {
+	local sysupgrade_rc=0
+
 	echo "🔄 Starting full system upgrade..."
-	sysupgrade --user david --skip-audit &&
-		update-krohnkite &&
+	sysupgrade --user david --skip-audit || {
+		sysupgrade_rc=$?
+		echo "⚠️ sysupgrade failed with exit code ${sysupgrade_rc}, continuing with remaining updates..."
+	}
+
+	update-krohnkite &&
 		update-arti-oniux &&
 		update-lyrebird &&
 		update-xd-torrent &&
