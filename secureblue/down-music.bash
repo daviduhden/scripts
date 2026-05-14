@@ -81,11 +81,28 @@ check_prereqs() {
 }
 
 detect_runtime_user() {
-	# If invoked via sudo, prefer the original non-root user.
-	if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
-		printf '%s\n' "$SUDO_USER"
+	# If invoked via policykit-compatible tools, prefer the caller UID.
+	if [ -n "${PKEXEC_UID:-}" ]; then
+		id -un "$PKEXEC_UID"
 		return
 	fi
+
+	# logname resolves the terminal owner.
+	if logname >/dev/null 2>&1; then
+		logname
+		return
+	fi
+
+	# Fallback to common login/session environment variables.
+	if [ -n "${LOGNAME:-}" ] && [ "$LOGNAME" != "root" ]; then
+		printf '%s\n' "$LOGNAME"
+		return
+	fi
+	if [ -n "${USER:-}" ] && [ "$USER" != "root" ]; then
+		printf '%s\n' "$USER"
+		return
+	fi
+
 	id -un
 }
 
