@@ -77,6 +77,26 @@ parse_args() {
 check_prereqs() {
 	require_cmd yt-dlp
 	require_cmd ffmpeg
+	require_cmd getent
+}
+
+detect_runtime_user() {
+	# If invoked via sudo, prefer the original non-root user.
+	if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
+		printf '%s\n' "$SUDO_USER"
+		return
+	fi
+	id -un
+}
+
+resolve_home_dir() {
+	local user="$1" home_dir
+	home_dir="$(getent passwd "$user" | cut -d: -f6)"
+	if [ -z "$home_dir" ]; then
+		error "Failed to resolve home directory for user: $user"
+		exit 1
+	fi
+	printf '%s\n' "$home_dir"
 }
 
 resolve_downloaded_file() {
@@ -90,10 +110,14 @@ resolve_downloaded_file() {
 }
 
 run_download_and_convert() {
-	local input audio_file sanitized_title output
+	local input audio_file sanitized_title output runtime_user home_dir cookies_profile
+
+	runtime_user="$(detect_runtime_user)"
+	home_dir="$(resolve_home_dir "$runtime_user")"
+	cookies_profile="${home_dir}/.config/trivalent/Default/"
 
 	log "Downloading audio from YouTube..."
-	yt-dlp -x --audio-format best -o "$TMP_DIR/%(title)s.%(ext)s" "$URL"
+	yt-dlp -x --audio-format best --cookies-from-browser "chromium:${cookies_profile}" -o "$TMP_DIR/%(title)s.%(ext)s" "$URL"
 
 	input="$(resolve_downloaded_file)"
 	audio_file="$(basename "$input")"
