@@ -44,7 +44,7 @@ else
 fi
 
 log() { printf '%s %b[INFO]%b ✅ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$GREEN" "$RESET" "$*"; }
-warn() { printf '%s %b[WARN]%b ⚠️ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$YELLOW" "$RESET" "$*"; }
+warn() { printf '%s %b[WARN]%b ⚠ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$YELLOW" "$RESET" "$*"; }
 error() { printf '%s %b[ERROR]%b ❌ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$RED" "$RESET" "$*" >&2; }
 
 declare -a PHASE_ORDER=()
@@ -146,7 +146,7 @@ backup_etc() {
 	fi
 
 	# First run: no baseline exists yet, so take a full backup and create the baseline.
-	if [[ ! -d "$baseline_etc" ]] || ! find "$baseline_etc" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null | grep -q .; then
+	if [[ ! -d $baseline_etc ]] || ! find "$baseline_etc" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null | grep -q .; then
 		archive="${backup_dir}/etc-full.tar.gz"
 		log "No baseline found; creating initial full /etc backup at ${archive}..."
 		tar --numeric-owner --xattrs --acls -cpzf "$archive" -C / etc
@@ -209,7 +209,7 @@ backup_etc() {
 }
 
 cleanup_old_backups() {
-	if [[ ! -d "$BACKUP_ROOT" ]]; then
+	if [[ ! -d $BACKUP_ROOT ]]; then
 		return 0
 	fi
 
@@ -236,11 +236,11 @@ apt_full_upgrade() {
 		. /etc/os-release 2>/dev/null || true
 		printf '%s' "${VERSION_CODENAME:-}"
 	)"
-	if [[ -z "$codename" ]] && command -v lsb_release >/dev/null 2>&1; then
+	if [[ -z $codename ]] && command -v lsb_release >/dev/null 2>&1; then
 		codename="$(lsb_release -sc 2>/dev/null || true)"
 	fi
 
-	if [[ -n "$codename" ]]; then
+	if [[ -n $codename ]]; then
 		target="${codename}-backports"
 		if apt-cache policy 2>/dev/null | grep -Fq "$target"; then
 			log "Running full-upgrade prioritizing backports (${target})..."
@@ -314,8 +314,10 @@ run_security_audit() {
 	if command -v systemcheck >/dev/null 2>&1; then
 		audit_ts="$(date +%Y%m%d-%H%M%S)"
 		syscheck_log="${audit_dir}/systemcheck-${audit_ts}.log"
-		log "Running systemcheck (log: ${syscheck_log})..."
-		if systemcheck --quiet >"$syscheck_log" 2>&1; then
+		local audit_user
+		audit_user="${SUDO_USER:-$(logname 2>/dev/null || true)}"
+		log "Running systemcheck as ${audit_user:-unknown} (log: ${syscheck_log})..."
+		if run_systemcheck_audit "$audit_user" >"$syscheck_log" 2>&1; then
 			chmod 0600 "$syscheck_log" || true
 			log "systemcheck completed."
 		else
@@ -330,6 +332,39 @@ run_security_audit() {
 	else
 		warn "Failed to clean old security audit logs in ${audit_dir}."
 	fi
+}
+
+run_systemcheck_audit() {
+	local audit_user="$1" audit_home audit_uid
+
+	if [[ -z $audit_user || $audit_user == "root" ]]; then
+		warn "systemcheck skipped: unable to determine a non-root invoking user."
+		return 1
+	fi
+
+	audit_home="$(getent passwd "$audit_user" | cut -d: -f6)"
+	audit_uid="$(getent passwd "$audit_user" | cut -d: -f3)"
+
+	if [[ -z $audit_home || -z $audit_uid ]]; then
+		warn "systemcheck skipped: could not resolve HOME/UID for user '$audit_user'."
+		return 1
+	fi
+
+	if [[ ! -d "/run/user/${audit_uid}" || ! -S "/run/user/${audit_uid}/bus" ]]; then
+		warn "systemcheck skipped: user '$audit_user' has no active session bus."
+		return 1
+	fi
+
+	runuser -u "$audit_user" -- env \
+		LANG="$LANG" \
+		LC_ALL="$LC_ALL" \
+		HOME="$audit_home" \
+		USER="$audit_user" \
+		LOGNAME="$audit_user" \
+		XDG_RUNTIME_DIR="/run/user/${audit_uid}" \
+		DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${audit_uid}/bus" \
+		PATH="$PATH" \
+		systemcheck --cli
 }
 
 collect_system_info_and_upload() {
