@@ -13,6 +13,7 @@ set -euo pipefail
 # - Create a basic /etc/monerod.conf if it does not exist
 # - Enable and start/restart monerod service
 # - Optionally build/install monero-lws release branch (latest release-v*)
+# - Configure monerod ZMQ and monero-lws public REST endpoints for Debian
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
@@ -38,14 +39,18 @@ MONERO_LOG_DIR="/var/log/monero"
 MONEROD_CONF="/etc/monerod.conf"
 MONEROD_ZMQ_RPC_IP="127.0.0.1"
 MONEROD_ZMQ_RPC_PORT="18082"
-MONEROD_ZMQ_PUB_ADDR="tcp://127.0.0.1:18084"
+MONEROD_ZMQ_PUB_ADDR="tcp://127.0.0.1:18083"
 LWS_CONF_DIR="/etc/monero-lws"
 LWS_CONF_FILE="${LWS_CONF_DIR}/monero-lws.conf"
 LWS_SERVICE_FILE="/etc/systemd/system/monero-lws.service"
-LWS_DATA_DIR="/var/lib/monero-lws"
+LWS_DATA_DIR="/var/lib/monero-lws/light_wallet_server"
 LWS_LOG_DIR="/var/log/monero-lws"
-LWS_REST_ADDR="http://127.0.0.1:8443"
+LWS_REST_ADDR="http://0.0.0.0:8443"
 LWS_ADMIN_REST_ADDR="http://127.0.0.1:8444"
+TOR_CONF_FILE="/etc/tor/torrc"
+I2PD_TUNNELS_FILE="/etc/i2pd/tunnels.conf"
+UFW_TCP_PORTS="18080 18089 8443"
+LWS_BUILD_PACKAGES="build-essential cmake git pkg-config libboost-all-dev libunbound-dev libzmq3-dev libsodium-dev liblzma-dev libreadline-dev libldns-dev libexpat1-dev libpgm-dev libnorm-dev libudev-dev libunwind-dev libusb-1.0-0-dev libprotobuf-dev protobuf-compiler"
 SKIP_SERVICE_AND_USER_SETUP=0
 INSTALL_OR_UPDATE_LWS=0
 
@@ -141,6 +146,44 @@ check_prereqs() {
 	fi
 }
 
+ensure_lws_build_dependencies() {
+	local -a missing=()
+
+	[[ ${INSTALL_OR_UPDATE_LWS} -eq 1 ]] || return 0
+	command -v dpkg-query >/dev/null 2>&1 || return 0
+	command -v apt-get >/dev/null 2>&1 || return 0
+
+	for package in $LWS_BUILD_PACKAGES; do
+		if ! dpkg-query -W -f='${Status}' "$package" 2>/dev/null | grep -q 'install ok installed'; then
+			missing+=("$package")
+		fi
+	done
+
+	if [[ ${#missing[@]} -eq 0 ]]; then
+		return 0
+	fi
+
+	log "Installing missing monero-lws build dependencies: ${missing[*]}"
+	DEBIAN_FRONTEND=noninteractive apt-get update
+	DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${missing[@]}"
+}
+
+open_ufw_ports() {
+	if ! command -v ufw >/dev/null 2>&1; then
+		log "ufw is not installed; skipping firewall rule updates."
+		return 0
+	fi
+
+	log "Opening UFW ports for clearnet access..."
+	for port in $UFW_TCP_PORTS; do
+		if ufw status | grep -Eq "^${port}/tcp[[:space:]]+ALLOW"; then
+			log "ufw already allows ${port}/tcp"
+			continue
+		fi
+		ufw allow "${port}/tcp"
+	done
+}
+
 net_curl() {
 	curl -fLsS --retry 5 "$@"
 }
@@ -162,11 +205,19 @@ set_config_value() {
 	fi
 }
 
-configure_monerod_for_lws() {
-	log "Configuring ${MONEROD_CONF} for monero-lws integration..."
+configure_monerod_conf() {
+	log "Configuring ${MONEROD_CONF} for public clearnet and monero-lws..."
+	set_config_value "$MONEROD_CONF" "public-node" "1"
+	set_config_value "$MONEROD_CONF" "rpc-restricted-bind-ip" "0.0.0.0"
+	set_config_value "$MONEROD_CONF" "rpc-restricted-bind-port" "18089"
 	set_config_value "$MONEROD_CONF" "zmq-rpc-bind-ip" "$MONEROD_ZMQ_RPC_IP"
 	set_config_value "$MONEROD_CONF" "zmq-rpc-bind-port" "$MONEROD_ZMQ_RPC_PORT"
 	set_config_value "$MONEROD_CONF" "zmq-pub" "$MONEROD_ZMQ_PUB_ADDR"
+	set_config_value "$MONEROD_CONF" "disable-rpc-ban" "1"
+}
+
+configure_monerod_for_lws() {
+	configure_monerod_conf
 }
 
 configure_lws_service() {
@@ -186,8 +237,13 @@ EOF
 	set_config_value "$LWS_CONF_FILE" "db-path" "$LWS_DATA_DIR"
 	set_config_value "$LWS_CONF_FILE" "daemon" "tcp://${MONEROD_ZMQ_RPC_IP}:${MONEROD_ZMQ_RPC_PORT}"
 	set_config_value "$LWS_CONF_FILE" "sub" "$MONEROD_ZMQ_PUB_ADDR"
+	set_config_value "$LWS_CONF_FILE" "zmq-pub" "tcp://127.0.0.1:18084"
 	set_config_value "$LWS_CONF_FILE" "rest-server" "$LWS_REST_ADDR"
 	set_config_value "$LWS_CONF_FILE" "admin-rest-server" "$LWS_ADMIN_REST_ADDR"
+	set_config_value "$LWS_CONF_FILE" "confirm-external-bind" "1"
+	set_config_value "$LWS_CONF_FILE" "auto-accept-creation" "1"
+	set_config_value "$LWS_CONF_FILE" "auto-accept-import" "1"
+	set_config_value "$LWS_CONF_FILE" "max-subaddresses" "500"
 	set_config_value "$LWS_CONF_FILE" "log-level" "1"
 	chown "${MONERO_USER}:${MONERO_USER}" "$LWS_CONF_FILE"
 
@@ -209,13 +265,56 @@ RestartSec=5
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
-ReadWritePaths=${LWS_DATA_DIR} ${LWS_LOG_DIR}
+ReadWritePaths=/var/lib/monero-lws ${LWS_LOG_DIR}
 LimitNOFILE=65536
 
 [Install]
 WantedBy=multi-user.target
 EOF
 	chmod 0644 "$LWS_SERVICE_FILE"
+}
+
+configure_monero_privacy_transports() {
+	if [[ -f $TOR_CONF_FILE ]] && command -v tor >/dev/null 2>&1; then
+		if ! grep -Fqx 'HiddenServicePort 8443 127.0.0.1:8443' "$TOR_CONF_FILE"; then
+			log "Adding monero-lws to the existing Monero onion service..."
+			sed -i '/^HiddenServiceDir \/var\/lib\/tor\/monero\/?$/a HiddenServicePort 8443 127.0.0.1:8443' "$TOR_CONF_FILE"
+		fi
+		if ! grep -Fqx 'HiddenServicePort 18089 127.0.0.1:18089' "$TOR_CONF_FILE"; then
+			log "Adding monerod restricted RPC to the existing Monero onion service..."
+			sed -i '/^HiddenServiceDir \/var\/lib\/tor\/monero\/?$/a HiddenServicePort 18089 127.0.0.1:18089' "$TOR_CONF_FILE"
+		fi
+		tor --verify-config -f "$TOR_CONF_FILE" --User debian-tor >/dev/null
+		systemctl restart tor
+	fi
+
+	if [[ -f $I2PD_TUNNELS_FILE ]] && command -v i2pd >/dev/null 2>&1; then
+		if ! grep -Fqx '[MONERO-LWS]' "$I2PD_TUNNELS_FILE"; then
+			log "Adding a dedicated monero-lws I2P HTTP tunnel..."
+			cat >>"$I2PD_TUNNELS_FILE" <<'EOF'
+
+[MONERO-LWS]
+type = http
+host = 127.0.0.1
+port = 8443
+inport = 8443
+keys = monero-lws.dat
+EOF
+		fi
+		if ! grep -Fqx '[MONERO-RESTRICTED-RPC]' "$I2PD_TUNNELS_FILE"; then
+			log "Adding a dedicated monerod restricted RPC I2P tunnel..."
+			cat >>"$I2PD_TUNNELS_FILE" <<'EOF'
+
+[MONERO-RESTRICTED-RPC]
+type = http
+host = 127.0.0.1
+port = 18089
+inport = 18089
+keys = monero-restricted-rpc.dat
+EOF
+		fi
+		systemctl restart i2pd
+	fi
 }
 
 # Get the latest release tag from GitHub
@@ -268,8 +367,9 @@ install_or_update_lws() {
 
 	lws_tmp="$(mktemp -d /tmp/monero-lws-src-XXXXXX)"
 	lws_build="${lws_tmp}/build"
+	LWS_TMP="$lws_tmp"
 
-	trap 'rm -rf "$TMPDIR" "$GPG_HOME" "$lws_tmp" 2>/dev/null || true' EXIT
+	trap 'rm -rf "${TMPDIR:-}" "${GPG_HOME:-}" "${LWS_TMP:-}" 2>/dev/null || true' EXIT
 
 	log "Cloning monero-lws (${lws_branch})..."
 	if ! git clone --depth 1 --branch "$lws_branch" "$LWS_REPO_URL" "$lws_tmp"; then
@@ -331,10 +431,26 @@ run_update() {
 		CURRENT_VERSION_RAW="$(monerod --version 2>/dev/null | awk 'NR==1{print}')"
 		log "Current monerod version line: ${CURRENT_VERSION_RAW:-unknown}"
 
-		# If current version string contains the latest tag, assume it's up to date
+		# If current version string contains the latest tag, assume it's up to date.
+		# Keep going when --install-lws was requested so we can still configure/build LWS.
 		if [[ -n ${CURRENT_VERSION_RAW} && ${CURRENT_VERSION_RAW} == *"${LATEST_TAG}"* ]]; then
 			log "Monero CLI already at latest version (${LATEST_TAG})."
-			exit 0
+			if [[ ${INSTALL_OR_UPDATE_LWS} -eq 0 ]]; then
+				exit 0
+			fi
+
+			install_or_update_lws
+			if [[ ${SKIP_SERVICE_AND_USER_SETUP} -eq 0 ]]; then
+				configure_monerod_for_lws
+				configure_lws_service
+				open_ufw_ports
+				systemctl daemon-reload
+				systemctl restart monerod
+				systemctl enable monero-lws >/dev/null 2>&1 || true
+				systemctl restart monero-lws
+			fi
+			log "monero-lws install/update completed successfully."
+			return 0
 		fi
 	else
 		log "Monero CLI is not currently installed (or not in PATH)."
@@ -487,6 +603,13 @@ data-dir=${MONERO_DATA_DIR}
 log-file=${MONERO_LOG_DIR}/monerod.log
 log-level=0
 db-sync-mode=safe
+public-node=1
+rpc-restricted-bind-ip=0.0.0.0
+rpc-restricted-bind-port=18089
+zmq-rpc-bind-ip=${MONEROD_ZMQ_RPC_IP}
+zmq-rpc-bind-port=${MONEROD_ZMQ_RPC_PORT}
+zmq-pub=${MONEROD_ZMQ_PUB_ADDR}
+disable-rpc-ban=1
 
 # Limit log size
 max-log-file-size=10485760
@@ -494,6 +617,8 @@ max-log-files=5
 EOF
 		chmod 644 "${MONEROD_CONF}"
 	fi
+
+	configure_monerod_conf
 
 	if [[ ${SKIP_SERVICE_AND_USER_SETUP} -eq 0 ]]; then
 		# Update systemd unit from the official repository (always replace)
@@ -558,6 +683,8 @@ EOF
 		if [[ ${SKIP_SERVICE_AND_USER_SETUP} -eq 0 ]]; then
 			configure_monerod_for_lws
 			configure_lws_service
+			configure_monero_privacy_transports
+			open_ufw_ports
 			log "Reloading systemd daemon..."
 			systemctl daemon-reload
 			log "Restarting monerod with ZMQ settings for monero-lws..."
@@ -577,6 +704,7 @@ EOF
 main() {
 	require_root
 	parse_args "$@"
+	ensure_lws_build_dependencies
 	check_prereqs
 	run_update
 }
