@@ -43,6 +43,20 @@ make install-tests-format
 
 Recipes use `install(1)` and strip `.pl`/`.bash`/`.ksh`/`.sh` when placing shell scripts in `${BINDIR}`.
 
+## Validation and formatting
+
+`make test` runs:
+
+- shell validation/formatting (`tests-format/validate-shell.sh`)
+- perl validation/formatting (`tests-format/validate-perl.sh`)
+- make validation/formatting (`tests-format/validate-make.sh`)
+- C/C++ formatting (`tests-format/clang-format-all.sh`) with this priority:
+  1. `knfmt` (if present)
+  2. `clang-format` fallback
+- clang-tidy pass (`tests-format/clang-tidy-all.sh`) when available
+
+For Linux hosts, `tests-format/install-knfmt-linux.sh` installs `knfmt` from source.
+
 ## SecureBlue shell aliases
 
 `make install-shell-secureblue` installs `shell/aliases.bash` to `${SECUREBLUE_BASHRCD_DIR}/aliases.bash`.

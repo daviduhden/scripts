@@ -8,8 +8,9 @@ printf '%s\n' "[INFO] Logging to: $TMPLOG" >&3
 exec >"$TMPLOG" 2>&1
 
 # clang-tidy-all.sh
-# - Recursively finds all C source files under ROOT_DIR (default: current directory
-#   excluding .git) and runs clang-tidy with C23 mode.
+# - Recursively finds all C/C++ source files under ROOT_DIR (default: current
+#   directory excluding .git) and runs clang-tidy.
+# - C files run with -std=c23; C++ files run with -std=c++23.
 # - Usage: ./clang-tidy-all.sh [ROOT_DIR]
 # - Optional: set CLANG_TIDY_BUILD_DIR to pass -p <build-dir>
 # - Requires: clang-tidy in PATH
@@ -46,29 +47,39 @@ run_clang_tidy_all() {
 
 	if ! command -v clang-tidy >/dev/null 2>&1; then
 		if [ "$OS_NAME" = "OpenBSD" ]; then
-			printf '%s\n' "[ERROR] clang-tidy not found; install clang-tools-extra" >&2
+			printf '%s\n' "[INFO] clang-tidy not found (install clang-tools-extra); skipping clang-tidy checks"
 		else
-			printf '%s\n' "[ERROR] clang-tidy not found in PATH" >&2
+			printf '%s\n' "[INFO] clang-tidy not found in PATH; skipping clang-tidy checks"
 		fi
-		exit 1
-	fi
-
-	set -- --extra-arg=-std=c23
-	if [ -n "${CLANG_TIDY_BUILD_DIR:-}" ]; then
-		set -- "$@" -p "$CLANG_TIDY_BUILD_DIR"
+		exit 0
 	fi
 
 	# Prune .git and run clang-tidy safely via find
-	if ! find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name "*.c" -o -name "*.h" \) -print | sed -n '1p' | grep -q .; then
+	if ! find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name "*.c" -o -name "*.h" -o -name "*.cc" -o -name "*.cpp" -o -name "*.cxx" -o -name "*.hh" -o -name "*.hpp" -o -name "*.hxx" \) -print | sed -n '1p' | grep -q .; then
 		printf '%s\n' "[INFO] No C/C++ source files found under: $ROOT_DIR"
 		exit 0
 	fi
 
-	printf '%s\n' "[INFO] Running clang-tidy (C23)..."
-	find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name "*.c" -o -name "*.h" \) -print |
+	printf '%s\n' "[INFO] Running clang-tidy on C/C++ sources..."
+	find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name "*.c" -o -name "*.h" -o -name "*.cc" -o -name "*.cpp" -o -name "*.cxx" -o -name "*.hh" -o -name "*.hpp" -o -name "*.hxx" \) -print |
 		while IFS= read -r f; do
 			[ -n "$f" ] || continue
-			clang-tidy "$@" "$f"
+			case "$f" in
+			*.c | *.h)
+				if [ -n "${CLANG_TIDY_BUILD_DIR:-}" ]; then
+					clang-tidy -p "$CLANG_TIDY_BUILD_DIR" --extra-arg=-std=c23 "$f"
+				else
+					clang-tidy --extra-arg=-std=c23 "$f"
+				fi
+				;;
+			*)
+				if [ -n "${CLANG_TIDY_BUILD_DIR:-}" ]; then
+					clang-tidy -p "$CLANG_TIDY_BUILD_DIR" --extra-arg=-std=c++23 "$f"
+				else
+					clang-tidy --extra-arg=-std=c++23 "$f"
+				fi
+				;;
+			esac
 		done
 	printf '%s\n' "[INFO] clang-tidy completed"
 	exit 0

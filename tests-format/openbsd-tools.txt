@@ -1,11 +1,10 @@
-clang-format = clang-tools-extra
-clang-tidy = clang-tools-extra
-tidy = tidy
-perltidy = perltidy
-shfmt = shfmt
-shellcheck = shellcheck
-bmake = make
+clang-format = devel/clang-tools-extra
+clang-tidy = devel/clang-tools-extra
+knfmt = devel/knfmt
+tidy = www/tidy
+perltidy = textproc/p5-Perl-Tidy
+shfmt = devel/shfmt
+shellcheck = devel/shellcheck
+bmake = base make
 checkmake = not ported
 mbake = not ported
-
-shfmt: 3.6.0 -> upstream: 3.13.0

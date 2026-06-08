@@ -53,6 +53,7 @@ SECUREBLUE_SCRIPTS = \
 TESTS_FORMAT_SCRIPTS = \
 	tests-format/clang-format-all.sh \
 	tests-format/clang-tidy-all.sh \
+	tests-format/install-knfmt-linux.sh \
 	tests-format/validate-make.sh \
 	tests-format/validate-manpages.sh \
 	tests-format/validate-perl.sh \
@@ -126,6 +127,8 @@ test:
 	@echo "Running shell script validation..." && /bin/bash tests-format/validate-shell.sh .
 	@echo "Running perl script validation..." && /bin/bash tests-format/validate-perl.sh .
 	@echo "Running make validation..." && /bin/bash tests-format/validate-make.sh .
+	@echo "Running C/C++ formatter pass (knfmt/clang-format)..." && /bin/sh tests-format/clang-format-all.sh .
+	@echo "Running clang-tidy pass (if available)..." && /bin/sh tests-format/clang-tidy-all.sh .
 
 help:
 	@printf "Usage: make [target]\n\nTargets:\n  all                      Install all helper sets\n  install-debian           Install Debian helper scripts into ${BINDIR}\n  install-openbsd          Install OpenBSD helper scripts into ${BINDIR}\n  install-secureblue       Install secureblue helper scripts into ${BINDIR}\n  install-shell            Alias of install-shell-secureblue\n  install-shell-secureblue Install shell aliases into ${SECUREBLUE_BASHRCD_DIR} (with chattr -i/+i)\n  install-shell-openbsd    Guidance for installing shell helpers on OpenBSD\n  install-perl             Install perl helper scripts into ${BINDIR}\n  install-tests-format     Install tests-format helper scripts into ${BINDIR}/tests-format\n  test                     Run script and make validation tests\n  clean                    No-op clean target\n  help                     Show this help\n"

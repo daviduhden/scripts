@@ -17,43 +17,50 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
         with:
           fetch-depth: 0
           persist-credentials: false
 
       - name: Configure git user
         run: |
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Ensure curl and unzip are installed
         run: |
+          set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y curl unzip
 
       - name: Fetch sysclean from Codeberg (git with ZIP fallback)
         run: |
-          set -e
+          set -euo pipefail
 
           REPO_GIT="https://codeberg.org/semarie/sysclean.git"
           REPO_ZIP="https://codeberg.org/semarie/sysclean/archive/main.zip"
+          WORK_TMP="$GITHUB_WORKSPACE/.tmp-sysclean"
+          rm -rf "$WORK_TMP"
+          mkdir -p "$WORK_TMP"
 
-          rm -rf /tmp/sysclean /tmp/sysclean.zip /tmp/sysclean-extracted
-          mkdir -p /tmp/sysclean
+          SYSCLONE="$WORK_TMP/sysclean"
+          ZIP_PATH="$WORK_TMP/sysclean.zip"
+          EXTRACT_DIR="$WORK_TMP/sysclean-extracted"
+          mkdir -p "$SYSCLONE"
 
           echo "Trying to clone sysclean via git..."
-          if git clone --depth=1 "$REPO_GIT" /tmp/sysclean; then
+          if git clone --depth=1 "$REPO_GIT" "$SYSCLONE"; then
             echo "Git clone succeeded."
           else
             echo "Git clone failed, falling back to ZIP download..."
-            curl -fLsS --retry 5 "$REPO_ZIP" -o /tmp/sysclean.zip
+            curl -fLsS --retry 5 "$REPO_ZIP" -o "$ZIP_PATH"
 
-            mkdir -p /tmp/sysclean-extracted
-            unzip -q /tmp/sysclean.zip -d /tmp/sysclean-extracted
+            mkdir -p "$EXTRACT_DIR"
+            unzip -q "$ZIP_PATH" -d "$EXTRACT_DIR"
 
             # Find extracted directory (e.g. sysclean-main)
-            SRC_DIR="$(find /tmp/sysclean-extracted -mindepth 1 -type d \
+            SRC_DIR="$(find "$EXTRACT_DIR" -mindepth 1 -type d \
               | head -n1)"
             if [ -z "$SRC_DIR" ]; then
               echo "ERROR: Could not find extracted sysclean directory." >&2
@@ -61,22 +68,25 @@ jobs:
             fi
 
             echo "Copying contents from ZIP-extracted directory: $SRC_DIR"
-            cp -a "$SRC_DIR/." /tmp/sysclean/
+            cp -a "$SRC_DIR/." "$SYSCLONE/"
           fi
 
       - name: Sync sysclean into openbsd/sysclean
         run: |
+          set -euo pipefail
           mkdir -p openbsd
           # Remove previous content
           rm -rf openbsd/sysclean
           mkdir -p openbsd/sysclean
 
           # Copy all content (including .git if present), then remove .git
-          cp -a /tmp/sysclean/. openbsd/sysclean/
+          cp -a "$GITHUB_WORKSPACE/.tmp-sysclean/sysclean/." openbsd/sysclean/
           rm -rf openbsd/sysclean/.git
+          rm -rf "$GITHUB_WORKSPACE/.tmp-sysclean"
 
       - name: Commit changes if any
         run: |
+          set -euo pipefail
           if [ -n "$(git status --porcelain)" ]; then
             echo "Changes detected, committing..."
             git add -A openbsd/sysclean
