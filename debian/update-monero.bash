@@ -34,7 +34,7 @@ LWS_REPO_URL="https://github.com/${LWS_REPO}.git"
 
 INSTALL_DIR="/usr/bin"
 MONERO_USER="monero"
-MONERO_DATA_DIR="/var/lib/monero"
+MONERO_DATA_DIR="${MONERO_DATA_DIR:-/var/lib/monero}"
 MONERO_LOG_DIR="/var/log/monero"
 MONEROD_CONF="/etc/monerod.conf"
 MONEROD_ZMQ_RPC_IP="127.0.0.1"
@@ -43,13 +43,15 @@ MONEROD_ZMQ_PUB_ADDR="tcp://127.0.0.1:18083"
 LWS_CONF_DIR="/etc/monero-lws"
 LWS_CONF_FILE="${LWS_CONF_DIR}/monero-lws.conf"
 LWS_SERVICE_FILE="/etc/systemd/system/monero-lws.service"
-LWS_DATA_DIR="/var/lib/monero-lws"
+LWS_DATA_DIR="${LWS_DATA_DIR:-/var/lib/monero-lws/light_wallet_server}"
 LWS_LOG_DIR="/var/log/monero-lws"
-LWS_REST_ADDR="http://0.0.0.0:8443"
-LWS_ADMIN_REST_ADDR="http://127.0.0.1:8444"
+LWS_REST_ADDR="${LWS_REST_ADDR:-http://0.0.0.0:8443}"
+LWS_REST_ADDR_V6="${LWS_REST_ADDR_V6:-}"
+LWS_ADMIN_REST_ADDR="${LWS_ADMIN_REST_ADDR:-http://127.0.0.1:8444}"
+LWS_ADMIN_REST_ADDR_V6="${LWS_ADMIN_REST_ADDR_V6:-}"
 TOR_CONF_FILE="/etc/tor/torrc"
 I2PD_TUNNELS_FILE="/etc/i2pd/tunnels.conf"
-UFW_TCP_PORTS="18080 18089 8443"
+UFW_TCP_PORTS="${UFW_TCP_PORTS:-18080 8443}"
 LWS_BUILD_PACKAGES="build-essential cmake git pkg-config libboost-all-dev libunbound-dev libzmq3-dev libsodium-dev liblzma-dev libreadline-dev libldns-dev libexpat1-dev libpgm-dev libnorm-dev libudev-dev libunwind-dev libusb-1.0-0-dev libprotobuf-dev protobuf-compiler"
 SKIP_SERVICE_AND_USER_SETUP=0
 INSTALL_OR_UPDATE_LWS=0
@@ -205,15 +207,65 @@ set_config_value() {
 	fi
 }
 
+append_config_line() {
+	local file line
+	file="$1"
+	line="$2"
+
+	if ! grep -Fqx "$line" "$file"; then
+		printf '%s\n' "$line" >>"$file"
+	fi
+}
+
 configure_monerod_conf() {
 	log "Configuring ${MONEROD_CONF} for public clearnet and monero-lws..."
+	local p2p_bind_ip="${MONEROD_P2P_BIND_IP:-0.0.0.0}"
+	local p2p_bind_ipv6="${MONEROD_P2P_BIND_IPV6:-::}"
+	local rpc_bind_ip="${MONEROD_RPC_BIND_IP:-127.0.0.1}"
+	local rpc_bind_ipv6="${MONEROD_RPC_BIND_IPV6:-::1}"
+	local tor_onion="${MONERO_TOR_ONION:-}"
+	local i2p_b32="${MONERO_I2P_B32:-}"
+
+	set_config_value "$MONEROD_CONF" "data-dir" "$MONERO_DATA_DIR"
+	set_config_value "$MONEROD_CONF" "log-file" "${MONERO_LOG_DIR}/monerod.log"
+	set_config_value "$MONEROD_CONF" "log-level" "0"
+	set_config_value "$MONEROD_CONF" "max-log-file-size" "10485760"
+	set_config_value "$MONEROD_CONF" "max-log-files" "5"
+	set_config_value "$MONEROD_CONF" "no-igd" "1"
+	set_config_value "$MONEROD_CONF" "db-sync-mode" "fast:async:250000000bytes"
+	set_config_value "$MONEROD_CONF" "p2p-bind-ip" "${p2p_bind_ip}"
+	set_config_value "$MONEROD_CONF" "p2p-bind-ipv6-address" "${p2p_bind_ipv6}"
+	set_config_value "$MONEROD_CONF" "p2p-bind-port" "18080"
+	set_config_value "$MONEROD_CONF" "p2p-bind-port-ipv6" "18080"
+	set_config_value "$MONEROD_CONF" "p2p-use-ipv6" "1"
+	set_config_value "$MONEROD_CONF" "out-peers" "32"
+	set_config_value "$MONEROD_CONF" "in-peers" "64"
+	set_config_value "$MONEROD_CONF" "limit-rate-up" "8192"
+	set_config_value "$MONEROD_CONF" "limit-rate-down" "32768"
+	set_config_value "$MONEROD_CONF" "rpc-bind-ip" "${rpc_bind_ip}"
+	set_config_value "$MONEROD_CONF" "rpc-bind-port" "18081"
+	set_config_value "$MONEROD_CONF" "rpc-use-ipv6" "1"
+	set_config_value "$MONEROD_CONF" "rpc-bind-ipv6-address" "${rpc_bind_ipv6}"
+	set_config_value "$MONEROD_CONF" "restricted-rpc" "1"
+	set_config_value "$MONEROD_CONF" "confirm-external-bind" "1"
 	set_config_value "$MONEROD_CONF" "public-node" "1"
-	set_config_value "$MONEROD_CONF" "rpc-restricted-bind-ip" "0.0.0.0"
-	set_config_value "$MONEROD_CONF" "rpc-restricted-bind-port" "18089"
+	set_config_value "$MONEROD_CONF" "max-concurrency" "4"
+	set_config_value "$MONEROD_CONF" "prep-blocks-threads" "4"
+	set_config_value "$MONEROD_CONF" "enable-dns-blocklist" "1"
+	set_config_value "$MONEROD_CONF" "enforce-dns-checkpointing" "1"
 	set_config_value "$MONEROD_CONF" "zmq-rpc-bind-ip" "$MONEROD_ZMQ_RPC_IP"
 	set_config_value "$MONEROD_CONF" "zmq-rpc-bind-port" "$MONEROD_ZMQ_RPC_PORT"
 	set_config_value "$MONEROD_CONF" "zmq-pub" "$MONEROD_ZMQ_PUB_ADDR"
 	set_config_value "$MONEROD_CONF" "disable-rpc-ban" "1"
+	sed -i -E '/^tx-proxy=/d;/^anonymous-inbound=/d' "$MONEROD_CONF"
+	if [[ -n ${tor_onion} ]]; then
+		append_config_line "$MONEROD_CONF" "tx-proxy=tor,[::1]:9050,10"
+		append_config_line "$MONEROD_CONF" "anonymous-inbound=${tor_onion}:18080,127.0.0.1:18080,16"
+	fi
+	if [[ -n ${i2p_b32} ]]; then
+		append_config_line "$MONEROD_CONF" "tx-proxy=i2p,[::1]:4447"
+		append_config_line "$MONEROD_CONF" "anonymous-inbound=${i2p_b32},127.0.0.2:18080,16"
+	fi
 }
 
 configure_monerod_for_lws() {
@@ -239,11 +291,19 @@ EOF
 	set_config_value "$LWS_CONF_FILE" "sub" "$MONEROD_ZMQ_PUB_ADDR"
 	set_config_value "$LWS_CONF_FILE" "zmq-pub" "tcp://127.0.0.1:18084"
 	set_config_value "$LWS_CONF_FILE" "rest-server" "$LWS_REST_ADDR"
+	if [[ -n ${LWS_REST_ADDR_V6} ]]; then
+		append_config_line "$LWS_CONF_FILE" "rest-server=${LWS_REST_ADDR_V6}"
+	fi
 	set_config_value "$LWS_CONF_FILE" "admin-rest-server" "$LWS_ADMIN_REST_ADDR"
+	if [[ -n ${LWS_ADMIN_REST_ADDR_V6} ]]; then
+		append_config_line "$LWS_CONF_FILE" "admin-rest-server=${LWS_ADMIN_REST_ADDR_V6}"
+	fi
 	set_config_value "$LWS_CONF_FILE" "confirm-external-bind" "1"
 	set_config_value "$LWS_CONF_FILE" "auto-accept-creation" "1"
 	set_config_value "$LWS_CONF_FILE" "auto-accept-import" "1"
 	set_config_value "$LWS_CONF_FILE" "max-subaddresses" "500"
+	set_config_value "$LWS_CONF_FILE" "scan-threads" "4"
+	set_config_value "$LWS_CONF_FILE" "rest-threads" "2"
 	set_config_value "$LWS_CONF_FILE" "log-level" "1"
 	chown "${MONERO_USER}:${MONERO_USER}" "$LWS_CONF_FILE"
 
@@ -254,6 +314,7 @@ Description=Monero Light Wallet Server
 Wants=network-online.target
 After=network-online.target monerod.service
 Requires=monerod.service
+RequiresMountsFor=${LWS_DATA_DIR}
 
 [Service]
 Type=simple
@@ -264,8 +325,20 @@ Restart=on-failure
 RestartSec=5
 NoNewPrivileges=true
 PrivateTmp=true
+PrivateDevices=true
 ProtectSystem=full
-ReadWritePaths=/var/lib/monero-lws ${LWS_LOG_DIR}
+ProtectHome=true
+ProtectControlGroups=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+AmbientCapabilities=
+ReadWritePaths=${LWS_DATA_DIR} ${LWS_LOG_DIR}
 LimitNOFILE=65536
 
 [Install]
@@ -280,9 +353,9 @@ configure_monero_privacy_transports() {
 			log "Adding monero-lws to the existing Monero onion service..."
 			sed -i '/^HiddenServiceDir \/var\/lib\/tor\/monero\/?$/a HiddenServicePort 8443 127.0.0.1:8443' "$TOR_CONF_FILE"
 		fi
-		if ! grep -Fqx 'HiddenServicePort 18089 127.0.0.1:18089' "$TOR_CONF_FILE"; then
+		if ! grep -Fqx 'HiddenServicePort 18081 127.0.0.1:18081' "$TOR_CONF_FILE"; then
 			log "Adding monerod restricted RPC to the existing Monero onion service..."
-			sed -i '/^HiddenServiceDir \/var\/lib\/tor\/monero\/?$/a HiddenServicePort 18089 127.0.0.1:18089' "$TOR_CONF_FILE"
+			sed -i '/^HiddenServiceDir \/var\/lib\/tor\/monero\/?$/a HiddenServicePort 18081 127.0.0.1:18081' "$TOR_CONF_FILE"
 		fi
 		tor --verify-config -f "$TOR_CONF_FILE" --User debian-tor >/dev/null
 		systemctl restart tor
@@ -308,8 +381,8 @@ EOF
 [MONERO-RESTRICTED-RPC]
 type = http
 host = 127.0.0.1
-port = 18089
-inport = 18089
+port = 18081
+inport = 18081
 keys = monero-restricted-rpc.dat
 EOF
 		fi
@@ -602,18 +675,38 @@ run_update() {
 data-dir=${MONERO_DATA_DIR}
 log-file=${MONERO_LOG_DIR}/monerod.log
 log-level=0
-db-sync-mode=safe
+max-log-file-size=10485760
+max-log-files=5
+no-igd=1
+db-sync-mode=fast:async:250000000bytes
 public-node=1
-rpc-restricted-bind-ip=0.0.0.0
-rpc-restricted-bind-port=18089
+p2p-bind-ip=0.0.0.0
+p2p-bind-port=18080
+p2p-use-ipv6=1
+p2p-bind-ipv6-address=::
+p2p-bind-port-ipv6=18080
+out-peers=32
+in-peers=64
+limit-rate-up=8192
+limit-rate-down=32768
+rpc-bind-ip=127.0.0.1
+rpc-bind-port=18081
+rpc-use-ipv6=1
+rpc-bind-ipv6-address=::1
+restricted-rpc=1
+confirm-external-bind=1
+max-concurrency=4
+prep-blocks-threads=4
+enable-dns-blocklist=1
+enforce-dns-checkpointing=1
+# Optional Tor/I2P transport configuration can be added with environment
+# variables when needed.
 zmq-rpc-bind-ip=${MONEROD_ZMQ_RPC_IP}
 zmq-rpc-bind-port=${MONEROD_ZMQ_RPC_PORT}
 zmq-pub=${MONEROD_ZMQ_PUB_ADDR}
 disable-rpc-ban=1
 
 # Limit log size
-max-log-file-size=10485760
-max-log-files=5
 EOF
 		chmod 644 "${MONEROD_CONF}"
 	fi
