@@ -179,7 +179,17 @@ remove_obsolete_paths() {
 remove_obsolete_users() {
 	log "Parsing obsolete users from: $SYSCLEAN_OUT"
 
-	awk '$1=="@user" {
+	awk '$1=="@user" && index($0, "=>") > 0 {
+            sub(/^@user[[:space:]]+/, "", $0);
+            split($0, a, ":");
+            print a[1];
+        }' "$SYSCLEAN_OUT" | sort -u |
+		while IFS= read -r user; do
+			[ -n "$user" ] || continue
+			warn "Skipping user with profile differences (reported by sysclean): $user"
+		done
+
+	awk '$1=="@user" && index($0, "=>") == 0 {
             sub(/^@user[[:space:]]+/, "", $0);
             split($0, a, ":");
             print a[1];
@@ -189,6 +199,11 @@ remove_obsolete_users() {
 
 			if [ "$DRY_RUN" -eq 1 ]; then
 				log "DRY RUN: would remove user: $user"
+				continue
+			fi
+
+			if [ "$user" = "root" ] || [ "$(id -u "$user" 2>/dev/null || true)" = "0" ]; then
+				warn "Skipping protected user: $user"
 				continue
 			fi
 
