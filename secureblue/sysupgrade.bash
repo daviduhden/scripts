@@ -502,15 +502,15 @@ update_homebrew() {
 	if [[ -n ${BREW_PROXY_AUTO_FLAG:-} ]]; then
 		log "Using ${BREW_CMD} auto-confirm flag: ${BREW_PROXY_AUTO_FLAG}"
 	fi
-	if ! run_as_user "$NONROOT_USER" env -u HOMEBREW_CASK_OPTS_REQUIRE_SHA "$BREW_CMD" ${BREW_PROXY_AUTO_FLAG:+"$BREW_PROXY_AUTO_FLAG"} update; then
+	if ! run_as_user "$NONROOT_USER" "$BREW_CMD" ${BREW_PROXY_AUTO_FLAG:+"$BREW_PROXY_AUTO_FLAG"} update; then
 		warn "brew update failed."
 		phase_failed=1
 	fi
-	if ! run_as_user "$NONROOT_USER" env -u HOMEBREW_CASK_OPTS_REQUIRE_SHA "$BREW_CMD" ${BREW_PROXY_AUTO_FLAG:+"$BREW_PROXY_AUTO_FLAG"} upgrade --greedy; then
+	if ! run_as_user "$NONROOT_USER" "$BREW_CMD" ${BREW_PROXY_AUTO_FLAG:+"$BREW_PROXY_AUTO_FLAG"} upgrade --greedy; then
 		warn "brew upgrade failed."
 		phase_failed=1
 	fi
-	if ! run_as_user "$NONROOT_USER" env -u HOMEBREW_CASK_OPTS_REQUIRE_SHA "$BREW_CMD" ${BREW_PROXY_AUTO_FLAG:+"$BREW_PROXY_AUTO_FLAG"} cleanup; then
+	if ! run_as_user "$NONROOT_USER" "$BREW_CMD" ${BREW_PROXY_AUTO_FLAG:+"$BREW_PROXY_AUTO_FLAG"} cleanup; then
 		warn "brew cleanup failed."
 		phase_failed=1
 	fi
