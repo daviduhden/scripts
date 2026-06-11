@@ -45,6 +45,7 @@ LWS_CONF_FILE="${LWS_CONF_DIR}/monero-lws.conf"
 LWS_SERVICE_FILE="/etc/systemd/system/monero-lws.service"
 LWS_DATA_DIR="${LWS_DATA_DIR:-/var/lib/monero-lws/light_wallet_server}"
 LWS_LOG_DIR="/var/log/monero-lws"
+LWS_STATE_FILE="/var/lib/monero-lws/.installed-release-ref"
 LWS_REST_ADDR="${LWS_REST_ADDR:-http://0.0.0.0:8443}"
 LWS_REST_ADDR_V6="${LWS_REST_ADDR_V6:-}"
 LWS_ADMIN_REST_ADDR="${LWS_ADMIN_REST_ADDR:-http://127.0.0.1:8444}"
@@ -61,7 +62,7 @@ usage() {
 Usage: update-monero.bash [--skip-service-and-user-setup] [--install-lws]
 
 Options:
-  --skip-service-and-user-setup  Skip monero user creation and systemd install/enable steps.
+  --skip-service-and-user-setup  Skip monero/monero-lws user and systemd install/enable steps.
   --install-lws                  Build/install monero-lws and configure monerod+lws to run together.
   -h, --help                     Show this help message and exit.
 EOF
@@ -428,15 +429,39 @@ get_latest_lws_release_branch() {
 		tail -n1
 }
 
+get_lws_release_ref() {
+	local branch="$1"
+	git ls-remote --heads "$LWS_REPO_URL" "refs/heads/${branch}" 2>/dev/null | awk 'NR==1{print $1}'
+}
+
+lws_is_current() {
+	local branch="$1"
+	local ref="$2"
+	local installed_ref
+
+	[[ -x "${INSTALL_DIR}/monero-lws-daemon" ]] || return 1
+	[[ -f "${LWS_STATE_FILE}" ]] || return 1
+	installed_ref="$(awk 'NR==1{print}' "${LWS_STATE_FILE}" 2>/dev/null || true)"
+	[[ "${installed_ref}" == "${branch}:${ref}" ]]
+}
+
 install_or_update_lws() {
-	local lws_branch lws_tmp lws_build
+	local lws_branch lws_ref lws_tmp lws_build
 
 	log "Checking latest monero-lws release branch..."
 	lws_branch="$(get_latest_lws_release_branch || true)"
 	if [[ -z ${lws_branch} ]]; then
 		error "could not determine latest monero-lws release-v* branch."
 	fi
+	lws_ref="$(get_lws_release_ref "${lws_branch}" || true)"
+	if [[ -z ${lws_ref} ]]; then
+		error "could not determine monero-lws commit for branch ${lws_branch}."
+	fi
 	log "Using monero-lws branch: ${lws_branch}"
+	if lws_is_current "${lws_branch}" "${lws_ref}"; then
+		log "monero-lws is already up to date (${lws_branch} @ ${lws_ref}). Skipping build/install."
+		return 0
+	fi
 
 	lws_tmp="$(mktemp -d /tmp/monero-lws-src-XXXXXX)"
 	lws_build="${lws_tmp}/build"
@@ -485,6 +510,10 @@ install_or_update_lws() {
 		error "no monero-lws binaries found under build output: ${lws_build}/src"
 	fi
 
+	install -d "$(dirname "${LWS_STATE_FILE}")"
+	printf '%s:%s\n' "${lws_branch}" "${lws_ref}" >"${LWS_STATE_FILE}"
+	chmod 0644 "${LWS_STATE_FILE}"
+
 	log "monero-lws install/update completed from ${lws_branch}"
 }
 
@@ -521,6 +550,8 @@ run_update() {
 				systemctl restart monerod
 				systemctl enable monero-lws >/dev/null 2>&1 || true
 				systemctl restart monero-lws
+			else
+				log "Skipping monero-lws service and user setup as requested."
 			fi
 			log "monero-lws install/update completed successfully."
 			return 0
@@ -785,6 +816,8 @@ EOF
 			log "Enabling and restarting monero-lws..."
 			systemctl enable monero-lws >/dev/null 2>&1 || true
 			systemctl restart monero-lws
+		else
+			log "Skipping monero-lws service and user setup as requested."
 		fi
 		if command -v monero-lws-daemon >/dev/null 2>&1; then
 			log "Installed monero-lws-daemon: $(command -v monero-lws-daemon)"
