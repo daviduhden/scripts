@@ -442,7 +442,7 @@ update_homebrew() {
 
 	# Never run "brew" as root. Determine a primary non-root user and
 	# execute brew via that user's context using "runuser"/"run_as_user".
-	local BREW_PREFIX PREFIX_UID PREFIX_GID BREW_USER BREW_CMD BREW_PROXY_AUTO_FLAG BREW_RUN_USER
+	local BREW_PREFIX PREFIX_UID PREFIX_GID BREW_USER BREW_CMD BREW_PROXY_AUTO_FLAG BREW_RUN_USER BREW_WORKDIR
 	local BREW_CASK_OPTS_MIGRATED
 	local -a BREW_ENV
 	BREW_RUN_USER="$NONROOT_USER"
@@ -514,6 +514,15 @@ update_homebrew() {
 	if [[ -n ${HOMEBREW_CASK_OPTS_REQUIRE_SHA:-} && -z ${HOMEBREW_CASK_OPTS:-} ]]; then
 		BREW_CASK_OPTS_MIGRATED="--require-sha"
 		BREW_ENV+=("HOMEBREW_CASK_OPTS=${BREW_CASK_OPTS_MIGRATED}")
+	fi
+
+	BREW_WORKDIR="$(user_home_dir "$BREW_RUN_USER" || true)"
+	if [[ -z ${BREW_WORKDIR:-} || ! -d $BREW_WORKDIR ]]; then
+		BREW_WORKDIR="/"
+	fi
+	if ! cd "$BREW_WORKDIR"; then
+		warn "Could not switch to Homebrew workdir '$BREW_WORKDIR'."
+		return 1
 	fi
 
 	# Prefer explicit non-interactive flag for brew-proxy when available.
