@@ -460,6 +460,11 @@ update_homebrew() {
 	fi
 
 	BREW_PREFIX="$(runuser -u "$BREW_RUN_USER" -- "$BREW_CMD" --prefix 2>/dev/null || true)"
+	if [[ -z ${BREW_PREFIX:-} && $BREW_CMD == "brew-proxy" ]]; then
+		# brew-proxy may require an interactive auth session even for metadata.
+		# Fall back to direct brew for prefix discovery when available.
+		BREW_PREFIX="$(runuser -u "$BREW_RUN_USER" -- brew --prefix 2>/dev/null || true)"
+	fi
 	if [[ -z ${BREW_PREFIX:-} || ! -d $BREW_PREFIX ]]; then
 		warn "Could not determine a valid Homebrew prefix for configured user '$BREW_RUN_USER'."
 		return 1
@@ -492,6 +497,15 @@ update_homebrew() {
 		if [[ -z ${BREW_CMD:-} ]]; then
 			warn "brew-proxy/brew not available for Homebrew owner '$BREW_RUN_USER'."
 			return 1
+		fi
+	fi
+
+	# When running as the Homebrew owner account, prefer direct brew over
+	# brew-proxy to avoid D-Bus/polkit auth requirements in unattended runs.
+	if [[ $BREW_CMD == "brew-proxy" && $BREW_RUN_USER == "$BREW_USER" ]]; then
+		if runuser -u "$BREW_RUN_USER" -- bash -lc 'command -v brew >/dev/null 2>&1'; then
+			log "Using direct brew as Homebrew owner '$BREW_RUN_USER'."
+			BREW_CMD="brew"
 		fi
 	fi
 
