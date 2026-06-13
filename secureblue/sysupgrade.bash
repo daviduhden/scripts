@@ -442,7 +442,7 @@ update_homebrew() {
 
 	# Never run "brew" as root. Determine a primary non-root user and
 	# execute brew via that user's context using "runuser"/"run_as_user".
-	local BREW_PREFIX PREFIX_UID PREFIX_GID BREW_USER BREW_CMD BREW_PROXY_AUTO_FLAG BREW_RUN_USER BREW_WORKDIR
+	local BREW_PREFIX PREFIX_UID PREFIX_GID BREW_USER BREW_CMD BREW_PROXY_AUTO_FLAG BREW_RUN_USER BREW_WORKDIR BREW_UPGRADE_AUTO_FLAG
 	local BREW_CASK_OPTS_MIGRATED
 	local -a BREW_ENV
 	BREW_RUN_USER="$NONROOT_USER"
@@ -490,8 +490,8 @@ update_homebrew() {
 	fi
 
 	if [[ $BREW_USER != "$BREW_RUN_USER" ]]; then
-		warn "Homebrew prefix owner is '$BREW_USER' but configured non-root user is '$BREW_RUN_USER'."
-		warn "Using '$BREW_USER' for Homebrew operations in this phase."
+		log "Homebrew prefix owner is '$BREW_USER' (configured user: '$BREW_RUN_USER')."
+		log "Using '$BREW_USER' for Homebrew operations in this phase."
 		BREW_RUN_USER="$BREW_USER"
 		BREW_CMD="$(runuser -u "$BREW_RUN_USER" -- bash -lc 'if command -v brew-proxy >/dev/null 2>&1; then echo brew-proxy; elif command -v brew >/dev/null 2>&1; then echo brew; fi' 2>/dev/null || true)"
 		if [[ -z ${BREW_CMD:-} ]]; then
@@ -514,6 +514,7 @@ update_homebrew() {
 	BREW_CASK_OPTS_MIGRATED="--require-sha"
 	BREW_ENV+=(
 		"HOMEBREW_CASK_OPTS=${BREW_CASK_OPTS_MIGRATED}"
+		"HOMEBREW_NO_ASK=1"
 		"HOMEBREW_NO_ENV_HINTS=1"
 		"NONINTERACTIVE=1"
 	)
@@ -536,6 +537,8 @@ update_homebrew() {
 		elif runuser -u "$BREW_RUN_USER" -- "${BREW_ENV[@]}" brew-proxy --help 2>/dev/null | grep -q -- '--non-interactive'; then
 			BREW_PROXY_AUTO_FLAG="--non-interactive"
 		fi
+	elif runuser -u "$BREW_RUN_USER" -- "${BREW_ENV[@]}" brew upgrade --help 2>/dev/null | grep -q -- '--yes'; then
+		BREW_UPGRADE_AUTO_FLAG="--yes"
 	fi
 
 	log "Running ${BREW_CMD} as user: $BREW_RUN_USER"
@@ -546,7 +549,7 @@ update_homebrew() {
 		warn "brew update failed."
 		phase_failed=1
 	fi
-	if ! run_as_user "$BREW_RUN_USER" "${BREW_ENV[@]}" "$BREW_CMD" ${BREW_PROXY_AUTO_FLAG:+"$BREW_PROXY_AUTO_FLAG"} upgrade --greedy; then
+	if ! run_as_user "$BREW_RUN_USER" "${BREW_ENV[@]}" "$BREW_CMD" ${BREW_PROXY_AUTO_FLAG:+"$BREW_PROXY_AUTO_FLAG"} upgrade ${BREW_UPGRADE_AUTO_FLAG:+"$BREW_UPGRADE_AUTO_FLAG"} --greedy; then
 		warn "brew upgrade failed."
 		phase_failed=1
 	fi
