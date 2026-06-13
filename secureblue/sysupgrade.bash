@@ -509,12 +509,14 @@ update_homebrew() {
 		fi
 	fi
 
-	# Silence deprecated Homebrew env var while preserving old behavior.
+	# Run brew non-interactively and use the non-deprecated cask SHA flag.
 	BREW_ENV=(env -u HOMEBREW_CASK_OPTS_REQUIRE_SHA)
-	if [[ -n ${HOMEBREW_CASK_OPTS_REQUIRE_SHA:-} && -z ${HOMEBREW_CASK_OPTS:-} ]]; then
-		BREW_CASK_OPTS_MIGRATED="--require-sha"
-		BREW_ENV+=("HOMEBREW_CASK_OPTS=${BREW_CASK_OPTS_MIGRATED}")
-	fi
+	BREW_CASK_OPTS_MIGRATED="--require-sha"
+	BREW_ENV+=(
+		"HOMEBREW_CASK_OPTS=${BREW_CASK_OPTS_MIGRATED}"
+		"HOMEBREW_NO_ENV_HINTS=1"
+		"NONINTERACTIVE=1"
+	)
 
 	BREW_WORKDIR="$(user_home_dir "$BREW_RUN_USER" || true)"
 	if [[ -z ${BREW_WORKDIR:-} || ! -d $BREW_WORKDIR ]]; then
