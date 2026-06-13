@@ -442,7 +442,10 @@ update_homebrew() {
 
 	# Never run "brew" as root. Determine a primary non-root user and
 	# execute brew via that user's context using "runuser"/"run_as_user".
-	local BREW_PREFIX PREFIX_UID PREFIX_GID BREW_USER BREW_CMD BREW_PROXY_AUTO_FLAG
+	local BREW_PREFIX PREFIX_UID PREFIX_GID BREW_USER BREW_CMD BREW_PROXY_AUTO_FLAG BREW_RUN_USER
+	local BREW_CASK_OPTS_MIGRATED
+	local -a BREW_ENV
+	BREW_RUN_USER="$NONROOT_USER"
 
 	if ! require_cmd --check runuser; then
 		warn "'runuser' not available; cannot safely run Homebrew update."
@@ -450,15 +453,15 @@ update_homebrew() {
 	fi
 
 	# Prefer brew-proxy when present for compatibility with secureblue setups.
-	BREW_CMD="$(runuser -u "$NONROOT_USER" -- bash -lc 'if command -v brew-proxy >/dev/null 2>&1; then echo brew-proxy; elif command -v brew >/dev/null 2>&1; then echo brew; fi' 2>/dev/null || true)"
+	BREW_CMD="$(runuser -u "$BREW_RUN_USER" -- bash -lc 'if command -v brew-proxy >/dev/null 2>&1; then echo brew-proxy; elif command -v brew >/dev/null 2>&1; then echo brew; fi' 2>/dev/null || true)"
 	if [[ -z ${BREW_CMD:-} ]]; then
-		warn "brew-proxy/brew not available for configured user '$NONROOT_USER'."
+		warn "brew-proxy/brew not available for configured user '$BREW_RUN_USER'."
 		return 1
 	fi
 
-	BREW_PREFIX="$(runuser -u "$NONROOT_USER" -- "$BREW_CMD" --prefix 2>/dev/null || true)"
+	BREW_PREFIX="$(runuser -u "$BREW_RUN_USER" -- "$BREW_CMD" --prefix 2>/dev/null || true)"
 	if [[ -z ${BREW_PREFIX:-} || ! -d $BREW_PREFIX ]]; then
-		warn "Could not determine a valid Homebrew prefix for configured user '$NONROOT_USER'."
+		warn "Could not determine a valid Homebrew prefix for configured user '$BREW_RUN_USER'."
 		return 1
 	fi
 
@@ -481,36 +484,48 @@ update_homebrew() {
 		return 1
 	fi
 
-	if [[ $BREW_USER != "$NONROOT_USER" ]]; then
-		warn "Homebrew prefix owner is '$BREW_USER' but configured non-root user is '$NONROOT_USER'."
-		warn "Configure --user '$BREW_USER' or fix prefix ownership."
-		return 1
+	if [[ $BREW_USER != "$BREW_RUN_USER" ]]; then
+		warn "Homebrew prefix owner is '$BREW_USER' but configured non-root user is '$BREW_RUN_USER'."
+		warn "Using '$BREW_USER' for Homebrew operations in this phase."
+		BREW_RUN_USER="$BREW_USER"
+		BREW_CMD="$(runuser -u "$BREW_RUN_USER" -- bash -lc 'if command -v brew-proxy >/dev/null 2>&1; then echo brew-proxy; elif command -v brew >/dev/null 2>&1; then echo brew; fi' 2>/dev/null || true)"
+		if [[ -z ${BREW_CMD:-} ]]; then
+			warn "brew-proxy/brew not available for Homebrew owner '$BREW_RUN_USER'."
+			return 1
+		fi
+	fi
+
+	# Silence deprecated Homebrew env var while preserving old behavior.
+	BREW_ENV=(env -u HOMEBREW_CASK_OPTS_REQUIRE_SHA)
+	if [[ -n ${HOMEBREW_CASK_OPTS_REQUIRE_SHA:-} && -z ${HOMEBREW_CASK_OPTS:-} ]]; then
+		BREW_CASK_OPTS_MIGRATED="--require-sha"
+		BREW_ENV+=("HOMEBREW_CASK_OPTS=${BREW_CASK_OPTS_MIGRATED}")
 	fi
 
 	# Prefer explicit non-interactive flag for brew-proxy when available.
 	if [[ $BREW_CMD == "brew-proxy" ]]; then
-		if runuser -u "$NONROOT_USER" -- brew-proxy --help 2>/dev/null | grep -q -- '--yes'; then
+		if runuser -u "$BREW_RUN_USER" -- "${BREW_ENV[@]}" brew-proxy --help 2>/dev/null | grep -q -- '--yes'; then
 			BREW_PROXY_AUTO_FLAG="--yes"
-		elif runuser -u "$NONROOT_USER" -- brew-proxy --help 2>/dev/null | grep -q -- '--auto'; then
+		elif runuser -u "$BREW_RUN_USER" -- "${BREW_ENV[@]}" brew-proxy --help 2>/dev/null | grep -q -- '--auto'; then
 			BREW_PROXY_AUTO_FLAG="--auto"
-		elif runuser -u "$NONROOT_USER" -- brew-proxy --help 2>/dev/null | grep -q -- '--non-interactive'; then
+		elif runuser -u "$BREW_RUN_USER" -- "${BREW_ENV[@]}" brew-proxy --help 2>/dev/null | grep -q -- '--non-interactive'; then
 			BREW_PROXY_AUTO_FLAG="--non-interactive"
 		fi
 	fi
 
-	log "Running ${BREW_CMD} as configured user: $NONROOT_USER"
+	log "Running ${BREW_CMD} as user: $BREW_RUN_USER"
 	if [[ -n ${BREW_PROXY_AUTO_FLAG:-} ]]; then
 		log "Using ${BREW_CMD} auto-confirm flag: ${BREW_PROXY_AUTO_FLAG}"
 	fi
-	if ! run_as_user "$NONROOT_USER" "$BREW_CMD" ${BREW_PROXY_AUTO_FLAG:+"$BREW_PROXY_AUTO_FLAG"} update; then
+	if ! run_as_user "$BREW_RUN_USER" "${BREW_ENV[@]}" "$BREW_CMD" ${BREW_PROXY_AUTO_FLAG:+"$BREW_PROXY_AUTO_FLAG"} update; then
 		warn "brew update failed."
 		phase_failed=1
 	fi
-	if ! run_as_user "$NONROOT_USER" "$BREW_CMD" ${BREW_PROXY_AUTO_FLAG:+"$BREW_PROXY_AUTO_FLAG"} upgrade --greedy; then
+	if ! run_as_user "$BREW_RUN_USER" "${BREW_ENV[@]}" "$BREW_CMD" ${BREW_PROXY_AUTO_FLAG:+"$BREW_PROXY_AUTO_FLAG"} upgrade --greedy; then
 		warn "brew upgrade failed."
 		phase_failed=1
 	fi
-	if ! run_as_user "$NONROOT_USER" "$BREW_CMD" ${BREW_PROXY_AUTO_FLAG:+"$BREW_PROXY_AUTO_FLAG"} cleanup; then
+	if ! run_as_user "$BREW_RUN_USER" "${BREW_ENV[@]}" "$BREW_CMD" ${BREW_PROXY_AUTO_FLAG:+"$BREW_PROXY_AUTO_FLAG"} cleanup; then
 		warn "brew cleanup failed."
 		phase_failed=1
 	fi
