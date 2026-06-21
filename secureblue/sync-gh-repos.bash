@@ -12,7 +12,7 @@ set -euo pipefail
 #
 # Environment variables:
 #   OWNER     GitHub username to sync (default: daviduhden)
-#   BASE_DIR  Local directory to clone into (default: /var/home/david/git)
+#   BASE_DIR  Local directory to clone into (default: ${HOME}/git)
 # Flags:
 #   -n, --non-interactive   Do not question (use default BASE_DIR if unset)
 #
@@ -21,7 +21,7 @@ set -euo pipefail
 
 OWNER="${OWNER:-daviduhden}"
 
-DEFAULT_BASE_DIR="/var/home/david/git"
+DEFAULT_BASE_DIR="${HOME}/git"
 NON_INTERACTIVE=0
 
 if [ -t 1 ] && [ "${NO_COLOR:-0}" != "1" ]; then
@@ -95,7 +95,7 @@ Usage: sync-gh-repos.bash [--non-interactive]
 
 Environment variables:
   OWNER     GitHub username to sync (default: daviduhden)
-  BASE_DIR  Local directory to clone into (default: /var/home/david/git)
+  BASE_DIR  Local directory to clone into (default: ${HOME}/git)
 
 Options:
   -n, --non-interactive  Do not question for BASE_DIR

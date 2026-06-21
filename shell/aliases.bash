@@ -55,9 +55,10 @@ alias wget='wget -c'
 # Full system upgrade helper
 sysupgrade-all() {
 	local sysupgrade_rc=0
+	local sysupgrade_user="${SYSUPGRADE_USER:-${USER:-$(id -un)}}"
 
 	echo "🔄 Starting full system upgrade..."
-	sysupgrade --user david --skip-audit || {
+	sysupgrade --user "$sysupgrade_user" --skip-audit || {
 		sysupgrade_rc=$?
 		echo "⚠️ sysupgrade failed with exit code ${sysupgrade_rc}, continuing with remaining updates..."
 	}

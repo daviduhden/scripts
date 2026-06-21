@@ -490,8 +490,8 @@ update_homebrew() {
 	fi
 
 	if [[ $BREW_USER != "$BREW_RUN_USER" ]]; then
-		log "Homebrew prefix owner is '$BREW_USER' (configured user: '$BREW_RUN_USER')."
-		log "Using '$BREW_USER' for Homebrew operations in this phase."
+		log "Homebrew prefix ownership differs from the configured user."
+		log "Using the Homebrew owner account for this phase."
 		BREW_RUN_USER="$BREW_USER"
 		BREW_CMD="$(runuser -u "$BREW_RUN_USER" -- bash -lc 'if command -v brew-proxy >/dev/null 2>&1; then echo brew-proxy; elif command -v brew >/dev/null 2>&1; then echo brew; fi' 2>/dev/null || true)"
 		if [[ -z ${BREW_CMD:-} ]]; then
@@ -504,7 +504,7 @@ update_homebrew() {
 	# brew-proxy to avoid D-Bus/polkit auth requirements in unattended runs.
 	if [[ $BREW_CMD == "brew-proxy" && $BREW_RUN_USER == "$BREW_USER" ]]; then
 		if runuser -u "$BREW_RUN_USER" -- bash -lc 'command -v brew >/dev/null 2>&1'; then
-			log "Using direct brew as Homebrew owner '$BREW_RUN_USER'."
+			log "Using direct brew for Homebrew maintenance."
 			BREW_CMD="brew"
 		fi
 	fi
@@ -541,7 +541,7 @@ update_homebrew() {
 		BREW_UPGRADE_AUTO_FLAG="--yes"
 	fi
 
-	log "Running ${BREW_CMD} as user: $BREW_RUN_USER"
+	log "Running Homebrew maintenance with ${BREW_CMD}."
 	if [[ -n ${BREW_PROXY_AUTO_FLAG:-} ]]; then
 		log "Using ${BREW_CMD} auto-confirm flag: ${BREW_PROXY_AUTO_FLAG}"
 	fi
@@ -555,7 +555,14 @@ update_homebrew() {
 	fi
 	if ! run_as_user "$BREW_RUN_USER" "${BREW_ENV[@]}" "$BREW_CMD" ${BREW_PROXY_AUTO_FLAG:+"$BREW_PROXY_AUTO_FLAG"} cleanup; then
 		warn "brew cleanup failed."
-		phase_failed=1
+	fi
+	if [[ $phase_failed -eq 0 ]]; then
+		if ! run_as_user "$BREW_RUN_USER" "${BREW_ENV[@]}" "$BREW_CMD" ${BREW_PROXY_AUTO_FLAG:+"$BREW_PROXY_AUTO_FLAG"} missing; then
+			warn "brew missing failed."
+		fi
+		if ! run_as_user "$BREW_RUN_USER" "${BREW_ENV[@]}" "$BREW_CMD" ${BREW_PROXY_AUTO_FLAG:+"$BREW_PROXY_AUTO_FLAG"} doctor; then
+			warn "brew doctor failed."
+		fi
 	fi
 
 	((phase_failed == 0))

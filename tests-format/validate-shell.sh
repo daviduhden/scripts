@@ -10,10 +10,10 @@ exec >"$TMPLOG" 2>&1
 # validate-shell.sh
 # - Recursively finds all shell scripts under ROOT_DIR (default: current directory)
 #   and checks formatting with shfmt, shell syntax, bash syntax,
-#   ksh syntax (if ksh is available), and runs shellcheck (if available
+#   ksh syntax, fish syntax (if fish is available), and runs shellcheck (if available
 #   treating warnings as errors).
 # - Usage: ./validate-shell.sh [ROOT_DIR]
-# - Requires: shfmt, shellcheck, ksh (optional) in PATH
+# - Requires: shfmt, shellcheck, ksh/fish (optional) in PATH
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
@@ -126,6 +126,22 @@ run_validate_shell() {
 		done
 	else
 		printf '%s\n' "[INFO] ksh not found; skipping ksh syntax checks"
+	fi
+
+	if command -v fish >/dev/null 2>&1; then
+		printf '%s\n' "[INFO] Running fish syntax checks..."
+		find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f -name '*.fish' -print |
+			while IFS= read -r f; do
+				[ -n "$f" ] || continue
+				if ! fish -n "$f" 2>/dev/null; then
+					printf '%s\n' "[ERROR] fish syntax error in: $f" 1>&2
+					printf "%s\n" "$f"
+				fi
+			done | while IFS= read -r bad; do
+			[ -n "$bad" ] && note_fail "$bad"
+		done
+	else
+		printf '%s\n' "[INFO] fish not found; skipping fish syntax checks"
 	fi
 
 	if command -v shellcheck >/dev/null 2>&1; then

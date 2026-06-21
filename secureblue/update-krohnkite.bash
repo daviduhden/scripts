@@ -38,6 +38,13 @@ require_cmd() {
 	}
 }
 
+require_exec() {
+	[[ -x $1 ]] || {
+		error "Required executable '$1' not found."
+		exit 1
+	}
+}
+
 ensure_cmd() {
 	for cmd in "$@"; do
 		require_cmd "$cmd"
@@ -74,13 +81,43 @@ prepare_repo() {
 }
 
 build_krohnkite() {
-	log "Building Krohnkite using task…"
-	task package
-
-	if [[ ! -d $BUILD_DIR ]]; then
-		error "Build directory '$BUILD_DIR' not found."
+	log "Building Krohnkite using task via linuxbrew..."
+	local build_workdir build_output_dir
+	build_workdir="$(mktemp -d "${TMPDIR:-/tmp}/krohnkite-build-XXXXXX")"
+	build_output_dir="$build_workdir/$BUILD_DIR"
+	cleanup_build_workdir() {
+		if [[ -n ${build_workdir:-} && -d $build_workdir ]]; then
+			run0 -- rm -rf "$build_workdir" >/dev/null 2>&1 || true
+		fi
+	}
+	trap cleanup_build_workdir EXIT
+	if ! run0 -- cp -a "$SRC_DIR"/. "$build_workdir"/; then
+		error "Could not stage Krohnkite sources for the linuxbrew build."
 		exit 1
 	fi
+
+	if ! run0 -D "$build_workdir" -- env \
+		HOME=/home/linuxbrew \
+		PATH=/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/local/bin:/usr/bin:/bin \
+		task package; then
+		error "Could not start the build through linuxbrew."
+		exit 1
+	fi
+
+	if ! run0 -- chown -R "$(id -un):$(id -gn)" "$build_workdir"; then
+		error "Could not restore build directory ownership."
+		exit 1
+	fi
+
+	if [[ ! -d $build_output_dir ]]; then
+		error "Build directory '$build_output_dir' not found."
+		exit 1
+	fi
+
+	mkdir -p "$SRC_DIR/$BUILD_DIR"
+	cp -f "$build_output_dir"/*.kwinscript "$SRC_DIR/$BUILD_DIR"/
+	trap - EXIT
+	cleanup_build_workdir
 }
 
 install_krohnkite() {
@@ -105,7 +142,8 @@ install_krohnkite() {
 }
 
 check_prereqs() {
-	ensure_cmd git task npm 7z kpackagetool6
+	ensure_cmd run0 git 7z kpackagetool6
+	require_exec /home/linuxbrew/.linuxbrew/bin/task
 }
 
 run_update() {

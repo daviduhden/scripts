@@ -9,7 +9,7 @@ Shell and Perl utilities for system administration and maintenance across multip
 ├── debian/        # Scripts for Debian-based distributions
 ├── openbsd/       # Scripts for OpenBSD systems
 ├── perl/          # Perl scripts (portable)
-├── secureblue/    # Scripts for SecureBlue (Fedora Atomic/rpm-ostree)
+├── secureblue/    # Scripts for SecureBlue
 ├── shell/         # Shell helpers for interactive shells
 └── tests-format/  # Test scripts for validating formatting
 ```
@@ -31,6 +31,9 @@ make install-secureblue
 # SecureBlue shell aliases (~/.bashrc.d/aliases.bash with chattr -i/+i)
 make install-shell-secureblue
 
+# fish shell config (~/.config/fish/conf.d with chattr -i/+i)
+make install-shell-fish
+
 # Same as install-shell-secureblue
 make install-shell
 
@@ -47,15 +50,9 @@ Recipes use `install(1)` and strip `.pl`/`.bash`/`.ksh`/`.sh` when placing shell
 
 `make test` runs:
 
-- shell validation/formatting (`tests-format/validate-shell.sh`)
+- shell validation/formatting (`tests-format/validate-shell.sh`, incluye sintaxis sh/bash/ksh/fish cuando estén disponibles)
 - perl validation/formatting (`tests-format/validate-perl.sh`)
 - make validation/formatting (`tests-format/validate-make.sh`)
-- C/C++ formatting (`tests-format/clang-format-all.sh`) with this priority:
-  1. `knfmt` (if present)
-  2. `clang-format` fallback
-- clang-tidy pass (`tests-format/clang-tidy-all.sh`) when available
-
-For Linux hosts, `tests-format/install-knfmt-linux.sh` installs `knfmt` from source.
 
 ## SecureBlue shell aliases
 
@@ -64,6 +61,24 @@ For Linux hosts, `tests-format/install-knfmt-linux.sh` installs `knfmt` from sou
 - Default user: `SECUREBLUE_USER=david`
 - Default path: `SECUREBLUE_BASHRCD_DIR=/var/home/${SECUREBLUE_USER}/.bashrc.d`
 - Immutable handling: removes immutable bit (`chattr -i`) on directory/file before install, then restores it (`chattr +i`) afterwards.
+
+## fish shell config
+
+`make install-shell-fish` installs the fish configuration into `${HOME}/.config/fish/conf.d`.
+
+- Default destination: `${HOME}/.config/fish/conf.d`
+- Override: `FISH_CONF_DST_DIR=/path/to/conf.d`
+- Immutable handling: removes immutable bit (`chattr -i`) on destination directory/files before install, then restores it (`chattr +i`) afterwards.
+
+Examples:
+
+```
+# Install fish config for the current user
+make install-shell-fish
+
+# Install fish config to a custom destination
+make install-shell-fish FISH_CONF_DST_DIR=/var/home/alice/.config/fish/conf.d
+```
 
 Examples:
 
