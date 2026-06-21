@@ -14,6 +14,7 @@ BUILD_DIR="${HOME}/.local/src/signify-build"
 ROOT_CMD=""
 LATEST_TAG=""
 SOURCE_CHANGED=0
+BUILD_LOG=""
 
 ################
 # Color helpers #
@@ -72,9 +73,22 @@ ensure_debian() {
 }
 
 install_build_deps() {
+	local missing=()
+	local pkg
+
+	for pkg in git clang libbsd-dev; do
+		if ! dpkg -s "$pkg" >/dev/null 2>&1; then
+			missing+=("$pkg")
+		fi
+	done
+
+	if [ "${#missing[@]}" -eq 0 ]; then
+		return
+	fi
+
 	log "Installing build dependencies via apt"
-	run_root apt-get update -qq
-	run_root DEBIAN_FRONTEND=noninteractive apt-get install -y -qq git clang libbsd-dev
+	run_root apt-get update -qq >/dev/null
+	run_root env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${missing[@]}" >/dev/null
 }
 
 get_latest_tag() {
@@ -90,12 +104,12 @@ prepare_source() {
 		log "Cloning signify repository"
 		rm -rf "$BUILD_DIR"
 		mkdir -p "$(dirname "$BUILD_DIR")"
-		git clone "$REPO" "$BUILD_DIR"
+		git clone --quiet "$REPO" "$BUILD_DIR"
 	fi
 
 	cd "$BUILD_DIR"
 	log "Fetching latest tags"
-	git fetch --tags --prune origin
+	git fetch --quiet --tags --prune origin
 
 	LATEST_TAG="$(get_latest_tag)"
 	[ -n "$LATEST_TAG" ] || error "Could not determine latest signify tag"
@@ -110,15 +124,20 @@ prepare_source() {
 	fi
 
 	log "Checking out latest tag '$LATEST_TAG'"
-	git checkout -q "tags/$LATEST_TAG"
+	git checkout --quiet "tags/$LATEST_TAG"
 	SOURCE_CHANGED=1
 	return 0
 }
 
 build_and_install() {
 	log "Building signify from source"
-
-	make -C "$BUILD_DIR" CC=clang BUNDLED_LIBBSD=1
+	BUILD_LOG="$(mktemp "${TMPDIR:-/tmp}/signify-build.XXXXXX.log")"
+	if ! make -s -C "$BUILD_DIR" CC=clang BUNDLED_LIBBSD=1 >"$BUILD_LOG" 2>&1; then
+		cat "$BUILD_LOG" >&2
+		error "signify build failed"
+	fi
+	rm -f "$BUILD_LOG"
+	BUILD_LOG=""
 
 	log "Installing to $INSTALL_PATH"
 	run_root install -m 0755 "$BUILD_DIR/signify" "$INSTALL_PATH"
@@ -127,7 +146,6 @@ build_and_install() {
 verify_install() {
 	if [ -x "$INSTALL_PATH" ]; then
 		log "signify installed successfully at $INSTALL_PATH"
-		"$INSTALL_PATH" -V 2>&1 || "$INSTALL_PATH" -version 2>&1 || true
 	else
 		error "Installation failed: $INSTALL_PATH not found or not executable"
 	fi
@@ -151,5 +169,13 @@ main() {
 		log "Done - signify already at latest source tag ($LATEST_TAG)"
 	fi
 }
+
+cleanup() {
+	if [ -n "${BUILD_LOG:-}" ] && [ -f "$BUILD_LOG" ]; then
+		rm -f "$BUILD_LOG"
+	fi
+}
+
+trap cleanup EXIT
 
 main "$@"
