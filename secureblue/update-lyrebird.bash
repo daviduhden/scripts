@@ -120,7 +120,7 @@ clone_or_update_repo() {
 
 build_lyrebird() {
 	log "Building lyrebird..."
-	make build
+	env -u LD_PRELOAD make build
 
 	[ -x "./$BIN_NAME" ] || error "Build failed: binary $BIN_NAME not found."
 }

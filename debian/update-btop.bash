@@ -109,7 +109,7 @@ build_and_install() {
 	cd "$src_dir"
 
 	log "Building btop..."
-	make -j"$(nproc)"
+	env -u LD_PRELOAD make -j"$(nproc)"
 
 	log "Installing btop..."
 	make PREFIX="$INSTALL_PREFIX" install

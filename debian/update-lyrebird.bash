@@ -91,7 +91,7 @@ clone_or_update_repo() {
 
 build_lyrebird() {
 	log "Building lyrebird..."
-	make build
+	env -u LD_PRELOAD make build
 	if [ ! -x ./lyrebird ]; then
 		error "Build failed: lyrebird binary not found."
 	fi

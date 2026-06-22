@@ -97,6 +97,7 @@ build_krohnkite() {
 	fi
 
 	if ! run0 -D "$build_workdir" -- env \
+		-u LD_PRELOAD \
 		HOME=/home/linuxbrew \
 		PATH=/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/local/bin:/usr/bin:/bin \
 		task package; then

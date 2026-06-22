@@ -138,7 +138,7 @@ prepare_source() {
 build_and_install() {
 	log "Building signify from source"
 	BUILD_LOG="$(mktemp "${TMPDIR:-/tmp}/signify-build.XXXXXX.log")"
-	if ! make -s -C "$BUILD_DIR" CC=clang BUNDLED_LIBBSD=1 >"$BUILD_LOG" 2>&1; then
+	if ! env -u LD_PRELOAD make -s -C "$BUILD_DIR" CC=clang BUNDLED_LIBBSD=1 >"$BUILD_LOG" 2>&1; then
 		cat "$BUILD_LOG" >&2
 		error "signify build failed"
 	fi

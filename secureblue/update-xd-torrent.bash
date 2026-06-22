@@ -158,7 +158,7 @@ clone_or_update_repo() {
 
 build_and_install_XD() {
 	log "Building XD..."
-	make
+	env -u LD_PRELOAD make
 	# Adjust Makefile installation prefix: change $(PREFIX)/bin -> $(PREFIX)/local/bin
 	if [ -f Makefile ]; then
 		log "Patching Makefile install path..."

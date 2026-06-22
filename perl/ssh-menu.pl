@@ -17,10 +17,14 @@
 use strict;
 use warnings;
 use File::Path qw(make_path);
+use File::Spec;
 
 my $no_color  = 0;
 my $is_tty    = ( -t STDOUT )             ? 1 : 0;
 my $use_color = ( !$no_color && $is_tty ) ? 1 : 0;
+
+sub is_windows { return $^O eq 'MSWin32'; }
+sub is_openbsd { return $^O eq 'openbsd'; }
 
 my ( $GREEN, $YELLOW, $RED, $CYAN, $BOLD, $RESET ) = ( "", "", "", "", "", "" );
 if ($use_color) {
@@ -48,13 +52,21 @@ sub require_cmd {
     die_tool("Required command '$cmd' not found in PATH.");
 }
 
-my $known_hosts = $ENV{SSH_MENU_KNOWN_HOSTS} // "$ENV{HOME}/.ssh/known_hosts";
-my $freq_file   = $ENV{SSH_MENU_FREQ_FILE}
-  // "$ENV{HOME}/.cache/ssh-menu/frequencies";
-my $alias_file = $ENV{SSH_MENU_ALIAS_FILE}
-  // "$ENV{HOME}/.cache/ssh-menu/aliases";
+sub home_dir {
+    return $ENV{HOME} if defined $ENV{HOME} && length $ENV{HOME};
+    return $ENV{USERPROFILE}
+      if defined $ENV{USERPROFILE} && length $ENV{USERPROFILE};
+    die_tool(
+        "Cannot determine home directory: neither HOME nor USERPROFILE is set."
+    );
+}
+
+my $home        = home_dir();
+my $known_hosts = $ENV{SSH_MENU_KNOWN_HOSTS} // "$home/.ssh/known_hosts";
+my $freq_file = $ENV{SSH_MENU_FREQ_FILE} // "$home/.cache/ssh-menu/frequencies";
+my $alias_file = $ENV{SSH_MENU_ALIAS_FILE} // "$home/.cache/ssh-menu/aliases";
 my $last_user_file = $ENV{SSH_MENU_LAST_USER_FILE}
-  // "$ENV{HOME}/.cache/ssh-menu/last-user";
+  // "$home/.cache/ssh-menu/last-user";
 
 my @entries;
 my %seen;
@@ -63,7 +75,7 @@ my %freq;
 my $freq_file_exists;
 my %alias;
 my $alias_file_exists;
-my $last_user = '';
+my %last_user;
 
 ########################
 # 0. Small helper bits #
@@ -72,8 +84,10 @@ my $last_user = '';
 sub parent_dir {
     my ($path) = @_;
     return unless defined $path && length $path;
-    my ($dir) = $path =~ m{^(.*)/[^/]+$};
-    return $dir;
+    my ( $vol, $dirs, $file ) = File::Spec->splitpath($path);
+    return unless length $file;
+    $dirs =~ s{[\\/]\z}{} if length $dirs;
+    return File::Spec->catpath( $vol, $dirs );
 }
 
 sub entry_key {
@@ -84,10 +98,15 @@ sub entry_key {
 # Small PATH search for ksshaskpass (no extra modules needed)
 sub find_in_path {
     my ($prog) = @_;
-    for my $dir ( split /:/, $ENV{PATH} || '' ) {
+    my $sep = is_windows() ? ';' : ':';
+    for my $dir ( split /\Q$sep\E/, $ENV{PATH} || '' ) {
         next unless length $dir;
-        my $full = "$dir/$prog";
+        my $full = File::Spec->catfile( $dir, $prog );
         return $full if -x $full;
+        if ( is_windows() ) {
+            my $full_exe = "$full.exe";
+            return $full_exe if -x $full_exe;
+        }
     }
     return;
 }
@@ -115,7 +134,7 @@ sub setup_ssh_askpass {
 }
 
 sub setup_openbsd_sandbox {
-    return unless $^O eq 'openbsd';
+    return unless is_openbsd();
 
     # Unveil PATH for exec, and state/cache dirs for read/write.
     my @path_dirs = grep { defined $_ && length $_ }
@@ -161,7 +180,7 @@ sub setup_openbsd_sandbox {
 
 sub write_alias_file {
     my ($aliases_ref) = @_;
-    my ($dir)         = $alias_file =~ m{^(.*)/[^/]+$};
+    my $dir = parent_dir($alias_file);
     make_path($dir) if defined $dir && length $dir;
     if ( open my $afh, '>', $alias_file ) {
         for my $k ( sort keys %{$aliases_ref} ) {
@@ -176,7 +195,7 @@ sub write_alias_file {
 
 sub write_freq_file {
     my ($freq_ref) = @_;
-    my ($dir)      = $freq_file =~ m{^(.*)/[^/]+$};
+    my $dir = parent_dir($freq_file);
     make_path($dir) if defined $dir && length $dir;
     if ( open my $ffh, '>', $freq_file ) {
         for my $k ( sort keys %{$freq_ref} ) {
@@ -190,14 +209,16 @@ sub write_freq_file {
 }
 
 sub write_last_user_file {
-    my ($user) = @_;
-    return unless defined $user && length $user;
+    my ($last_ref) = @_;
+    return unless defined $last_ref && %{$last_ref};
 
-    my ($dir) = $last_user_file =~ m{^(.*)/[^/]+$};
+    my $dir = parent_dir($last_user_file);
     make_path($dir) if defined $dir && length $dir;
 
     if ( open my $ufh, '>', $last_user_file ) {
-        print {$ufh} "$user\n";
+        for my $k ( sort keys %{$last_ref} ) {
+            printf $ufh "%s %s\n", $k, $last_ref->{$k};
+        }
         close $ufh;
     }
     else {
@@ -211,7 +232,7 @@ sub reset_state {
     $hashed_count      = 0;
     %freq              = ();
     %alias             = ();
-    $last_user         = '';
+    %last_user         = ();
     $freq_file_exists  = -f $freq_file  ? 1 : 0;
     $alias_file_exists = -f $alias_file ? 1 : 0;
 }
@@ -257,15 +278,14 @@ sub load_last_user_file {
     return unless -f $last_user_file;
 
     if ( open my $ufh, '<', $last_user_file ) {
-        my $line = <$ufh>;
-        close $ufh;
-
-        if ( defined $line ) {
+        while ( my $line = <$ufh> ) {
             chomp $line;
-            if ( $line =~ /\S/ ) {
-                $last_user = $line;
-            }
+            next if $line =~ /^\s*$/;
+            my ( $k, $v ) = split /\s+/, $line, 2;
+            next unless defined $k && defined $v;
+            $last_user{$k} = $v;
         }
+        close $ufh;
     }
     else {
         logw("Could not read last user file $last_user_file: $!");
@@ -385,8 +405,17 @@ sub prune_stale_data {
         }
     }
 
-    write_freq_file( \%freq )   if $pruned_freq;
-    write_alias_file( \%alias ) if $pruned_alias;
+    my $pruned_last_user = 0;
+    for my $k ( keys %last_user ) {
+        if ( !$valid_keys{$k} ) {
+            delete $last_user{$k};
+            $pruned_last_user = 1;
+        }
+    }
+
+    write_freq_file( \%freq )           if $pruned_freq;
+    write_alias_file( \%alias )         if $pruned_alias;
+    write_last_user_file( \%last_user ) if $pruned_last_user;
 }
 
 sub ensure_entries_present {
@@ -530,7 +559,14 @@ sub select_entry_menu {
 #####################
 
 sub question_ssh_user {
-    my $default_user = $last_user || $ENV{SSH_MENU_USER} || $ENV{USER} || '';
+    my ($selected_key) = @_;
+    my $per_host_user = $last_user{$selected_key} if defined $selected_key;
+    my $default_user =
+         $per_host_user
+      || $ENV{SSH_MENU_USER}
+      || $ENV{USER}
+      || $ENV{USERNAME}
+      || '';
 
     print "${BOLD}SSH user${RESET}"
       . ( length $default_user ? " [${CYAN}$default_user${RESET}]" : '' )
@@ -552,24 +588,24 @@ sub question_ssh_user {
         die_tool("Empty user. Aborting.");
     }
 
-    $last_user = $ssh_user;
-    write_last_user_file($last_user);
+    $last_user{$selected_key} = $ssh_user;
+    write_last_user_file( \%last_user );
 
     return $ssh_user;
 }
 
 sub build_ssh_command {
-    my ( $ssh_user, $selected_host, $selected_port ) = @_;
+    my ( $ssh_path, $ssh_user, $selected_host, $selected_port ) = @_;
     my @cmd;
 
     if ($selected_port) {
         logi(
             "Connecting to $ssh_user\@$selected_host (port $selected_port)...");
-        @cmd = ( 'ssh', '-p', $selected_port, "$ssh_user\@$selected_host" );
+        @cmd = ( $ssh_path, '-p', $selected_port, "$ssh_user\@$selected_host" );
     }
     else {
         logi("Connecting to $ssh_user\@$selected_host ...");
-        @cmd = ( 'ssh', "$ssh_user\@$selected_host" );
+        @cmd = ( $ssh_path, "$ssh_user\@$selected_host" );
     }
 
     return @cmd;
@@ -585,6 +621,7 @@ sub update_frequency {
 sub main {
 
     require_cmd('ssh');
+    my $ssh_path = find_in_path('ssh');
 
     ensure_known_hosts_exists();
     setup_ssh_askpass();
@@ -607,8 +644,9 @@ sub main {
 
     logi("Selected server: $selected_display");
 
-    my $ssh_user = question_ssh_user();
-    my @cmd = build_ssh_command( $ssh_user, $selected_host, $selected_port );
+    my $ssh_user = question_ssh_user($selected_key);
+    my @cmd =
+      build_ssh_command( $ssh_path, $ssh_user, $selected_host, $selected_port );
 
     update_frequency($selected_key);
     exec @cmd or die_tool("Failed to exec ssh: $!");

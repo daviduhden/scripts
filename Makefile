@@ -31,6 +31,7 @@ DEBIAN_SCRIPTS = \
 	debian/add-tor-repo.bash \
 	debian/clean-logs.bash \
 	debian/enable-tor-transport.bash \
+	debian/install-hardened-malloc.bash \
 	debian/sync-website.bash \
 	debian/sysupgrade.bash \
 	debian/update-argon-one-v3.bash \
