@@ -47,6 +47,18 @@ log() { printf '%s %b[INFO]%b ✅ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$GREEN" 
 warn() { printf '%s %b[WARN]%b ⚠ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$YELLOW" "$RESET" "$*"; }
 error() { printf '%s %b[ERROR]%b ❌ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$RED" "$RESET" "$*" >&2; }
 
+run_logged_cmd() {
+	local log_file="$1" label="$2"
+	shift 2
+
+	printf '\n=== %s ===\n\n' "$label" >>"$log_file"
+	if "$@" >>"$log_file" 2>&1; then
+		return 0
+	fi
+
+	return 1
+}
+
 declare -a PHASE_ORDER=()
 declare -A PHASE_STATUS=()
 declare -A PHASE_KIND=()
@@ -225,12 +237,19 @@ cleanup_old_backups() {
 }
 
 apt_update() {
+	local phase_log
+	phase_log="$(mktemp /tmp/debian-apt-update.XXXXXX)"
 	log "Updating package lists..."
-	"$APT_BIN" update
+	if ! run_logged_cmd "$phase_log" "apt update" "$APT_BIN" update; then
+		warn "APT update details written to ${phase_log}."
+		return 1
+	fi
+	log "APT update details written to ${phase_log}."
 }
 
 apt_full_upgrade() {
-	local codename target
+	local codename target phase_log
+	phase_log="$(mktemp /tmp/debian-apt-full-upgrade.XXXXXX)"
 
 	codename="$(
 		. /etc/os-release 2>/dev/null || true
@@ -244,12 +263,15 @@ apt_full_upgrade() {
 		target="${codename}-backports"
 		if apt-cache policy 2>/dev/null | grep -Fq "$target"; then
 			log "Running full-upgrade prioritizing backports (${target})..."
-			"$APT_BIN" -y \
+			if ! run_logged_cmd "$phase_log" "apt full-upgrade -t ${target}" "$APT_BIN" -y \
 				-o Dpkg::Options::="--force-confdef" \
 				-o Dpkg::Options::="--force-confnew" \
 				-o Dpkg::Options::="--force-confmiss" \
 				-o APT::Get::Assume-Yes=true \
-				full-upgrade -t "$target"
+				full-upgrade -t "$target"; then
+				warn "APT full-upgrade details written to ${phase_log}."
+				return 1
+			fi
 		else
 			warn "Backports (${target}) not found in APT policy; skipping backports-priority pass."
 		fi
@@ -258,20 +280,33 @@ apt_full_upgrade() {
 	fi
 
 	log "Running second full-upgrade pass using all configured APT repositories..."
-	"$APT_BIN" -y \
+	if ! run_logged_cmd "$phase_log" "apt full-upgrade" "$APT_BIN" -y \
 		-o Dpkg::Options::="--force-confdef" \
 		-o Dpkg::Options::="--force-confnew" \
 		-o Dpkg::Options::="--force-confmiss" \
 		-o APT::Get::Assume-Yes=true \
-		full-upgrade
+		full-upgrade; then
+		warn "APT full-upgrade details written to ${phase_log}."
+		return 1
+	fi
+	log "APT full-upgrade details written to ${phase_log}."
 }
 
 apt_cleanup() {
+	local phase_log
+	phase_log="$(mktemp /tmp/debian-apt-cleanup.XXXXXX)"
 	log "Removing unused packages (autoremove)..."
-	"$APT_BIN" -y autoremove
+	if ! run_logged_cmd "$phase_log" "apt autoremove" "$APT_BIN" -y autoremove; then
+		warn "APT autoremove details written to ${phase_log}."
+		return 1
+	fi
 
 	log "Cleaning package cache (autoclean)..."
-	"$APT_BIN" -y autoclean
+	if ! run_logged_cmd "$phase_log" "apt autoclean" "$APT_BIN" -y autoclean; then
+		warn "APT autoclean details written to ${phase_log}."
+		return 1
+	fi
+	log "APT cleanup details written to ${phase_log}."
 }
 
 restart_services() {

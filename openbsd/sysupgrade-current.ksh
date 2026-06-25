@@ -120,26 +120,51 @@ EOF_RCF
 
 append_firstboot_tasks() {
     cat <<'EOF_APPEND' >> "$RCF"
+run_logged_cmd() {
+    log_file="$1"
+    shift
+    if "$@" >>"$log_file" 2>&1; then
+        return 0
+    fi
+    return 1
+}
+
 run_sysmerge() {
+    log_file="/var/log/openbsd/sysmerge-$(date +%Y%m%d-%H%M%S).log"
     print "Running sysmerge -b..."
-    /usr/sbin/sysmerge -b
+    if run_logged_cmd "$log_file" /usr/sbin/sysmerge -b; then
+        print "sysmerge completed (log: $log_file)."
+    else
+        print "sysmerge encountered errors; see $log_file."
+    fi
 }
 
 upgrade_packages() {
+    log_file="/var/log/openbsd/pkg-upgrade-$(date +%Y%m%d-%H%M%S).log"
     print "Upgrading packages (pkg_add -Uu -Dsnap) and removing unused ones (pkg_delete -a)..."
-    /usr/sbin/pkg_add -Uu -Dsnap && /usr/sbin/pkg_delete -a
+    if run_logged_cmd "$log_file" /usr/sbin/pkg_add -Uu -Dsnap && run_logged_cmd "$log_file" /usr/sbin/pkg_delete -a; then
+        print "Package upgrade completed (log: $log_file)."
+    else
+        print "Package upgrade encountered errors; see $log_file."
+    fi
 }
 
 run_apply_sysclean() {
+    log_file="/var/log/openbsd/apply-sysclean-$(date +%Y%m%d-%H%M%S).log"
     print "Running apply-sysclean..."
     if [ -x /usr/local/bin/apply-sysclean ]; then
-        /usr/local/bin/apply-sysclean
+        if run_logged_cmd "$log_file" /usr/local/bin/apply-sysclean; then
+            print "apply-sysclean completed (log: $log_file)."
+        else
+            print "apply-sysclean encountered errors; see $log_file."
+        fi
     else
         print "apply-sysclean not found; skipping."
     fi
 }
 
 run_lynis_audit() {
+    log_file="/var/log/openbsd/lynis-audit-$(date +%Y%m%d-%H%M%S).log"
     print "Running Lynis security audit..."
     # Prefer explicit absolute shell path for Lynis (ksh93 -> ksh fallback).
     if [ -x /usr/local/bin/ksh93 ]; then
@@ -153,11 +178,11 @@ run_lynis_audit() {
         audit_ts=$(date +%Y%m%d-%H%M%S)
         audit_log="${audit_dir}/lynis-audit-${audit_ts}.log"
         audit_report="${audit_dir}/lynis-report-${audit_ts}.dat"
-        if "$shell_bin" /usr/local/bin/lynis audit system --quiet --logfile "$audit_log" --report-file "$audit_report"; then
+        if run_logged_cmd "$log_file" "$shell_bin" /usr/local/bin/lynis audit system --quiet --logfile "$audit_log" --report-file "$audit_report"; then
             chmod 0600 "$audit_log" "$audit_report" || true
             print "Lynis security audit completed (log: $audit_log)."
         else
-            print "Lynis security audit encountered errors; see $audit_log."
+            print "Lynis security audit encountered errors; see $log_file."
         fi
         find "$audit_dir" -type f \( -name 'lynis-audit-*.log' -o -name 'lynis-report-*.dat' \) -mtime +7 -exec rm -f {} + 2>/dev/null || true
     else

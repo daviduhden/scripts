@@ -49,11 +49,25 @@ export LC_ALL=C.UTF-8
 #   - CLI: --user USERNAME
 #   - Env: SYSUPGRADE_USER=USERNAME
 NONROOT_USER="${SYSUPGRADE_USER:-}"
+# Staging file for Homebrew diagnostics consumed by collect_system_info().
+BREW_DIAGNOSTICS_FILE=""
 
 run_as_user() {
 	local user="$1"
 	shift
 	runuser -u "$user" -- "$@"
+}
+
+run_logged_cmd() {
+	local log_file="$1" label="$2"
+	shift 2
+
+	printf '\n=== %s ===\n\n' "$label" >>"$log_file"
+	if "$@" >>"$log_file" 2>&1; then
+		return 0
+	fi
+
+	return 1
 }
 
 user_home_dir() {
@@ -438,6 +452,7 @@ update_firmware() {
 
 update_homebrew() {
 	local phase_failed=0
+	local phase_log
 	log "Updating Homebrew applications..."
 
 	# Never run "brew" as root. Determine a primary non-root user and
@@ -527,6 +542,7 @@ update_homebrew() {
 		warn "Could not switch to Homebrew workdir '$BREW_WORKDIR'."
 		return 1
 	fi
+	phase_log="$(mktemp /tmp/secureblue-brew.XXXXXX)"
 
 	# Prefer explicit non-interactive flag for brew-proxy when available.
 	if [[ $BREW_CMD == "brew-proxy" ]]; then
@@ -545,24 +561,32 @@ update_homebrew() {
 	if [[ -n ${BREW_PROXY_AUTO_FLAG:-} ]]; then
 		log "Using ${BREW_CMD} auto-confirm flag: ${BREW_PROXY_AUTO_FLAG}"
 	fi
-	if ! run_as_user "$BREW_RUN_USER" "${BREW_ENV[@]}" "$BREW_CMD" ${BREW_PROXY_AUTO_FLAG:+"$BREW_PROXY_AUTO_FLAG"} update; then
+	if ! run_logged_cmd "$phase_log" "brew update" run_as_user "$BREW_RUN_USER" "${BREW_ENV[@]}" "$BREW_CMD" ${BREW_PROXY_AUTO_FLAG:+"$BREW_PROXY_AUTO_FLAG"} update; then
 		warn "brew update failed."
 		phase_failed=1
 	fi
-	if ! run_as_user "$BREW_RUN_USER" "${BREW_ENV[@]}" "$BREW_CMD" ${BREW_PROXY_AUTO_FLAG:+"$BREW_PROXY_AUTO_FLAG"} upgrade ${BREW_UPGRADE_AUTO_FLAG:+"$BREW_UPGRADE_AUTO_FLAG"} --greedy; then
+	if ! run_logged_cmd "$phase_log" "brew upgrade --greedy" run_as_user "$BREW_RUN_USER" "${BREW_ENV[@]}" "$BREW_CMD" ${BREW_PROXY_AUTO_FLAG:+"$BREW_PROXY_AUTO_FLAG"} upgrade ${BREW_UPGRADE_AUTO_FLAG:+"$BREW_UPGRADE_AUTO_FLAG"} --greedy; then
 		warn "brew upgrade failed."
 		phase_failed=1
 	fi
-	if ! run_as_user "$BREW_RUN_USER" "${BREW_ENV[@]}" "$BREW_CMD" ${BREW_PROXY_AUTO_FLAG:+"$BREW_PROXY_AUTO_FLAG"} cleanup; then
+	if ! run_logged_cmd "$phase_log" "brew cleanup" run_as_user "$BREW_RUN_USER" "${BREW_ENV[@]}" "$BREW_CMD" ${BREW_PROXY_AUTO_FLAG:+"$BREW_PROXY_AUTO_FLAG"} cleanup; then
 		warn "brew cleanup failed."
 	fi
 	if [[ $phase_failed -eq 0 ]]; then
-		if ! run_as_user "$BREW_RUN_USER" "${BREW_ENV[@]}" "$BREW_CMD" ${BREW_PROXY_AUTO_FLAG:+"$BREW_PROXY_AUTO_FLAG"} missing; then
+		BREW_DIAGNOSTICS_FILE="$(mktemp /tmp/secureblue-brew-diagnostics.XXXXXX)"
+		printf '\n---\n\n=== Homebrew Missing ===\n\n' >>"$BREW_DIAGNOSTICS_FILE"
+		if ! run_logged_cmd "$BREW_DIAGNOSTICS_FILE" "brew missing" run_as_user "$BREW_RUN_USER" "${BREW_ENV[@]}" "$BREW_CMD" ${BREW_PROXY_AUTO_FLAG:+"$BREW_PROXY_AUTO_FLAG"} missing; then
 			warn "brew missing failed."
 		fi
-		if ! run_as_user "$BREW_RUN_USER" "${BREW_ENV[@]}" "$BREW_CMD" ${BREW_PROXY_AUTO_FLAG:+"$BREW_PROXY_AUTO_FLAG"} doctor; then
+		printf '\n---\n\n=== Homebrew Doctor ===\n\n' >>"$BREW_DIAGNOSTICS_FILE"
+		if ! run_logged_cmd "$BREW_DIAGNOSTICS_FILE" "brew doctor" run_as_user "$BREW_RUN_USER" "${BREW_ENV[@]}" "$BREW_CMD" ${BREW_PROXY_AUTO_FLAG:+"$BREW_PROXY_AUTO_FLAG"} doctor; then
 			warn "brew doctor failed."
 		fi
+	fi
+	if [[ $phase_failed -eq 0 ]]; then
+		log "Homebrew maintenance details written to ${phase_log}."
+	else
+		warn "Homebrew maintenance details written to ${phase_log}."
 	fi
 
 	((phase_failed == 0))
@@ -777,7 +801,7 @@ collect_system_info() {
 	}
 
 	local sysinfo rpm_ostree_status flatpaks homebrew_packages
-	local audit_results local_overrides recent_events last_boot_events failed_services brew_services disk_usage
+	local audit_results local_overrides recent_events last_boot_events failed_services brew_services brew_diagnostics disk_usage
 	local content tmpfile
 
 	sysinfo=$(
@@ -900,6 +924,13 @@ collect_system_info() {
 		} 2>&1 || true
 	)
 
+	brew_diagnostics=""
+	if [[ -n ${BREW_DIAGNOSTICS_FILE:-} && -f ${BREW_DIAGNOSTICS_FILE} ]]; then
+		brew_diagnostics="$(<"$BREW_DIAGNOSTICS_FILE")"
+		rm -f "$BREW_DIAGNOSTICS_FILE"
+		BREW_DIAGNOSTICS_FILE=""
+	fi
+
 	disk_usage=$(
 		{
 			print_section "Disk Usage (df -h)"
@@ -911,7 +942,7 @@ collect_system_info() {
 		} 2>&1 || true
 	)
 
-	content="${sysinfo}${rpm_ostree_status}${flatpaks}${homebrew_packages}${audit_results}${local_overrides}${last_boot_events}${recent_events}${failed_services}${brew_services}${disk_usage}"
+	content="${sysinfo}${rpm_ostree_status}${flatpaks}${homebrew_packages}${audit_results}${local_overrides}${last_boot_events}${recent_events}${failed_services}${brew_services}${brew_diagnostics}${disk_usage}"
 
 	tmpfile="$(mktemp /tmp/secureblue-info.XXXXXX)"
 	printf "%s\n" "$content" >"$tmpfile"
