@@ -59,6 +59,29 @@ run_logged_cmd() {
 	return 1
 }
 
+apt_suite_enabled() {
+	local target="$1"
+
+	# Prefer APT policy metadata when available; it exposes the exact suite name.
+	if apt-cache policy 2>/dev/null | grep -Eq "release .*n=${target}([, ]|$)"; then
+		return 0
+	fi
+
+	# Fall back to configured APT source files so we still detect enabled backports
+	# before package lists are refreshed or when policy output is sparse.
+	if grep -RqsE "^[[:space:]]*Suites:.*(^|[[:space:]])${target}([[:space:]]|$)" \
+		/etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null; then
+		return 0
+	fi
+
+	if grep -RqsE "^[[:space:]]*deb[[:space:]].*[[:space:]]${target}([[:space:]]|/|$)" \
+		/etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null; then
+		return 0
+	fi
+
+	return 1
+}
+
 declare -a PHASE_ORDER=()
 declare -A PHASE_STATUS=()
 declare -A PHASE_KIND=()
@@ -261,7 +284,7 @@ apt_full_upgrade() {
 
 	if [[ -n $codename ]]; then
 		target="${codename}-backports"
-		if apt-cache policy 2>/dev/null | grep -Fq "$target"; then
+		if apt_suite_enabled "$target"; then
 			log "Running full-upgrade prioritizing backports (${target})..."
 			if ! run_logged_cmd "$phase_log" "apt full-upgrade -t ${target}" "$APT_BIN" -y \
 				-o Dpkg::Options::="--force-confdef" \
@@ -273,7 +296,7 @@ apt_full_upgrade() {
 				return 1
 			fi
 		else
-			warn "Backports (${target}) not found in APT policy; skipping backports-priority pass."
+			log "Backports (${target}) not found in APT policy; skipping backports-priority pass."
 		fi
 	else
 		warn "Could not determine Debian codename; skipping backports-priority pass."
