@@ -27,5 +27,5 @@ for p in /home/linuxbrew/.linuxbrew/bin /home/linuxbrew/.linuxbrew/sbin
 end
 
 if set -q brew_paths[1]
-    fish_add_path -g --prepend --move $brew_paths
+    fish_add_path -g --move $brew_paths
 end
