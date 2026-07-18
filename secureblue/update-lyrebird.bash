@@ -64,6 +64,37 @@ ensure_git() {
 	require_cmd git
 }
 
+ensure_brew_access() {
+	local brew_prefix=""
+	for prefix in \
+		/var/home/linuxbrew/.linuxbrew \
+		/home/linuxbrew/.linuxbrew \
+		"$HOME/.linuxbrew"; do
+		if [ -x "$prefix/bin/brew" ]; then
+			export PATH="$prefix/bin:$prefix/sbin:$PATH"
+			brew_prefix="$prefix"
+			break
+		fi
+	done
+
+	if [[ -z $brew_prefix ]]; then
+		return 0
+	fi
+
+	if [[ -d $brew_prefix/Cellar ]]; then
+		local restricted
+		restricted="$(find "$brew_prefix/Cellar" -maxdepth 3 -type d ! -perm -o+rx 2>/dev/null | head -1 || true)"
+		if [[ -n $restricted ]]; then
+			log "Fixing Homebrew cellar permissions for multi-user access..."
+			if command -v run0 >/dev/null 2>&1; then
+				run0 find "$brew_prefix/Cellar" -maxdepth 4 -type d ! -perm -o+rx -exec chmod o+rx {} \; 2>/dev/null || true
+			else
+				warn "run0 not available; cannot fix cellar permissions."
+			fi
+		fi
+	fi
+}
+
 ensure_go() {
 	if command -v go >/dev/null 2>&1; then
 		log "Go already installed: $(go version)"
@@ -134,6 +165,7 @@ install_lyrebird() {
 
 check_prereqs() {
 	detect_root_cmd
+	ensure_brew_access
 	ensure_git
 	ensure_go
 }

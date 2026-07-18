@@ -72,11 +72,25 @@ ensure_homebrew_path() {
 		if [ -x "$prefix/bin/brew" ]; then
 			PATH="$prefix/bin:$PATH"
 			export PATH
+			BREW_PREFIX="$prefix"
 			break
 		fi
 	done
 
 	have_cmd brew || error "Homebrew is required but was not found in PATH"
+
+	if [[ -n ${BREW_PREFIX:-} && -d $BREW_PREFIX/Cellar ]]; then
+		local restricted
+		restricted="$(find "$BREW_PREFIX/Cellar" -maxdepth 3 -type d ! -perm -o+rx 2>/dev/null | head -1 || true)"
+		if [[ -n $restricted ]]; then
+			log "Fixing Homebrew cellar permissions for multi-user access..."
+			if command -v run0 >/dev/null 2>&1; then
+				run0 find "$BREW_PREFIX/Cellar" -maxdepth 4 -type d ! -perm -o+rx -exec chmod o+rx {} \; 2>/dev/null || true
+			else
+				warn "run0 not available; cannot fix cellar permissions."
+			fi
+		fi
+	fi
 }
 
 install_build_deps() {
