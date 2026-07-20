@@ -104,6 +104,10 @@ ensure_git() {
 }
 
 ensure_brew_access() {
+	if command -v go >/dev/null 2>&1; then
+		return 0
+	fi
+
 	local brew_prefix=""
 	for prefix in \
 		/var/home/linuxbrew/.linuxbrew \
@@ -116,20 +120,12 @@ ensure_brew_access() {
 		fi
 	done
 
-	if [[ -z $brew_prefix ]]; then
-		return 0
-	fi
-
-	if [[ -d $brew_prefix/Cellar ]]; then
+	if [[ -n $brew_prefix && -d $brew_prefix/Cellar ]]; then
 		local restricted
 		restricted="$(find "$brew_prefix/Cellar" -maxdepth 3 -type d ! -perm -o+rx 2>/dev/null | head -1 || true)"
 		if [[ -n $restricted ]]; then
-			log "Fixing Homebrew cellar permissions for multi-user access..."
-			if command -v run0 >/dev/null 2>&1; then
-				run0 find "$brew_prefix/Cellar" -maxdepth 4 -type d ! -perm -o+rx -exec chmod o+rx {} \; 2>/dev/null || true
-			else
-				warn "run0 not available; cannot fix cellar permissions."
-			fi
+			warn "Some Homebrew cellar directories have restricted permissions."
+			warn "Run this to fix: run0 find $brew_prefix/Cellar -maxdepth 4 -type d ! -perm -o+rx -exec chmod o+rx {} \\;"
 		fi
 	fi
 }

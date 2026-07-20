@@ -92,10 +92,8 @@ reboot_system() {
 		systemctl reboot
 	elif have run0; then
 		run0 systemctl reboot
-	elif have sudo; then
-		sudo systemctl reboot
 	else
-		say "No run0/sudo found. Please reboot manually when convenient."
+		say "No run0 found. Please reboot manually when convenient."
 		return 1
 	fi
 }

@@ -74,7 +74,20 @@ parse_args() {
 	URL="$1"
 }
 
+ensure_brew_path() {
+	for prefix in \
+		/var/home/linuxbrew/.linuxbrew \
+		/home/linuxbrew/.linuxbrew \
+		"$HOME/.linuxbrew"; do
+		if [ -x "$prefix/bin/brew" ]; then
+			export PATH="$prefix/bin:$prefix/sbin:$PATH"
+			return
+		fi
+	done
+}
+
 check_prereqs() {
+	ensure_brew_path
 	require_cmd yt-dlp
 	require_cmd ffmpeg
 	require_cmd getent

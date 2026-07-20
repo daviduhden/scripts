@@ -3,9 +3,11 @@ set -euo pipefail
 
 # SecureBlue arti and oniux update/install script
 # Automated script to install or update Rust-based Tor software (arti and oniux)
-# - Uses run0 to escalate to root so that Homebrew's Rust binaries are accessible
-# - Builds as the invoking user via runuser to preserve their .cargo cache
-# - Installs the resulting binaries into /usr/local/bin
+# - Ensures Rust and cargo are installed (via rustup or Homebrew)
+# - Clones the arti and oniux repositories from the Tor Project GitLab
+# - Determines the latest release tags for each project
+# - Installs or updates the crates via cargo with appropriate features
+# - Installs the resulting binaries into /usr/local/bin (requires root)
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
@@ -13,9 +15,8 @@ set -euo pipefail
 REPO_ARTI="https://gitlab.torproject.org/tpo/core/arti.git"
 REPO_ONIUX="https://gitlab.torproject.org/tpo/core/oniux.git"
 
-BREW_PREFIX="/home/linuxbrew/.linuxbrew"
-ORIGINAL_USER=""
-ORIGINAL_HOME=""
+CARGO_BIN_DIR="${CARGO_HOME:-$HOME/.cargo}/bin"
+ROOT_CMD=""
 TMP_FILES=()
 
 if [ -t 1 ] && [ "${NO_COLOR:-0}" != "1" ]; then
@@ -50,91 +51,111 @@ require_cmd() {
 	}
 }
 
-ensure_root() {
-	if [[ ${EUID:-$(id -u)} -eq 0 ]]; then
-		return
-	fi
-
-	if command -v run0 >/dev/null 2>&1; then
-		exec run0 -- "$0" "$@"
+detect_root_cmd() {
+	if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+		ROOT_CMD=""
+		log "Running as root; no elevation helper needed for privileged operations."
+	elif command -v run0 >/dev/null 2>&1; then
+		ROOT_CMD="run0"
+		log "Using run0 for privileged operations."
 	else
-		error "run0 is required for privilege escalation on SecureBlue."
+		error "run0 not found. Run this script as root or install run0."
 		exit 1
 	fi
 }
 
-init_context() {
-	if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
-		error "init_context must be called as root."
-		exit 1
-	fi
-
-	if [[ -n ${SUDO_USER:-} && ${SUDO_USER} != "root" ]]; then
-		ORIGINAL_USER="$SUDO_USER"
-	elif [[ -n ${PKEXEC_UID:-} ]]; then
-		ORIGINAL_USER="$(id -nu "$PKEXEC_UID" 2>/dev/null || true)"
-	fi
-
-	if [[ -z ${ORIGINAL_USER:-} ]]; then
-		error "Could not determine invoking non-root user. Run this script via run0 from your user account."
-		exit 1
-	fi
-
-	ORIGINAL_HOME="$(getent passwd "$ORIGINAL_USER" | cut -d: -f6)"
-	if [[ -z ${ORIGINAL_HOME:-} ]]; then
-		error "Could not determine home directory for user '$ORIGINAL_USER'."
-		exit 1
+run_root() {
+	if [ -n "$ROOT_CMD" ]; then
+		"$ROOT_CMD" "$@"
+	else
+		"$@"
 	fi
 }
 
-run_as_user_env() {
-	local user="$1"
-	shift
-
-	local home uid runtime_dir bus_path
-	home="$(getent passwd "$user" | cut -d: -f6)"
-	uid="$(id -u "$user" 2>/dev/null || true)"
-
-	if [[ -z ${home:-} || -z ${uid:-} ]]; then
-		error "Could not determine HOME/UID for user '$user'."
-		exit 1
+ensure_brew_path() {
+	if command -v cargo >/dev/null 2>&1; then
+		return 0
 	fi
 
-	runtime_dir="/run/user/${uid}"
-	bus_path="${runtime_dir}/bus"
-
-	local -a env_vars
-	env_vars=(
-		"HOME=${home}"
-		"USER=${user}"
-		"LOGNAME=${user}"
-		"PATH=${BREW_PREFIX}/bin:${BREW_PREFIX}/sbin:/usr/local/bin:/usr/bin:/bin"
-		"LANG=${LANG:-C.UTF-8}"
-		"LC_ALL=${LC_ALL:-C.UTF-8}"
-	)
-
-	if [[ -d $runtime_dir ]]; then
-		env_vars+=("XDG_RUNTIME_DIR=${runtime_dir}")
-		if [[ -S $bus_path ]]; then
-			env_vars+=("DBUS_SESSION_BUS_ADDRESS=unix:path=${bus_path}")
+	local brew_prefix=""
+	for prefix in \
+		/var/home/linuxbrew/.linuxbrew \
+		/home/linuxbrew/.linuxbrew \
+		"$HOME/.linuxbrew"; do
+		if [ -x "$prefix/bin/cargo" ]; then
+			export PATH="$prefix/bin:$PATH"
+			brew_prefix="$prefix"
+			if [[ -d $brew_prefix/Cellar ]]; then
+				local restricted
+				restricted="$(find "$brew_prefix/Cellar" -maxdepth 3 -type d ! -perm -o+rx 2>/dev/null | head -1 || true)"
+				if [[ -n $restricted ]]; then
+					warn "Some Homebrew cellar directories have restricted permissions."
+					warn "Run this to fix: run0 find $brew_prefix/Cellar -maxdepth 4 -type d ! -perm -o+rx -exec chmod o+rx {} \\;"
+				fi
+			fi
+			return 0
 		fi
-	fi
+	done
 
-	runuser -u "$user" -- env "${env_vars[@]}" "$@"
-}
-
-cargo_np() {
-	run_as_user_env "$ORIGINAL_USER" env -u LD_PRELOAD cargo "$@"
+	return 1
 }
 
 ensure_rust() {
-	if run_as_user_env "$ORIGINAL_USER" command -v cargo >/dev/null 2>&1; then
-		log "Rust toolchain available."
+	ensure_brew_path || true
+
+	if command -v cargo >/dev/null 2>&1 && command -v rustc >/dev/null 2>&1; then
+		log "Rust and cargo are already installed."
 		return
 	fi
 
-	error "Cargo not available for user '$ORIGINAL_USER' with PATH=${BREW_PREFIX}/bin."
-	error "Ensure Rust is installed via Homebrew (brew-proxy install rust)."
+	if command -v brew-proxy >/dev/null 2>&1 || command -v brew >/dev/null 2>&1; then
+		local brew_cmd
+		brew_cmd="$(command -v brew-proxy 2>/dev/null || command -v brew 2>/dev/null || true)"
+		log "Homebrew detected ($brew_cmd), installing Rust..."
+		if "$brew_cmd" list rust >/dev/null 2>&1; then
+			log "Rust already installed with Homebrew, attempting upgrade..."
+			"$brew_cmd" upgrade rust || log "$brew_cmd upgrade rust failed or was not needed."
+		else
+			"$brew_cmd" install rust
+		fi
+
+		ensure_brew_path
+
+		if command -v cargo >/dev/null 2>&1; then
+			log "Using cargo at: $(command -v cargo)"
+			return
+		fi
+
+		warn "Rust is installed via Homebrew but cargo is not accessible."
+		warn "Falling back to rustup for user-local Rust installation."
+	fi
+
+	log "Installing Rust via rustup..."
+	if ! command -v curl >/dev/null 2>&1; then
+		error "curl is required to install rustup but is not installed."
+		exit 1
+	fi
+	local rustup_script
+	rustup_script="$(mktemp rustup-init.XXXXXX.sh)"
+	TMP_FILES+=("$rustup_script")
+	log "Downloading rustup installer..."
+	curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o "$rustup_script"
+	log "Running rustup installer..."
+	sh "$rustup_script" -y
+
+	if [ -f "$HOME/.cargo/env" ]; then
+		# shellcheck source=/dev/null
+		. "$HOME/.cargo/env"
+	else
+		export PATH="$HOME/.cargo/bin:$PATH"
+	fi
+
+	if command -v cargo >/dev/null 2>&1; then
+		log "Using cargo at: $(command -v cargo)"
+		return
+	fi
+
+	error "Rust installation seems to have failed (cargo not found in PATH)."
 	exit 1
 }
 
@@ -147,10 +168,14 @@ ensure_git() {
 
 get_installed_cargo_version() {
 	local crate="$1"
-	cargo_np install --list 2>/dev/null |
+	cargo install --list 2>/dev/null |
 		awk -v crate="$crate" '$1==crate {print $2}' |
 		sed -E 's/^v//; s/:$//' |
 		head -n1
+}
+
+cargo_np() {
+	env -u LD_PRELOAD cargo "$@"
 }
 
 latest_git_tag() {
@@ -167,7 +192,6 @@ latest_git_tag() {
 install_or_update_arti() {
 	local crate="arti"
 	local updated=0
-	local cargo_bin_dir="${ORIGINAL_HOME}/.cargo/bin"
 	log "Checking $crate version (git tags from $REPO_ARTI)..."
 
 	local installed latest_tag latest_ver
@@ -191,11 +215,11 @@ install_or_update_arti() {
 	fi
 
 	if [[ $updated -eq 1 ]]; then
-		if [[ -x "$cargo_bin_dir/arti" ]]; then
-			log "Installing arti binary into /usr/local/bin..."
-			install -m 0755 "$cargo_bin_dir/arti" /usr/local/bin/
+		if [[ -x "$CARGO_BIN_DIR/arti" ]]; then
+			log "Installing arti binary into /usr/local/bin (may require root)..."
+			run_root install -m 0755 "$CARGO_BIN_DIR/arti" /usr/local/bin/
 		else
-			error "arti binary not found at $cargo_bin_dir/arti. Check previous error messages."
+			error "arti binary not found at $CARGO_BIN_DIR/arti. Check previous error messages."
 			return 1
 		fi
 	else
@@ -204,10 +228,9 @@ install_or_update_arti() {
 }
 
 install_or_update_oniux() {
+	ujust set-unconfined-userns off >/dev/null 2>&1 || true
 	local crate="oniux"
 	local updated=0
-	local cargo_bin_dir="${ORIGINAL_HOME}/.cargo/bin"
-	ujust set-unconfined-userns off >/dev/null 2>&1 || true
 	log "Checking $crate version (git tags from $REPO_ONIUX)..."
 
 	local installed latest_tag latest_ver
@@ -231,11 +254,11 @@ install_or_update_oniux() {
 	fi
 
 	if [[ $updated -eq 1 ]]; then
-		if [[ -x "$cargo_bin_dir/oniux" ]]; then
-			log "Installing oniux binary into /usr/local/bin..."
-			install -m 0755 "$cargo_bin_dir/oniux" /usr/local/bin/
+		if [[ -x "$CARGO_BIN_DIR/oniux" ]]; then
+			log "Installing oniux binary into /usr/local/bin (may require root)..."
+			run_root install -m 0755 "$CARGO_BIN_DIR/oniux" /usr/local/bin/
 		else
-			error "oniux binary not found at $cargo_bin_dir/oniux. Check previous error messages."
+			error "oniux binary not found at $CARGO_BIN_DIR/oniux. Check previous error messages."
 			return 1
 		fi
 	else
@@ -244,7 +267,7 @@ install_or_update_oniux() {
 }
 
 check_prereqs() {
-	require_cmd runuser
+	detect_root_cmd
 	require_cmd install
 	require_cmd mkdir
 	require_cmd awk
@@ -254,14 +277,13 @@ check_prereqs() {
 }
 
 run_update() {
+	mkdir -p "$CARGO_BIN_DIR"
 	install_or_update_arti
 	install_or_update_oniux
-	log "Done. arti and oniux are installed in /usr/local/bin."
+	log "Done. Make sure /usr/local/bin is in your PATH."
 }
 
 main() {
-	ensure_root "$@"
-	init_context
 	check_prereqs
 	run_update
 }
