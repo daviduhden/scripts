@@ -43,3 +43,10 @@ set -gx CLICOLOR 1
 set -gx GREP_COLORS 'mt=01;32'
 
 umask 022
+
+if not set -q DBUS_SYSTEM_BUS_ADDRESS
+    set -gx DBUS_SYSTEM_BUS_ADDRESS unix:path=/run/dbus/system_bus_socket
+end
+
+set -gx HOMEBREW_NO_AUTO_UPDATE 1
+set -gx HOMEBREW_NO_INSTALL_CLEANUP 1
