@@ -134,7 +134,24 @@ configure_freshclam() {
 
 run_freshclam() {
 	log "Running freshclam database update"
-	freshclam || error "freshclam failed"
+
+	# freshclam uses a single lock for its log and database. Stop an already
+	# running updater before doing the foreground update, then restore it.
+	local freshclam_service=""
+	for candidate in clamav-freshclam.service freshclam.service; do
+		if systemctl is-active --quiet "$candidate"; then
+			freshclam_service="$candidate"
+			systemctl stop "$candidate"
+			break
+		fi
+	done
+
+	if ! freshclam; then
+		[[ -n "$freshclam_service" ]] && systemctl start "$freshclam_service"
+		error "freshclam failed"
+	fi
+
+	[[ -n "$freshclam_service" ]] && systemctl start "$freshclam_service"
 }
 
 #######################
@@ -155,7 +172,41 @@ configure_clamd() {
 		-e 's|^#OnAccessExcludeRootUID .*|OnAccessExcludeRootUID yes|' \
 		/etc/clamd.d/scan.conf
 
+	# clamd otherwise rotates only when explicitly configured. Remove any
+	# previous/commented copies first so repeated setup runs stay idempotent.
+	sed -i \
+		-e '/^#\?LogFileMaxSize[[:space:]]/d' \
+		-e '/^#\?LogRotate[[:space:]]/d' \
+		-e '/^LogFile[[:space:]]/a LogFileMaxSize 50M\nLogRotate yes' \
+		/etc/clamd.d/scan.conf
+
 	systemctl enable --now clamd@scan.service
+}
+
+####################
+# LOG ROTATION     #
+####################
+
+configure_log_rotation() {
+	log "Configuring ClamAV log rotation"
+
+	# clamonacc, periodic scans and freshclam do not all honor clamd's
+	# LogFileMaxSize. The clamd*.log glob also prunes historical files created
+	# by clamd's own rotation. copytruncate lets active services keep their
+	# file descriptors while preventing unbounded growth.
+	cat >/etc/logrotate.d/clamav <<EOF
+/var/log/clamav/clamd*.log /var/log/clamav/clamonacc.log /var/log/clamav/periodic.log /var/log/freshclam.log {
+    size 50M
+    rotate 7
+    daily
+    missingok
+    notifempty
+    compress
+    delaycompress
+    copytruncate
+    create 0640 $CLAMAV_USER $CLAMAV_GROUP
+}
+EOF
 }
 
 ######################
@@ -165,11 +216,34 @@ configure_clamd() {
 configure_clamonacc() {
 	log "Configuring clamonacc (on-access scanning)"
 
-	cat >/etc/systemd/system/clamonacc.service <<'EOF'
+	# Prefer Fedora's packaged unit when available. Creating a second unit
+	# named clamonacc.service can otherwise run two on-access scanners.
+	if systemctl cat clamav-clamonacc.service >/dev/null 2>&1; then
+		# Remove the custom unit from older versions of this script so it
+		# cannot remain enabled alongside Fedora's packaged unit.
+		systemctl disable --now clamonacc.service >/dev/null 2>&1 || true
+		rm -f /etc/systemd/system/clamonacc.service
+		install -d -m 0755 /etc/systemd/system/clamav-clamonacc.service.d
+		cat >/etc/systemd/system/clamav-clamonacc.service.d/10-secureblue.conf <<'EOF'
+[Unit]
+After=clamd@scan.service
+Requires=clamd@scan.service
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Restart=on-failure
+RestartSec=5
+EOF
+		CLAMONACC_SERVICE=clamav-clamonacc.service
+	else
+		cat >/etc/systemd/system/clamonacc.service <<'EOF'
 [Unit]
 Description=ClamAV On-Access Scanner
 After=clamd@scan.service
 Requires=clamd@scan.service
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 ExecStart=/usr/sbin/clamonacc \
@@ -181,7 +255,7 @@ ExecStart=/usr/sbin/clamonacc \
   --exclude-dir=/run \
   --exclude-dir=/tmp \
   --exclude-dir=/var/lib/containers
-Restart=always
+Restart=on-failure
 RestartSec=5
 NoNewPrivileges=true
 ProtectSystem=full
@@ -194,9 +268,11 @@ RestrictSUIDSGID=true
 [Install]
 WantedBy=multi-user.target
 EOF
+		CLAMONACC_SERVICE=clamonacc.service
+	fi
 
 	systemctl daemon-reload
-	systemctl enable --now clamonacc.service
+	systemctl enable --now "$CLAMONACC_SERVICE"
 }
 
 #####################
@@ -277,6 +353,7 @@ run_setup() {
 	configure_freshclam
 	run_freshclam
 	configure_clamd
+	configure_log_rotation
 	configure_clamonacc
 	configure_periodic_scan
 	log "ClamAV installation and configuration completed successfully 🎉"
