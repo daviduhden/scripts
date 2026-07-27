@@ -11,18 +11,6 @@ SECUREBLUE_USER ?= david
 BASH_CONF_DST_DIR ?= /var/home/${SECUREBLUE_USER}/.bashrc.d
 BASH_CONF_FILES = shell/aliases.bash \
 	shell/vi-mode.bash
-FISH_CONF_SRC_DIR = shell/fish/conf.d
-FISH_CONF_DST_DIR ?= /var/home/${SECUREBLUE_USER}/.config/fish/conf.d
-FISH_CONF_FILES = \
-	00-modern-cli.fish \
-	00-path.fish \
-	03-prompt.fish \
-	05-colors.fish \
-	10-env.fish \
-	15-vi-mode.fish \
-	20-abbr.fish \
-	25-verbose.fish \
-	30-functions.fish
 
 DEBIAN_SCRIPTS = \
 	debian/add-gh-cli-repo.bash \
@@ -104,7 +92,7 @@ install-secureblue:
 	@if [ -d secureblue/systemd ]; then printf '%s Installing %s -> %s\n' "${INFO}" "secureblue/systemd" "${BINDIR}/systemd"; rm -rf "${BINDIR}/systemd"; cp -R secureblue/systemd "${BINDIR}/systemd"; chmod -R a+rX "${BINDIR}/systemd"; fi
 	@wrapper="${BINDIR}/sudo-wrapper"; if [ -x "$$wrapper" ]; then ln -sf "$$wrapper" "${BINDIR}/sudo"; for link in sudo visudo sudoedit; do printf '%s Symlinking %s -> %s\n' "${INFO}" "${BINDIR}/$$link" "$$wrapper"; ln -sf "$$wrapper" "${BINDIR}/$$link"; done; fi; echo "${INFO} SecureBlue helpers installed"
 
-install-shell: install-shell-bash install-shell-fish
+install-shell: install-shell-bash
 	@echo "${INFO} Shell helpers installed"
 
 install-shell-bash: install-shell-bash-unlock install-shell-bash-copy install-shell-bash-lock
@@ -119,27 +107,7 @@ install-shell-bash-unlock:
 install-shell-bash-copy:
 	@for f in ${BASH_CONF_FILES}; do printf '%s Installing %s -> %s\n' "${INFO}" "$$f" "${BASH_CONF_DST_DIR}/$${f##*/}"; install -m 0644 "$$f" "${BASH_CONF_DST_DIR}/$${f##*/}"; done
 
-install-shell-bash-lock:
 	@printf '%s Restoring immutable attribute on %s\n' "${INFO}" "${BASH_CONF_DST_DIR}"; chattr +i "${BASH_CONF_DST_DIR}"
-	@printf '%s Restoring immutable attribute on %s\n' "${INFO}" "${BASH_CONF_DST_DIR}"; chattr +i "${BASH_CONF_DST_DIR}"
-
-install-shell-fish: install-shell-fish-unlock install-shell-fish-copy install-shell-fish-lock
-	@echo "${INFO} Installing fish config"
-	@echo "${INFO} Fish shell config installed"
-
-install-shell-fish-unlock:
-	@if ! command -v chattr >/dev/null 2>&1; then echo "${INFO} ERROR: chattr not found"; exit 1; fi
-	@if [ -e "${FISH_CONF_DST_DIR}" ]; then printf '%s Removing immutable attribute from %s\n' "${INFO}" "${FISH_CONF_DST_DIR}"; chattr -i "${FISH_CONF_DST_DIR}" 2>/dev/null || true; fi
-	@for f in ${FISH_CONF_FILES}; do if [ -e "${FISH_CONF_DST_DIR}/$$f" ]; then printf '%s Removing immutable attribute from %s\n' "${INFO}" "${FISH_CONF_DST_DIR}/$$f"; chattr -i "${FISH_CONF_DST_DIR}/$$f" 2>/dev/null || true; fi; done
-	@install -d "${FISH_CONF_DST_DIR}"
-
-install-shell-fish-copy:
-	@install -d "${FISH_CONF_DST_DIR}"
-	@for f in ${FISH_CONF_FILES}; do printf '%s Installing %s -> %s\n' "${INFO}" "${FISH_CONF_SRC_DIR}/$$f" "${FISH_CONF_DST_DIR}/$$f"; install -m 0644 "${FISH_CONF_SRC_DIR}/$$f" "${FISH_CONF_DST_DIR}/$$f"; done
-
-install-shell-fish-lock:
-	@for f in ${FISH_CONF_FILES}; do if [ -e "${FISH_CONF_DST_DIR}/$$f" ]; then printf '%s Restoring immutable attribute on %s\n' "${INFO}" "${FISH_CONF_DST_DIR}/$$f"; chattr +i "${FISH_CONF_DST_DIR}/$$f"; fi; done
-	@printf '%s Restoring immutable attribute on %s\n' "${INFO}" "${FISH_CONF_DST_DIR}"; chattr +i "${FISH_CONF_DST_DIR}"
 
 install-shell-openbsd:
 	@echo "${INFO} OpenBSD does not support chattr immutable flags like Linux."
@@ -162,4 +130,4 @@ test:
 	@echo "Running make validation..." && /bin/sh tests-format/validate-make.sh .
 
 help:
-	@printf "Usage: make [target]\n\nTargets:\n  all                      Install all helper sets\n  install-debian           Install Debian helper scripts into ${BINDIR}\n  install-openbsd          Install OpenBSD helper scripts into ${BINDIR}\n  install-secureblue       Install secureblue helper scripts into ${BINDIR}\n  install-shell            Alias of install-shell-secureblue\n  install-shell-fish       Install fish shell config into ${FISH_CONF_DST_DIR}\n  install-shell-secureblue Install shell aliases into ${SECUREBLUE_BASHRCD_DIR} (with chattr -i/+i)\n  install-shell-openbsd    Guidance for installing shell helpers on OpenBSD\n  install-perl             Install perl helper scripts into ${BINDIR}\n  install-tests-format     Install tests-format helper scripts into ${BINDIR}/tests-format\n  test                     Run script and make validation tests\n  clean                    No-op clean target\n  help                     Show this help\n"
+	@printf "Usage: make [target]\n\nTargets:\n  all                      Install all helper sets\n  install-debian           Install Debian helper scripts into ${BINDIR}\n  install-openbsd          Install OpenBSD helper scripts into ${BINDIR}\n  install-secureblue       Install secureblue helper scripts into ${BINDIR}\n  install-shell            Install SecureBlue Bash shell helpers\n  install-shell-bash       Install shell aliases into ${BASH_CONF_DST_DIR} (with chattr -i/+i)\n  install-shell-openbsd    Guidance for installing shell helpers on OpenBSD\n  install-perl             Install perl helper scripts into ${BINDIR}\n  install-tests-format     Install tests-format helper scripts into ${BINDIR}/tests-format\n  test                     Run script and make validation tests\n  clean                    No-op clean target\n  help                     Show this help\n"

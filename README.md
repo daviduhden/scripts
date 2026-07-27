@@ -31,10 +31,7 @@ make install-secureblue
 # SecureBlue shell aliases (~/.bashrc.d/aliases.bash with chattr -i/+i)
 make install-shell-secureblue
 
-# fish shell config (~/.config/fish/conf.d with chattr -i/+i)
-make install-shell-fish
-
-# Same as install-shell-secureblue
+# Same as install-shell-bash
 make install-shell
 
 # Perl
@@ -50,7 +47,7 @@ Recipes use `install(1)` and strip `.pl`/`.bash`/`.ksh`/`.sh` when placing shell
 
 `make test` runs:
 
-- shell validation/formatting (`tests-format/validate-shell.sh`, incluye sintaxis sh/bash/ksh/fish cuando estén disponibles)
+- shell validation/formatting (`tests-format/validate-shell.sh`, incluye sintaxis sh/bash/ksh)
 - perl validation/formatting (`tests-format/validate-perl.sh`)
 - make validation/formatting (`tests-format/validate-make.sh`)
 
@@ -61,24 +58,6 @@ Recipes use `install(1)` and strip `.pl`/`.bash`/`.ksh`/`.sh` when placing shell
 - Default user: `SECUREBLUE_USER=david`
 - Default path: `SECUREBLUE_BASHRCD_DIR=/var/home/${SECUREBLUE_USER}/.bashrc.d`
 - Immutable handling: removes immutable bit (`chattr -i`) on directory/file before install, then restores it (`chattr +i`) afterwards.
-
-## fish shell config
-
-`make install-shell-fish` installs the fish configuration into `${HOME}/.config/fish/conf.d`.
-
-- Default destination: `${HOME}/.config/fish/conf.d`
-- Override: `FISH_CONF_DST_DIR=/path/to/conf.d`
-- Immutable handling: removes immutable bit (`chattr -i`) on destination directory/files before install, then restores it (`chattr +i`) afterwards.
-
-Examples:
-
-```
-# Install fish config for the current user
-make install-shell-fish
-
-# Install fish config to a custom destination
-make install-shell-fish FISH_CONF_DST_DIR=/var/home/alice/.config/fish/conf.d
-```
 
 Examples:
 

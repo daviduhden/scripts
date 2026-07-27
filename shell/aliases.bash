@@ -31,6 +31,8 @@ alias chmod='chmod --preserve-root'
 alias nano='nano -l'
 alias vi='vim'
 alias svi='run0 vim'
+alias kakoune='kak'
+alias skak='run0 kak'
 
 # --------------------------------------------------
 # System information

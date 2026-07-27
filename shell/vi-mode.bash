@@ -19,6 +19,6 @@ esac
 set -o vi
 
 # Set EDITOR / VISUAL only if they are not defined yet
-: "${EDITOR:=vi}"
-: "${VISUAL:=$EDITOR}"
+: "${EDITOR:=vim}"
+: "${VISUAL:=kak}"
 export EDITOR VISUAL
