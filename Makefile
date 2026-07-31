@@ -33,7 +33,6 @@ DEBIAN_SCRIPTS = \
 	debian/update-xd-torrent.bash
 
 OPENBSD_SCRIPTS = \
-	openbsd/apply-sysclean.ksh \
 	openbsd/clean-logs.ksh \
 	openbsd/sudo-wrapper.ksh \
 	openbsd/sync-website.ksh \
@@ -83,7 +82,7 @@ install-openbsd:
 	@install -d ${BINDIR}
 	@for f in ${OPENBSD_SCRIPTS}; do base=$${f##*/}; name=$${base%.ksh}; printf '%s Installing %s -> %s\n' "${INFO}" "$$f" "${BINDIR}/$$name"; install -m 0755 "$$f" "${BINDIR}/$$name"; done
 	@wrapper="${BINDIR}/sudo-wrapper"; if [ -x "$$wrapper" ]; then ln -sf "$$wrapper" "${BINDIR}/sudo"; for link in sudo visudo sudoedit; do printf '%s Symlinking %s -> %s\n' "${INFO}" "${BINDIR}/$$link" "$$wrapper"; ln -sf "$$wrapper" "${BINDIR}/$$link"; done; fi
-	@printf '%s Installing openbsd/sysclean -> %s\n' "${INFO}" "${BINDIR}/sysclean"; rm -rf "${BINDIR}/sysclean"; cp -R openbsd/sysclean "${BINDIR}/sysclean"; chmod -R a+rX "${BINDIR}/sysclean"; echo "${INFO} OpenBSD helpers installed"
+	@echo "${INFO} OpenBSD helpers installed"
 
 install-secureblue:
 	@echo "${INFO} Installing SecureBlue helpers"

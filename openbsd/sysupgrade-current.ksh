@@ -8,7 +8,7 @@ set -eu
 #
 # Notes:
 # - Uses ksh93 if available, otherwise falls back to base ksh.
-# - Post-upgrade tasks (sysmerge/pkg_add/sysclean/lynis/info dump)
+# - Post-upgrade tasks (sysmerge/pkg_add/lynis/info dump)
 #   are wired through /upgrade.site → /etc/rc.firsttime.
 # - Lynis is executed explicitly via ksh/ksh93 to match shell expectations.
 #
@@ -149,20 +149,6 @@ upgrade_packages() {
     fi
 }
 
-run_apply_sysclean() {
-    log_file="/var/log/openbsd/apply-sysclean-$(date +%Y%m%d-%H%M%S).log"
-    print "Running apply-sysclean..."
-    if [ -x /usr/local/bin/apply-sysclean ]; then
-        if run_logged_cmd "$log_file" /usr/local/bin/apply-sysclean; then
-            print "apply-sysclean completed (log: $log_file)."
-        else
-            print "apply-sysclean encountered errors; see $log_file."
-        fi
-    else
-        print "apply-sysclean not found; skipping."
-    fi
-}
-
 run_lynis_audit() {
     log_file="/var/log/openbsd/lynis-audit-$(date +%Y%m%d-%H%M%S).log"
     print "Running Lynis security audit..."
@@ -258,7 +244,6 @@ collect_system_info_and_upload() {
 main() {
     run_sysmerge
     upgrade_packages
-    run_apply_sysclean
     run_lynis_audit
     collect_system_info_and_upload
 }
