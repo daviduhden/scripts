@@ -3,13 +3,14 @@
 set -eu
 
 # OpenBSD sudo-wrapper script
-# Compatibility shim that redirects sudo calls to doas and wraps visudo/sudoedit
-# to be executed via doas as well.
+# Compatibility shim that redirects sudo calls to doas
+# and wraps visudo/sudoedit to be executed via doas as well.
 #
 # This script is intended to be installed as /usr/local/bin/sudo.
 # You can also symlink it as:
-#   - /usr/local/bin/visudo   → "visudo" (without an absolute path) goes through doas
-#   - /usr/local/bin/sudoedit → "sudoedit" goes through doas
+#   - /usr/local/bin/visudo   -> "visudo" (without an absolute
+#     path) goes through doas
+#   - /usr/local/bin/sudoedit -> "sudoedit" goes through doas
 #
 # Any script or program that runs "sudo ..." (without an absolute path)
 # will effectively use doas instead.
@@ -17,7 +18,8 @@ set -eu
 # Notes:
 # - Scripts that call an absolute sudo path will still use the real sudo
 #   (if it exists on the system).
-# - Privilege escalation is controlled by /etc/doas.conf, not /etc/sudoers.
+# - Privilege escalation is controlled by /etc/doas.conf,
+#   not /etc/sudoers.
 # - The sudoedit behavior implemented here is a simplification:
 #     * It runs your editor as root on the target files via doas,
 #       instead of fully emulating sudoedit's temp-file semantics.
@@ -37,9 +39,15 @@ else
 	RESET=""
 fi
 
-log() { print "$(date '+%Y-%m-%d %H:%M:%S') ${GREEN}[INFO]${RESET} ✅ $*"; }
-warn() { print "$(date '+%Y-%m-%d %H:%M:%S') ${YELLOW}[WARN]${RESET} ⚠️ $*" >&2; }
-error() { print "$(date '+%Y-%m-%d %H:%M:%S') ${RED}[ERROR]${RESET} ❌ $*" >&2; }
+log() {
+	print "$(date '+%Y-%m-%d %H:%M:%S') ${GREEN}[INFO]${RESET} $*"
+}
+warn() {
+	print "$(date '+%Y-%m-%d %H:%M:%S') ${YELLOW}[WARN]${RESET} $*" >&2
+}
+error() {
+	print "$(date '+%Y-%m-%d %H:%M:%S') ${RED}[ERROR]${RESET} $*" >&2
+}
 
 ensure_doas() {
 	typeset prog_name
@@ -49,7 +57,8 @@ ensure_doas() {
 		return 0
 	fi
 
-	error "${prog_name}-wrapper error: 'doas' is not installed or not in PATH."
+	error "${prog_name}-wrapper error:" \
+		"'doas' is not installed or not in PATH."
 	error "Please install or enable doas before using this wrapper."
 	exit 1
 }
@@ -73,8 +82,10 @@ handle_visudo() {
 	fi
 
 	if [ -z "$real_visudo" ] || [ ! -x "$real_visudo" ]; then
-		error "sudo-wrapper error: could not locate the real 'visudo' binary."
-		error "Expected /usr/local/sbin/visudo or another executable visudo in PATH."
+		error "sudo-wrapper error: could not locate" \
+			"the real 'visudo' binary."
+		error "Expected /usr/local/sbin/visudo or another" \
+			"executable visudo in PATH."
 		exit 1
 	fi
 
@@ -101,7 +112,8 @@ handle_sudoedit() {
 	fi
 
 	if ! command -v "${editor_cmd[0]}" >/dev/null 2>&1; then
-		error "sudo-wrapper error: editor '${editor_cmd[0]}' not found in PATH."
+		error "sudo-wrapper error:" \
+			"editor '${editor_cmd[0]}' not found in PATH."
 		exit 1
 	fi
 

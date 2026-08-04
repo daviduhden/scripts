@@ -8,12 +8,14 @@ printf '%s\n' "[INFO] Logging to: $TMPLOG" >&3
 exec >"$TMPLOG" 2>&1
 
 # validate-manpages.sh
-# - Recursively finds all man pages under ROOT_DIR (default: current directory
-#   excluding .git) and runs mandoc lint on them, treating warnings as errors.
+# - Recursively finds all man pages under ROOT_DIR
+#   (default: current directory excluding .git) and runs
+#   mandoc lint on them, treating warnings as errors.
 # - Usage: ./validate-manpages.sh [ROOT_DIR]
 # - Requires: mandoc in PATH
 #
-# Note: mandoc is a BSD tool; on Linux, install it via your package manager (e.g., apt, dnf).
+# Note: mandoc is a BSD tool; on Linux, install it via
+# your package manager (e.g., apt, dnf).
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
@@ -56,8 +58,10 @@ run_validate_manpages() {
 
 	# Find man pages and run mandoc lint.
 	# - Prune .git to avoid scanning vendored stuff.
-	# - Use -exec ... {} + instead of xargs (portable + safe with spaces/newlines).
-	# - Match common man section suffixes: .1 .. .9 and variants like .1m, .3p, etc.
+	# - Use -exec ... {} + instead of xargs
+	#   (portable + safe with spaces/newlines).
+	# - Match common man section suffixes: .1 .. .9 and
+	#   variants like .1m, .3p, etc.
 	if ! find "$ROOT_DIR" \
 		\( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o \
 		-type f \( \
@@ -69,7 +73,9 @@ run_validate_manpages() {
 		exit 0
 	fi
 
-	printf '%s\n' "[INFO] Running mandoc lint (treat warnings as errors)..."
+	printf '%s\n' \
+		"[INFO] Running mandoc lint" \
+		" (treat warnings as errors)..."
 	find "$ROOT_DIR" \
 		\( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o \
 		-type f \( \

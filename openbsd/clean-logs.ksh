@@ -3,8 +3,10 @@
 set -eu
 
 # Log cleanup script
-# - Removes *.gz files under /var/log and *.old files under / (root filesystem only).
-# - Supports a dry-run mode via DRY_RUN=1 or the --dry-run / -n option to only list files.
+# - Removes *.gz files under /var/log and *.old files
+#   under / (root filesystem only).
+# - Supports a dry-run mode via DRY_RUN=1 or the
+#   --dry-run / -n option to only list files.
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
@@ -30,15 +32,22 @@ else
 	RESET=""
 fi
 
-log() { print "$(date '+%Y-%m-%d %H:%M:%S') ${GREEN}[INFO]${RESET} ✅ $*"; }
-warn() { print "$(date '+%Y-%m-%d %H:%M:%S') ${YELLOW}[WARN]${RESET} ⚠️ $*" >&2; }
-error() { print "$(date '+%Y-%m-%d %H:%M:%S') ${RED}[ERROR]${RESET} ❌ $*" >&2; }
+log() {
+	print "$(date '+%Y-%m-%d %H:%M:%S') ${GREEN}[INFO]${RESET} $*"
+}
+warn() {
+	print "$(date '+%Y-%m-%d %H:%M:%S') ${YELLOW}[WARN]${RESET} $*" >&2
+}
+error() {
+	print "$(date '+%Y-%m-%d %H:%M:%S') ${RED}[ERROR]${RESET} $*" >&2
+}
 
 parse_args() {
 	case "${1:-}" in
 	--dry-run | -n)
 		DRY_RUN=1
-		warn "CLI flag detected; using non-default options instead of standard behavior."
+		warn "CLI flag detected:" \
+			"using non-default options instead of standard behavior."
 		shift
 		;;
 	esac
@@ -47,7 +56,8 @@ parse_args() {
 
 clean_gz_logs() {
 	if [ "$DRY_RUN" -eq 1 ]; then
-		log "DRY RUN: listing *.gz files under /var/log (no deletion will occur):"
+		log "DRY RUN: listing *.gz files under /var/log"
+		log "(no deletion will occur):"
 		if ! find /var/log -xdev -type f -name '*.gz' -print; then
 			error "Failed to list *.gz files under /var/log."
 			return 1
@@ -58,7 +68,8 @@ clean_gz_logs() {
 	log "Deleting *.gz files under /var/log..."
 	# -xdev avoids crossing into other filesystems
 	# Use -exec rm instead of -delete for better portability
-	if ! find /var/log -xdev -type f -name '*.gz' -print -exec rm -f {} +; then
+	if ! find /var/log -xdev -type f -name '*.gz' \
+		-print -exec rm -f {} +; then
 		error "Failed while deleting *.gz files under /var/log."
 		return 1
 	fi
@@ -66,7 +77,8 @@ clean_gz_logs() {
 
 clean_old_files() {
 	if [ "$DRY_RUN" -eq 1 ]; then
-		log "DRY RUN: listing *.old files under / (no deletion will occur):"
+		log "DRY RUN: listing *.old files under /"
+		log "(no deletion will occur):"
 		if ! find / -xdev -type f -name '*.old' -print; then
 			error "Failed to list *.old files under /."
 			return 1
@@ -76,7 +88,8 @@ clean_old_files() {
 
 	log "Deleting *.old files under / (use with care)..."
 	# -xdev keeps us on the root filesystem only
-	if ! find / -xdev -type f -name '*.old' -print -exec rm -f {} +; then
+	if ! find / -xdev -type f -name '*.old' \
+		-print -exec rm -f {} +; then
 		error "Failed while deleting *.old files under /."
 		return 1
 	fi

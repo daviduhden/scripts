@@ -10,8 +10,10 @@ fi
 #  - Prefers GitHub CLI (gh repo sync) if available
 #  - Falls back to plain git fetch/reset if needed
 #  - Falls back to downloading a GitHub ZIP if git-based methods fail
-#  - Applies safe file permissions and restarts the configured web service
-#  - Uses a simple lock directory to avoid concurrent runs (safe for cron)
+#  - Applies safe file permissions and restarts
+#    the configured web service
+#  - Uses a simple lock directory to avoid concurrent
+#    runs (safe for cron)
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
@@ -34,15 +36,24 @@ else
 	RESET=""
 fi
 
-log() { print "$(date '+%Y-%m-%d %H:%M:%S') ${GREEN}[INFO]${RESET} ✅ $*"; }
-warn() { print "$(date '+%Y-%m-%d %H:%M:%S') ${YELLOW}[WARN]${RESET} ⚠️ $*" >&2; }
-error() { print "$(date '+%Y-%m-%d %H:%M:%S') ${RED}[ERROR]${RESET} ❌ $*" >&2; }
+log() {
+	print "$(date '+%Y-%m-%d %H:%M:%S') ${GREEN}[INFO]${RESET} $*"
+}
+warn() {
+	print "$(date '+%Y-%m-%d %H:%M:%S') ${YELLOW}[WARN]${RESET} $*" >&2
+}
+error() {
+	print "$(date '+%Y-%m-%d %H:%M:%S') ${RED}[ERROR]${RESET} $*" >&2
+}
 
 has_repo_content() {
 	typeset dir="$1"
 	[ -d "$dir" ] || return 1
 	find "$dir" \
-		\( -path "$dir/.git" -o -path "$dir/.git/*" -o -path "$dir/.github" -o -path "$dir/.github/*" \) -prune \
+		\( -path "$dir/.git" -o \
+		-path "$dir/.git/*" -o \
+		-path "$dir/.github" -o \
+		-path "$dir/.github/*" \) -prune \
 		-o -mindepth 1 -print | head -n 1 | grep -q .
 }
 
@@ -61,7 +72,8 @@ fetch_lfs_files() {
 	fi
 	if [ -d "$dir/.git" ]; then
 		log "Fetching Git LFS files in $dir..."
-		git -C "$dir" lfs pull >/dev/null 2>&1 || warn "git lfs pull failed in $dir"
+		git -C "$dir" lfs pull >/dev/null 2>&1 ||
+			warn "git lfs pull failed in $dir"
 	fi
 }
 
@@ -93,14 +105,24 @@ stage_from_source() {
 	typeset srcdir="$1"
 	if [ -d "$WWW_DIR/.git" ]; then rm -rf "$WWW_DIR/.git"; fi
 	if [ -d "$WWW_DIR/.github" ]; then rm -rf "$WWW_DIR/.github"; fi
-	if [ -e "$WWW_DIR/.gitattributes" ]; then rm -f "$WWW_DIR/.gitattributes"; fi
+	if [ -e "$WWW_DIR/.gitattributes" ]; then
+		rm -f "$WWW_DIR/.gitattributes"
+	fi
 
 	if command -v rsync >/dev/null 2>&1; then
-		if ! rsync -a --delete --exclude=".git" --exclude=".github" --exclude=".gitattributes" "$srcdir"/ "$WWW_DIR"/; then
+		if ! rsync -a --delete \
+			--exclude=".git" \
+			--exclude=".github" \
+			--exclude=".gitattributes" \
+			"$srcdir"/ "$WWW_DIR"/; then
 			return 1
 		fi
 	else
-		if ! find "$WWW_DIR" -mindepth 1 -maxdepth 1 ! -name ".git" ! -name ".github" ! -name ".gitattributes" -exec rm -rf {} +; then
+		if ! find "$WWW_DIR" -mindepth 1 -maxdepth 1 \
+			! -name ".git" \
+			! -name ".github" \
+			! -name ".gitattributes" \
+			-exec rm -rf {} +; then
 			return 1
 		fi
 		if ! cp -a "$srcdir"/. "$WWW_DIR"/; then
@@ -108,7 +130,9 @@ stage_from_source() {
 		fi
 	fi
 
-	if ! rm -rf "$WWW_DIR/.git" "$WWW_DIR/.github" "$WWW_DIR/.gitattributes"; then
+	if ! rm -rf "$WWW_DIR/.git" \
+		"$WWW_DIR/.github" \
+		"$WWW_DIR/.gitattributes"; then
 		return 1
 	fi
 	return 0
@@ -117,7 +141,8 @@ stage_from_source() {
 ######################
 # Main configuration #
 ######################
-typeset WWW_DIR BRANCH SERVICE_NAME OWNER_USER OWNER_GROUP WWW_HOST ZIP_URL LOCKDIR
+typeset WWW_DIR BRANCH SERVICE_NAME OWNER_USER
+typeset OWNER_GROUP WWW_HOST ZIP_URL LOCKDIR
 WWW_DIR="/var/www/htdocs/cypherpunk-handbook"
 WWW_HOST="handbook.uhden.dev"
 BRANCH="main"
@@ -125,7 +150,8 @@ SERVICE_NAME="httpd"
 OWNER_USER="root"
 OWNER_GROUP="daemon"
 
-ZIP_URL="https://${GH_HOST}/${REPO_SLUG}/archive/refs/heads/${BRANCH}.zip"
+ZIP_URL="https://${GH_HOST}/${REPO_SLUG}""\
+/archive/refs/heads/${BRANCH}.zip"
 
 ###################
 # GitHub CLI sync #
@@ -136,14 +162,22 @@ sync_with_gh_cli() {
 	if ! command -v gh >/dev/null 2>&1; then return 1; fi
 	if ! command -v git >/dev/null 2>&1; then return 1; fi
 	[ -f "${GH_CONFIG_DIR}/hosts.yml" ] || return 1
-	run_as_gh_user env GH_CONFIG_DIR="$GH_CONFIG_DIR" GH_HOST="$GH_HOST" gh auth status --hostname "$GH_HOST" >/dev/null 2>&1 || return 1
+	run_as_gh_user env GH_CONFIG_DIR="$GH_CONFIG_DIR" \
+		GH_HOST="$GH_HOST" \
+		gh auth status --hostname "$GH_HOST" \
+		>/dev/null 2>&1 || return 1
 
-	tmpdir="$(run_as_gh_user mktemp -d "/tmp/site-sync.XXXXXX")" || return 1
+	tmpdir="$(run_as_gh_user mktemp -d \
+		"/tmp/site-sync.XXXXXX")" || return 1
 	stagedir="$tmpdir/src"
 
 	while [ "$attempt" -le 5 ]; do
-		if run_as_gh_user env GH_CONFIG_DIR="$GH_CONFIG_DIR" GH_HOST="$GH_HOST" \
-			gh repo clone "$repo_slug" "$stagedir" -- --branch "$BRANCH" --single-branch >/dev/null 2>&1; then
+		if run_as_gh_user env \
+			GH_CONFIG_DIR="$GH_CONFIG_DIR" \
+			GH_HOST="$GH_HOST" \
+			gh repo clone "$repo_slug" "$stagedir" \
+			-- --branch "$BRANCH" --single-branch \
+			>/dev/null 2>&1; then
 			break
 		fi
 		log "gh repo clone attempt $attempt failed; retrying..."
@@ -179,16 +213,20 @@ sync_with_git() {
 	typeset origin_url tmpdir stagedir
 	if ! command -v git >/dev/null 2>&1; then return 1; fi
 
-	if git -C "$WWW_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-		origin_url=$(git -C "$WWW_DIR" remote get-url origin 2>/dev/null || printf '')
+	if git -C "$WWW_DIR" rev-parse --is-inside-work-tree \
+		>/dev/null 2>&1; then
+		origin_url=$(git -C "$WWW_DIR" remote get-url origin \
+			2>/dev/null || printf '')
 	fi
-	[ -z "$origin_url" ] && [ -n "$REPO_SLUG" ] && origin_url="https://${GH_HOST}/${REPO_SLUG}.git"
+	[ -z "$origin_url" ] && [ -n "$REPO_SLUG" ] &&
+		origin_url="https://${GH_HOST}/${REPO_SLUG}.git"
 	[ -z "$origin_url" ] && return 1
 
 	tmpdir=$(mktemp -d "/tmp/site-sync.XXXXXX") || return 1
 	stagedir="$tmpdir/src"
 
-	if ! git clone --branch "$BRANCH" --single-branch "$origin_url" "$stagedir" >/dev/null 2>&1; then
+	if ! git clone --branch "$BRANCH" --single-branch \
+		"$origin_url" "$stagedir" >/dev/null 2>&1; then
 		rm -rf "$tmpdir"
 		return 1
 	fi
@@ -242,7 +280,8 @@ sync_with_github_zip() {
 		rm -rf "$tmpdir"
 		return 1
 	fi
-	srcdir=$(find "$unpack_dir" -mindepth 1 -maxdepth 1 -type d | head -n 1)
+	srcdir=$(find "$unpack_dir" -mindepth 1 -maxdepth 1 -type d |
+		head -n 1)
 
 	[ -d "$srcdir" ] || {
 		rm -rf "$tmpdir"
@@ -265,7 +304,8 @@ post_update_steps() {
 	cd "$WWW_DIR" || return 1
 
 	log "Setting ownership to ${OWNER_USER}:${OWNER_GROUP}..."
-	chown -R "$OWNER_USER":"$OWNER_GROUP" "$WWW_DIR" || warn "ownership failed"
+	chown -R "$OWNER_USER":"$OWNER_GROUP" "$WWW_DIR" ||
+		warn "ownership failed"
 
 	log "Setting file permissions..."
 	find . -type d -exec chmod 755 {} +
@@ -281,8 +321,11 @@ post_update_steps() {
 	if command -v acme-client >/dev/null 2>&1; then
 		log "Running acme-client for ${WWW_HOST}..."
 		if acme-client "${WWW_HOST}"; then
-			log "acme-client completed, restarting ${SERVICE_NAME}..."
-			rcctl -q restart "$SERVICE_NAME" || warn "service restart failed after acme-client"
+			log "acme-client completed," \
+				"restarting ${SERVICE_NAME}..."
+			rcctl -q restart "$SERVICE_NAME" ||
+				warn "service restart failed" \
+					"after acme-client"
 		else
 			warn "acme-client failed for ${WWW_HOST}"
 		fi
@@ -309,9 +352,12 @@ main() {
 		exit 0
 	fi
 
-	trap 'if [ -n "${LOCKDIR:-}" ]; then rmdir "${LOCKDIR}" 2>/dev/null || true; fi' EXIT INT TERM
+	trap 'if [ -n "${LOCKDIR:-}" ]; then \
+		rmdir "${LOCKDIR}" 2>/dev/null || true; fi' \
+		EXIT INT TERM
 
-	if ! sync_with_gh_cli && ! sync_with_git && ! sync_with_github_zip; then
+	if ! sync_with_gh_cli && ! sync_with_git &&
+		! sync_with_github_zip; then
 		error "all sync methods failed."
 		exit 1
 	fi

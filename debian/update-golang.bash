@@ -14,7 +14,8 @@ set -euo pipefail
 # and license details.
 
 # Basic PATH
-PATH=/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+PATH=/usr/local/go/bin:/usr/local/sbin:/usr/local/bin
+PATH="${PATH}:/usr/sbin:/usr/bin:/sbin:/bin"
 export PATH
 
 GO_BASE_URL="https://go.dev/dl"
@@ -22,23 +23,10 @@ VERSION_URL="https://go.dev/VERSION?m=text"
 INSTALL_DIR="/usr/local"
 GO_ROOT="${INSTALL_DIR}/go"
 
-# Simple colors for messages
-if [ -t 1 ] && [ "${NO_COLOR:-0}" != "1" ]; then
-	GREEN="\033[32m"
-	YELLOW="\033[33m"
-	RED="\033[31m"
-	RESET="\033[0m"
-else
-	GREEN=""
-	YELLOW=""
-	RED=""
-	RESET=""
-fi
-
-log() { printf '%s %b[INFO]%b ✅ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$GREEN" "$RESET" "$*"; }
-warn() { printf '%s %b[WARN]%b ⚠️ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$YELLOW" "$RESET" "$*"; }
+log() { printf '%s [INFO] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
+warn() { printf '%s [WARN] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
 error() {
-	printf '%s %b[ERROR]%b ❌ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$RED" "$RESET" "$*" >&2
+	printf '%s [ERROR] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2
 	exit 1
 }
 
@@ -88,7 +76,9 @@ detect_go_arch() {
 	ppc64le | ppc64el) printf '%s\n' "ppc64le" ;;
 	riscv64) printf '%s\n' "riscv64" ;;
 	s390x) printf '%s\n' "s390x" ;;
-	*) error "Unsupported architecture: ${arch}. No matching official Go Linux tarball known for this arch." ;;
+	*) error "Unsupported architecture: ${arch}." \
+		"No matching official Go Linux tarball" \
+		"known for this arch." ;;
 	esac
 }
 
@@ -98,21 +88,29 @@ ensure_go_path_in_etc_profile() {
 	local backup_suffix
 	local go_path_snippet
 
-	go_path_snippet=$'# Go binary path\nexport PATH="$PATH:/usr/local/go/bin"\n'
+	go_path_snippet='# Go binary path'
+	go_path_snippet="${go_path_snippet}"$'\n'
+	go_path_snippet="${go_path_snippet}"'export PATH='
+	go_path_snippet="${go_path_snippet}\"\$PATH:/usr/local/go/bin\""
+	go_path_snippet="${go_path_snippet}"$'\n'
 
 	if [[ ! -f $profile_file ]]; then
-		warn "${profile_file} not found; cannot automatically update system PATH."
+		warn "${profile_file} not found;" \
+			"cannot automatically update system PATH."
 		return 0
 	fi
 
 	if grep -q '/usr/local/go/bin' "$profile_file"; then
-		log "${profile_file} already contains /usr/local/go/bin in PATH. No changes made."
+		log "${profile_file} already contains" \
+			"/usr/local/go/bin in PATH." \
+			"No changes made."
 		return 0
 	fi
 
 	backup_suffix="$(date +%Y%m%d%H%M%S)"
 	cp "$profile_file" "${profile_file}.bak.${backup_suffix}"
-	log "Backup of ${profile_file} created at ${profile_file}.bak.${backup_suffix}"
+	log "Backup of ${profile_file} created at" \
+		"${profile_file}.bak.${backup_suffix}"
 
 	printf '\n%s' "$go_path_snippet" >>"$profile_file"
 	log "${profile_file} updated to include /usr/local/go/bin in PATH."
@@ -171,7 +169,9 @@ run_golang_update() {
 
 	ensure_go_path_in_etc_profile
 	log "Done."
-	log "Log out and log back in (or source /etc/profile) to ensure the new PATH is applied."
+	log "Log out and log back in" \
+		"(or source /etc/profile)" \
+		"to ensure the new PATH is applied."
 }
 
 run_update() {

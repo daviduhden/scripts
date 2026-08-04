@@ -32,9 +32,18 @@ fi
 
 # ---------- Logging functions ----------
 
-log() { printf '%s %b[INFO]%b ✅ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$GREEN" "$RESET" "$*"; }
-warn() { printf '%s %b[WARN]%b ⚠️ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$YELLOW" "$RESET" "$*"; }
-error() { printf '%s %b[ERROR]%b ❌ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$RED" "$RESET" "$*" >&2; }
+log() {
+	printf '%s %b[INFO]%b  %s\n' \
+		"$(date '+%Y-%m-%d %H:%M:%S')" "$GREEN" "$RESET" "$*"
+}
+warn() {
+	printf '%s %b[WARN]%b  %s\n' \
+		"$(date '+%Y-%m-%d %H:%M:%S')" "$YELLOW" "$RESET" "$*"
+}
+error() {
+	printf '%s %b[ERROR]%b %s\n' \
+		"$(date '+%Y-%m-%d %H:%M:%S')" "$RED" "$RESET" "$*" >&2
+}
 
 # ---------- Utility functions ----------
 
@@ -54,7 +63,8 @@ cleanup() {
 trap cleanup EXIT
 
 sanitize_filename() {
-	# Convert to lowercase, replace spaces with underscores, remove special chars
+	# Convert to lowercase, replace spaces with
+	# underscores, remove special chars
 	local name="$1"
 	name=$(echo "$name" | tr '[:upper:]' '[:lower:]')
 	name=$(echo "$name" | sed 's/ /_/g' | sed 's/[^a-z0-9._-]//g')
@@ -140,14 +150,17 @@ resolve_downloaded_file() {
 }
 
 run_download_and_convert() {
-	local input audio_file sanitized_title output runtime_user home_dir cookies_profile
+	local input audio_file sanitized_title output
+	local runtime_user home_dir cookies_profile
 
 	runtime_user="$(detect_runtime_user)"
 	home_dir="$(resolve_home_dir "$runtime_user")"
 	cookies_profile="${home_dir}/.config/trivalent/Default/"
 
 	log "Downloading audio from YouTube..."
-	yt-dlp -x --audio-format best --cookies-from-browser "chromium:${cookies_profile}" -o "$TMP_DIR/%(title)s.%(ext)s" "$URL"
+	yt-dlp -x --audio-format best \
+		--cookies-from-browser "chromium:${cookies_profile}" \
+		-o "$TMP_DIR/%(title)s.%(ext)s" "$URL"
 
 	input="$(resolve_downloaded_file)"
 	audio_file="$(basename "$input")"

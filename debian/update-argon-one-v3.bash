@@ -30,7 +30,8 @@ Usage: $0 [OPTIONS]
 
 Options:
   -r, --auto-reboot   Automatically reboot at the end without asking.
-  -N, --no-reboot     Do not reboot at the end (default in non-interactive).
+  -N, --no-reboot     Do not reboot at the end
+                       (default in non-interactive).
   -h, --help          Show this help and exit.
 
 Examples:
@@ -61,7 +62,9 @@ parse_args() {
 			;;
 		-h | --help)
 			flag_used=1
-			warn "CLI flag detected; using non-default options instead of standard behavior."
+			warn "CLI flag detected;" \
+				"using non-default options" \
+				"instead of standard behavior."
 			usage
 			exit 0
 			;;
@@ -73,26 +76,18 @@ parse_args() {
 		esac
 	done
 	if [[ $flag_used -eq 1 ]]; then
-		warn "CLI flag detected; using non-default options instead of standard behavior."
+		warn "CLI flag detected;" \
+			"using non-default options" \
+			"instead of standard behavior."
 	fi
 }
 
-# Simple colors for messages
-if [ -t 1 ] && [ "${NO_COLOR:-0}" != "1" ]; then
-	GREEN="\033[32m"
-	YELLOW="\033[33m"
-	RED="\033[31m"
-	RESET="\033[0m"
-else
-	GREEN=""
-	YELLOW=""
-	RED=""
-	RESET=""
-fi
-
-log() { printf '%s %b[INFO]%b ✅ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$GREEN" "$RESET" "$*"; }
-warn() { printf '%s %b[WARN]%b ⚠️ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$YELLOW" "$RESET" "$*"; }
-error() { printf '%s %b[ERROR]%b ❌ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$RED" "$RESET" "$*" >&2; }
+log() { printf '%s [INFO] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
+warn() { printf '%s [WARN] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
+error() {
+	printf '%s [ERROR] %s\n' \
+		"$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2
+}
 
 trap 'error "Execution interrupted."; exit 1' INT
 
@@ -105,7 +100,7 @@ cleanup_tmp_files() {
 
 trap cleanup_tmp_files EXIT
 
-# ---- Helpers ---------------------------------------------------------------
+# ---- Helpers -------------------------------------------------------
 
 require_root() {
 	if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
@@ -128,7 +123,8 @@ net_curl() {
 check_network() {
 	log "Checking network connectivity to download.argon40.com..."
 	if ! net_curl --head "$EEPROM_URL" >/dev/null 2>&1; then
-		error "Cannot reach download.argon40.com. Check your Internet connection."
+		error "Cannot reach download.argon40.com." \
+			"Check your Internet connection."
 		exit 1
 	fi
 	log "Network looks OK."
@@ -177,7 +173,8 @@ ask_reboot() {
 
 	# Non-interactive (cron): never question
 	if [[ ! -t 0 ]]; then
-		log "Non-interactive session detected; skipping reboot. Please reboot manually."
+		log "Non-interactive session detected;" \
+			"skipping reboot. Please reboot manually."
 		return 0
 	fi
 
@@ -189,7 +186,8 @@ ask_reboot() {
 		reboot
 		;;
 	*)
-		log "Reboot skipped. Remember to reboot later to apply EEPROM and control changes."
+		log "Reboot skipped. Remember to reboot" \
+			"later to apply EEPROM and control changes."
 		;;
 	esac
 }
@@ -210,7 +208,7 @@ run_update() {
 	ask_reboot
 }
 
-# ---- Main ------------------------------------------------------------------
+# ---- Main ----------------------------------------------------------
 
 main() {
 	parse_args "$@"

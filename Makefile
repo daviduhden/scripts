@@ -115,7 +115,7 @@ install-shell-openbsd:
 install-perl:
 	@echo "${INFO} Installing perl helpers"
 	@install -d ${BINDIR}
-	@for f in ${PERL_SCRIPTS}; do base=$${f##*/}; name=$${base%.pl}; printf 'Installing %s -> %s\n' "$$f" "${BINDIR}/$$name"; install -m 0755 "$$f" "${BINDIR}/$$name"; done
+	@for f in ${PERL_SCRIPTS}; do base=$${f##*/}; name=$${base%.pl}; printf '%s Installing %s -> %s\n' "${INFO}" "$$f" "${BINDIR}/$$name"; install -m 0755 "$$f" "${BINDIR}/$$name"; done
 	@echo "${INFO} Perl helpers installed"
 
 install-tests-format:

@@ -2,7 +2,8 @@
 set -euo pipefail
 
 # SecureBlue lyrebird update/install script
-# Automated script to install or update the lyrebird Go-based Tor transport
+# Automated script to install or update the lyrebird
+# Go-based Tor transport
 # - Ensures Go is installed (via Homebrew if available)
 # - Clones the lyrebird repository from Tor Project GitLab
 # - Builds the binary with make
@@ -29,15 +30,23 @@ else
 	RESET=""
 fi
 
-log() { printf '%s %b[INFO]%b ✅ %s\n' "$(date '+%F %T')" "$GREEN" "$RESET" "$*"; }
-warn() { printf '%s %b[WARN]%b ⚠️ %s\n' "$(date '+%F %T')" "$YELLOW" "$RESET" "$*"; }
+log() {
+	printf '%s %b[INFO]%b  %s\n' \
+		"$(date '+%F %T')" "$GREEN" "$RESET" "$*"
+}
+warn() {
+	printf '%s %b[WARN]%b  %s\n' \
+		"$(date '+%F %T')" "$YELLOW" "$RESET" "$*"
+}
 error() {
-	printf '%s %b[ERROR]%b ❌ %s\n' "$(date '+%F %T')" "$RED" "$RESET" "$*" >&2
+	printf '%s %b[ERROR]%b %s\n' \
+		"$(date '+%F %T')" "$RED" "$RESET" "$*" >&2
 	exit 1
 }
 
 require_cmd() {
-	command -v "$1" >/dev/null 2>&1 || error "Required command '$1' not found."
+	command -v "$1" >/dev/null 2>&1 ||
+		error "Required command '$1' not found."
 }
 
 detect_root_cmd() {
@@ -83,10 +92,15 @@ ensure_brew_access() {
 
 	if [[ -n $brew_prefix && -d $brew_prefix/Cellar ]]; then
 		local restricted
-		restricted="$(find "$brew_prefix/Cellar" -maxdepth 3 -type d ! -perm -o+rx 2>/dev/null | head -1 || true)"
+		restricted="$(find "$brew_prefix/Cellar" \
+			-maxdepth 3 -type d ! -perm -o+rx \
+			2>/dev/null | head -1 || true)"
 		if [[ -n $restricted ]]; then
 			warn "Some Homebrew cellar directories have restricted permissions."
-			warn "Run this to fix: run0 find $brew_prefix/Cellar -maxdepth 4 -type d ! -perm -o+rx -exec chmod o+rx {} \\;"
+			warn "Run this to fix: run0 find" \
+				"$brew_prefix/Cellar -maxdepth 4" \
+				"-type d ! -perm -o+rx" \
+				'-exec chmod o+rx {} \;'
 		fi
 	fi
 }
@@ -106,7 +120,9 @@ ensure_go() {
 			brew install go
 		fi
 	else
-		error "Go is not installed and Homebrew is not available. Please install Go manually."
+		error "Go is not installed and Homebrew" \
+			"is not available. Please install Go" \
+			"manually."
 	fi
 
 	require_cmd go
@@ -123,17 +139,22 @@ clone_or_update_repo() {
 
 	cd "$BUILD_DIR/$BIN_NAME"
 
-	# Traer tags y refs remotas
+	# Fetch tags and remote refs
 	git fetch --tags --prune origin || git fetch --tags --prune
 
-	# Determinar el último tag (por fecha de creación de tag)
-	latest_tag=$(git describe --tags "$(git rev-list --tags --max-count=1)" 2>/dev/null || true)
+	# Determine the latest tag (by tag creation date)
+	latest_tag=$(git describe --tags \
+		"$(git rev-list --tags --max-count=1)" \
+		2>/dev/null || true)
 
 	if [ -n "$latest_tag" ]; then
-		# Verificar si el HEAD local está exactamente en un tag
-		local_tag=$(git describe --tags --exact-match HEAD 2>/dev/null || true)
+		# Check if local HEAD is exactly at a tag
+		local_tag=$(git describe --tags --exact-match \
+			HEAD 2>/dev/null || true)
 		if [ "$local_tag" = "$latest_tag" ]; then
-			log "Local repository is already at latest tag '$latest_tag'. Skipping build."
+			log "Local repository is already at" \
+				"latest tag '$latest_tag'." \
+				"Skipping build."
 			SKIP_BUILD=1
 			return
 		fi
@@ -149,7 +170,8 @@ build_lyrebird() {
 	log "Building lyrebird..."
 	env -u LD_PRELOAD make build
 
-	[ -x "./$BIN_NAME" ] || error "Build failed: binary $BIN_NAME not found."
+	[ -x "./$BIN_NAME" ] || error \
+		"Build failed: binary $BIN_NAME not found."
 }
 
 install_lyrebird() {

@@ -28,7 +28,9 @@ main() {
 
 	OS_NAME=$(uname -s 2>/dev/null || printf '%s' unknown)
 	[ "$OS_NAME" = "Linux" ] || {
-		printf '%s\n' "[ERROR] This installer only supports Linux (detected: $OS_NAME)" >&2
+		printf '%s\n' \
+			"[ERROR] This installer only supports Linux" \
+			" (detected: $OS_NAME)" >&2
 		exit 1
 	}
 
@@ -39,9 +41,13 @@ main() {
 
 	if command -v knfmt >/dev/null 2>&1; then
 		printf '%s\n' "[INFO] Existing knfmt found at: $(command -v knfmt)"
-		printf '%s\n' "[INFO] Proceeding with update from latest upstream source..."
+		printf '%s\n' \
+			"[INFO] Proceeding with update from latest upstream" \
+			" source..."
 	else
-		printf '%s\n' "[INFO] knfmt not found; proceeding with fresh install..."
+		printf '%s\n' \
+			"[INFO] knfmt not found; proceeding with" \
+			" fresh install..."
 	fi
 
 	TMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/knfmt-build-XXXXXX")
@@ -70,7 +76,9 @@ main() {
 		exit 0
 	fi
 
-	printf '%s\n' "[ERROR] Installation failed. Re-run with elevated privileges if needed." >&2
+	printf '%s\n' \
+		"[ERROR] Installation failed." \
+		" Re-run with elevated privileges if needed." >&2
 	exit 1
 }
 

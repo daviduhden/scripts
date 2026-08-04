@@ -2,7 +2,8 @@
 set -euo pipefail
 
 # Hardened malloc global install/update script for Debian 13
-# Downloads, builds and globally installs hardened_malloc from GrapheneOS,
+# Downloads, builds and globally installs
+# hardened_malloc from GrapheneOS,
 # both the default (maximum security) and light (balanced) variants.
 # Configures /etc/ld.so.preload for global preloading.
 #
@@ -25,23 +26,10 @@ VERSION_FILE="${INSTALL_DIR}/.hardened_malloc_version"
 # Which variant to preload globally by default
 DEFAULT_PRELOAD_VARIANT="default"
 
-# Colors
-if [ -t 1 ] && [ "${NO_COLOR:-0}" != "1" ]; then
-	GREEN="\033[32m"
-	YELLOW="\033[33m"
-	RED="\033[31m"
-	RESET="\033[0m"
-else
-	GREEN=""
-	YELLOW=""
-	RED=""
-	RESET=""
-fi
-
-log() { printf '%s %b[INFO]%b  %s\n' "$(date '+%F %T')" "$GREEN" "$RESET" "$*"; }
-warn() { printf '%s %b[WARN]%b  %s\n' "$(date '+%F %T')" "$YELLOW" "$RESET" "$*" >&2; }
+log() { printf '%s [INFO] %s\n' "$(date '+%F %T')" "$*"; }
+warn() { printf '%s [WARN] %s\n' "$(date '+%F %T')" "$*" >&2; }
 error() {
-	printf '%s %b[ERROR]%b %s\n' "$(date '+%F %T')" "$RED" "$RESET" "$*" >&2
+	printf '%s [ERROR] %s\n' "$(date '+%F %T')" "$*" >&2
 	exit 1
 }
 
@@ -50,7 +38,8 @@ require_root() {
 }
 
 require_cmd() {
-	command -v "$1" >/dev/null 2>&1 || error "Required command '$1' not found."
+	command -v "$1" >/dev/null 2>&1 ||
+		error "Required command '$1' not found."
 }
 
 have_cmd() {
@@ -65,7 +54,8 @@ ensure_debian13() {
 		debian:13) return 0 ;;
 		esac
 	fi
-	error "This script targets Debian 13 (ID=${ID:-} VERSION_ID=${VERSION_ID:-})"
+	error "This script targets Debian 13" \
+		"(ID=${ID:-} VERSION_ID=${VERSION_ID:-})"
 }
 
 detect_arch() {
@@ -74,7 +64,9 @@ detect_arch() {
 	case "$arch" in
 	x86_64) echo "x86_64" ;;
 	aarch64) echo "aarch64" ;;
-	*) error "Unsupported architecture: $arch (only amd64/x86_64 and arm64/aarch64 are supported)" ;;
+	*) error "Unsupported architecture: $arch" \
+		"(only amd64/x86_64 and arm64/aarch64" \
+		"are supported)" ;;
 	esac
 }
 
@@ -92,11 +84,14 @@ install_build_deps() {
 
 	log "Installing build dependencies: ${missing[*]}"
 	apt-get update -qq
-	env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${missing[@]}"
+	apt-get install -y -qq "${missing[@]}"
 }
 
 get_latest_tag() {
-	git ls-remote --tags --sort='version:refname' "$REPO_URL" 'refs/tags/[0-9]*' 2>/dev/null |
+	git ls-remote --tags \
+		--sort='version:refname' \
+		"$REPO_URL" 'refs/tags/[0-9]*' \
+		2>/dev/null |
 		awk '{print $2}' |
 		sed 's#refs/tags/##; s#\^{}##' |
 		uniq |
@@ -128,22 +123,23 @@ clone_or_update_repo() {
 
 build_variant() {
 	local variant="$1"
-	local variant_flag so_name out_dir
+	local so_name out_dir
 
 	if [ "$variant" = "default" ]; then
-		variant_flag=""
 		out_dir="out"
 		so_name="libhardened_malloc.so"
 		log "Building default variant (maximum security)..."
 	else
-		variant_flag="VARIANT=$variant"
 		out_dir="out-$variant"
 		so_name="libhardened_malloc-$variant.so"
 		log "Building light variant (balanced)..."
 	fi
 
-	# shellcheck disable=SC2086
-	gmake $variant_flag -j"$(nproc)"
+	if [ "$variant" = "default" ]; then
+		gmake -j"$(nproc)"
+	else
+		gmake "VARIANT=$variant" -j"$(nproc)"
+	fi
 
 	if [ ! -f "$out_dir/$so_name" ]; then
 		error "Build failed: $out_dir/$so_name not found"
@@ -278,7 +274,9 @@ main() {
 
 	log "Checking latest hardened_malloc release..."
 	latest_tag="$(get_latest_tag)"
-	[ -n "$latest_tag" ] || error "Could not determine latest hardened_malloc tag"
+	[ -n "$latest_tag" ] ||
+		error "Could not determine" \
+			"latest hardened_malloc tag"
 	log "Latest release tag: $latest_tag"
 
 	installed_version="$(get_installed_version || true)"

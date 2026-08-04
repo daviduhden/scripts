@@ -1,15 +1,15 @@
 #!/usr/bin/env perl
 
 # Interactive SSH launcher using entries from ~/.ssh/known_hosts:
-#  - Exports SSH_ASKPASS/SSH_ASKPASS_REQUIRE for ksshaskpass GUI questions
+#  - Exports SSH_ASKPASS/SSH_ASKPASS_REQUIRE for ksshaskpass GUI
 #  - Parses known_hosts and de-duplicates hosts (including custom ports)
 #  - Presents a numbered menu to choose a server
-#  - questions for the SSH username (default from SSH_MENU_USER or $USER)
+#  - questions for SSH username (default SSH_MENU_USER or $USER)
 #  - Remembers the last SSH username used and reuses it as default
-#  - Persists usage frequencies to sort frequently used hosts to the top
+#  - Persists usage frequencies to sort frequently used hosts to top
 #  - Supports custom aliases via a separate alias file
 #  - Supports known_hosts entry deletion and alias management via menus
-#  - Executes ssh to the selected host (with -p when a custom port exists)
+#  - Executes ssh to the selected host (with -p for custom port)
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
@@ -36,9 +36,9 @@ if ($use_color) {
     $RESET  = "\e[0m";
 }
 
-sub logi { print "${GREEN}✅ [INFO]${RESET} $_[0]\n"; }
-sub logw { print STDERR "${YELLOW}⚠️ [WARN]${RESET} $_[0]\n"; }
-sub loge { print STDERR "${RED}❌ [ERROR]${RESET} $_[0]\n"; }
+sub logi { print "${GREEN}[INFO]${RESET} $_[0]\n"; }
+sub logw { print STDERR "${YELLOW}[WARN]${RESET} $_[0]\n"; }
+sub loge { print STDERR "${RED}[ERROR]${RESET} $_[0]\n"; }
 
 sub die_tool {
     my ($msg) = @_;
@@ -57,8 +57,7 @@ sub home_dir {
     return $ENV{USERPROFILE}
       if defined $ENV{USERPROFILE} && length $ENV{USERPROFILE};
     die_tool(
-        "Cannot determine home directory: neither HOME nor USERPROFILE is set."
-    );
+        "Cannot determine home: " . "neither HOME nor USERPROFILE is set." );
 }
 
 my $home        = home_dir();
@@ -129,7 +128,7 @@ sub setup_ssh_askpass {
         $ENV{SSH_ASKPASS_REQUIRE} = 'prefer';
     }
     else {
-        logw('ksshaskpass not found in PATH; continuing without SSH_ASKPASS');
+        logw('ksshaskpass not found in PATH; no SSH_ASKPASS');
     }
 }
 
@@ -151,7 +150,8 @@ sub setup_openbsd_sandbox {
     push @rw_dirs, $last_user_dir   if defined $last_user_dir;
 
     my %uniq;
-    @rw_dirs = grep { defined $_ && length $_ && !$uniq{$_}++ } @rw_dirs;
+    @rw_dirs =
+      grep { defined $_ && length $_ && !$uniq{$_}++ } @rw_dirs;
 
     eval {
         require OpenBSD::Pledge;
@@ -385,7 +385,7 @@ sub parse_known_hosts {
 
 sub prune_stale_data {
 
-    # Keep frequency and alias data consistent with the current host list.
+    # Keep freq/alias data consistent with current host list.
     my %valid_keys =
       map { entry_key( $_->{host}, $_->{port} ) => 1 } @entries;
 
@@ -421,10 +421,10 @@ sub prune_stale_data {
 sub ensure_entries_present {
     if ( !@entries ) {
         if ( $hashed_count > 0 ) {
-            die_tool( "No valid plain hosts found in $known_hosts.\n"
-                  . "It looks like your known_hosts file contains only hashed entries.\n"
-                  . "This script cannot recover hostnames from hashed lines.\n"
-                  . "Consider keeping a separate non-hashed file (e.g. ~/.ssh/known_hosts.menu)\n"
+            die_tool( "No valid plain hosts in $known_hosts.\n"
+                  . "Your known_hosts contains only hashed entries.\n"
+                  . "Cannot recover hostnames from hashed lines.\n"
+                  . "Keep a non-hashed file (~/.ssh/known_hosts.menu)\n"
                   . "for use with this menu script." );
         }
         else {
@@ -441,7 +441,8 @@ sub sort_entries {
         } @entries;
     }
     else {
-        @entries = sort { lc $a->{display} cmp lc $b->{display} } @entries;
+        @entries =
+          sort { lc $a->{display} cmp lc $b->{display} } @entries;
     }
 }
 
@@ -492,7 +493,7 @@ sub add_alias_menu {
 
         $alias{$key} = $alias_val;
         write_alias_file( \%alias );
-        logi('Alias saved. Please re-run ssh-menu to refresh the list.');
+        logi('Alias saved. Re-run ssh-menu to refresh the list.');
         return;
     }
 }
@@ -506,9 +507,11 @@ sub select_entry_menu {
         printf "  ${CYAN}%2d)${RESET} ${BOLD}%s${RESET}\n", $i + 1,
           $entries[$i]{display};
     }
-    printf "  ${CYAN}%2d)${RESET} ${BOLD}Manage known_hosts (delete)${RESET}\n",
+    printf "  ${CYAN}%2d)${RESET}"
+      . " ${BOLD}Manage known_hosts (delete)${RESET}\n",
       scalar(@entries) + 1;
-    printf "  ${CYAN}%2d)${RESET} ${BOLD}Add custom name (alias)${RESET}\n",
+    printf "  ${CYAN}%2d)${RESET}"
+      . " ${BOLD}Add custom name (alias)${RESET}\n",
       scalar(@entries) + 2;
     printf "  ${CYAN}%2d)${RESET} ${BOLD}Quit${RESET}\n\n",
       scalar(@entries) + 3;
@@ -569,8 +572,11 @@ sub question_ssh_user {
       || '';
 
     print "${BOLD}SSH user${RESET}"
-      . ( length $default_user ? " [${CYAN}$default_user${RESET}]" : '' )
-      . ": ";
+      . (
+        length $default_user
+        ? " [${CYAN}$default_user${RESET}]"
+        : ''
+      ) . ": ";
     my $ssh_user = <STDIN>;
     defined $ssh_user or die_tool("Input closed.");
     chomp $ssh_user;
@@ -599,8 +605,8 @@ sub build_ssh_command {
     my @cmd;
 
     if ($selected_port) {
-        logi(
-            "Connecting to $ssh_user\@$selected_host (port $selected_port)...");
+        logi(   "Connecting to $ssh_user\@$selected_host"
+              . " (port $selected_port)..." );
         @cmd = ( $ssh_path, '-p', $selected_port, "$ssh_user\@$selected_host" );
     }
     else {

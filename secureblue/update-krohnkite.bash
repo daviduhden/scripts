@@ -5,7 +5,8 @@ set -euo pipefail
 # Automated script to build and install the latest Krohnkite KWin script
 #
 # - Clones or updates the Krohnkite repository into ~/.local/src
-# - Builds the .kwinscript package using go-task if the repository has changed
+# - Builds the .kwinscript package using go-task if the
+#   repository has changed
 # - Installs or upgrades the script via kpackagetool6
 #
 # See the LICENSE file at the top of the project tree for copyright
@@ -27,9 +28,18 @@ else
 	RESET=""
 fi
 
-log() { printf '%s %b[INFO]%b ✅ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$GREEN" "$RESET" "$*"; }
-warn() { printf '%s %b[WARN]%b ⚠️ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$YELLOW" "$RESET" "$*"; }
-error() { printf '%s %b[ERROR]%b ❌ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$RED" "$RESET" "$*" >&2; }
+log() {
+	printf '%s %b[INFO]%b  %s\n' \
+		"$(date '+%Y-%m-%d %H:%M:%S')" "$GREEN" "$RESET" "$*"
+}
+warn() {
+	printf '%s %b[WARN]%b  %s\n' \
+		"$(date '+%Y-%m-%d %H:%M:%S')" "$YELLOW" "$RESET" "$*"
+}
+error() {
+	printf '%s %b[ERROR]%b %s\n' \
+		"$(date '+%Y-%m-%d %H:%M:%S')" "$RED" "$RESET" "$*" >&2
+}
 
 require_cmd() {
 	command -v "$1" >/dev/null 2>&1 || {
@@ -64,10 +74,15 @@ ensure_brew_path() {
 
 	if [[ -n $brew_prefix && -d $brew_prefix/Cellar ]]; then
 		local restricted
-		restricted="$(find "$brew_prefix/Cellar" -maxdepth 3 -type d ! -perm -o+rx 2>/dev/null | head -1 || true)"
+		restricted="$(find "$brew_prefix/Cellar" \
+			-maxdepth 3 -type d ! -perm -o+rx \
+			2>/dev/null | head -1 || true)"
 		if [[ -n $restricted ]]; then
 			warn "Some Homebrew cellar directories have restricted permissions."
-			warn "Run this to fix: run0 find $brew_prefix/Cellar -maxdepth 4 -type d ! -perm -o+rx -exec chmod o+rx {} \\;"
+			warn "Run this to fix: run0 find" \
+				"$brew_prefix/Cellar -maxdepth 4" \
+				"-type d ! -perm -o+rx" \
+				"-exec chmod o+rx {} \\;"
 		fi
 	fi
 }
@@ -76,7 +91,7 @@ prepare_repo() {
 	mkdir -p "$(dirname "$SRC_DIR")"
 
 	if [[ -d "$SRC_DIR/.git" ]]; then
-		log "Checking Krohnkite repository status…"
+		log "Checking Krohnkite repository status..."
 		git -C "$SRC_DIR" fetch --quiet
 		local local_rev remote_rev
 		local_rev="$(git -C "$SRC_DIR" rev-parse HEAD)"
@@ -87,10 +102,10 @@ prepare_repo() {
 			exit 0
 		fi
 
-		log "Repository updated upstream; syncing…"
+		log "Repository updated upstream; syncing..."
 		git -C "$SRC_DIR" reset --hard origin/HEAD
 	else
-		log "Cloning Krohnkite repository into $SRC_DIR…"
+		log "Cloning Krohnkite repository into $SRC_DIR..."
 		git clone "$REPO_URL" "$SRC_DIR"
 	fi
 }
@@ -125,10 +140,10 @@ install_krohnkite() {
 	fi
 
 	if kpackagetool6 -t KWin/Script -s krohnkite >/dev/null 2>&1; then
-		log "Upgrading Krohnkite…"
+		log "Upgrading Krohnkite..."
 		kpackagetool6 -t KWin/Script -u "$pkg"
 	else
-		log "Installing Krohnkite…"
+		log "Installing Krohnkite..."
 		kpackagetool6 -t KWin/Script -i "$pkg"
 	fi
 }

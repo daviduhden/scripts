@@ -59,10 +59,11 @@ sysupgrade-all() {
 	local sysupgrade_rc=0
 	local sysupgrade_user="${SYSUPGRADE_USER:-${USER:-$(id -un)}}"
 
-	echo "🔄 Starting full system upgrade..."
+	echo "Starting full system upgrade..."
 	sysupgrade --user "$sysupgrade_user" --skip-audit || {
 		sysupgrade_rc=$?
-		echo "⚠️ sysupgrade failed with exit code ${sysupgrade_rc}, continuing with remaining updates..."
+		echo "[WARN] sysupgrade failed with exit code ${sysupgrade_rc}," \
+			"continuing with remaining updates..."
 	}
 
 	update-krohnkite &&
@@ -70,7 +71,7 @@ sysupgrade-all() {
 		update-lyrebird &&
 		update-xd-torrent --skip-service-and-user-setup &&
 		pipx upgrade-all &&
-		echo "✅ System upgrade completed successfully."
+		echo "[OK] System upgrade completed successfully."
 }
 
 # --------------------------------------------------
@@ -92,12 +93,12 @@ extract() {
 		*.Z) uncompress "$1" ;;
 		*.7z) 7z x "$1" ;;
 		*)
-			echo "❌ Cannot extract '$1'"
+			echo "[ERROR] Cannot extract '$1'"
 			return 1
 			;;
 		esac
 	else
-		echo "❌ Invalid file"
+		echo "[ERROR] Invalid file"
 		return 1
 	fi
 }

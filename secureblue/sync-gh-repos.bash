@@ -2,19 +2,23 @@
 set -euo pipefail
 
 # GitHub repository sync script
-# Sync or clone all repositories for a GitHub user into a local base directory.
+# Sync or clone all repositories for a GitHub user
+# into a local base directory.
 # - Uses GitHub CLI for authenticated API access
-# - If a repo directory exists, renames it, fresh-clones via SSH, keeps only
-#   .git and .github from the clone, then copies the previous working tree over
+# - If a repo directory exists, renames it, fresh-clones
+#   via SSH, keeps only .git and .github from the clone,
+#   then copies the previous working tree over
 # - Otherwise, clones the repo via SSH
 # - Configurable via OWNER and BASE_DIR environment variables
-# - If BASE_DIR is not set, questions interactively (unless --non-interactive)
+# - If BASE_DIR is not set, questions interactively
+#   (unless --non-interactive)
 #
 # Environment variables:
 #   OWNER     GitHub username to sync (default: daviduhden)
 #   BASE_DIR  Local directory to clone into (default: ${HOME}/git)
 # Flags:
-#   -n, --non-interactive   Do not question (use default BASE_DIR if unset)
+#   -n, --non-interactive  Do not question
+#                          (use default BASE_DIR if unset)
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
@@ -36,9 +40,18 @@ else
 	RESET=""
 fi
 
-log() { printf '%s %b[INFO]%b ✅ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$GREEN" "$RESET" "$*"; }
-warn() { printf '%s %b[WARN]%b ⚠️ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$YELLOW" "$RESET" "$*"; }
-error() { printf '%s %b[ERROR]%b ❌ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$RED" "$RESET" "$*" >&2; }
+log() {
+	printf '%s %b[INFO]%b  %s\n' \
+		"$(date '+%Y-%m-%d %H:%M:%S')" "$GREEN" "$RESET" "$*"
+}
+warn() {
+	printf '%s %b[WARN]%b  %s\n' \
+		"$(date '+%Y-%m-%d %H:%M:%S')" "$YELLOW" "$RESET" "$*"
+}
+error() {
+	printf '%s %b[ERROR]%b %s\n' \
+		"$(date '+%Y-%m-%d %H:%M:%S')" "$RED" "$RESET" "$*" >&2
+}
 
 require_cmd() {
 	if ! command -v "$1" >/dev/null 2>&1; then
@@ -70,9 +83,12 @@ copy_from_backup_excluding_git() {
 	local backup_dir="$1"
 	local target_dir="$2"
 
-	# Copy everything (including dotfiles) except .git from backup into target.
-	# Using tar keeps permissions reasonably intact and avoids requiring rsync.
-	tar --exclude='./.git' -C "$backup_dir" -cf - . | tar -C "$target_dir" -xf -
+	# Copy everything (including dotfiles) except .git
+	# from backup into target. Using tar keeps
+	# permissions reasonably intact and avoids
+	# requiring rsync.
+	tar --exclude='./.git' -C "$backup_dir" -cf - . |
+		tar -C "$target_dir" -xf -
 }
 
 repo_has_content() {
@@ -81,7 +97,10 @@ repo_has_content() {
 	[ -d "$dir" ] || return 1
 
 	if find "$dir" \
-		\( -path "$dir/.git" -o -path "$dir/.git/*" -o -path "$dir/.github" -o -path "$dir/.github/*" \) -prune \
+		\( -path "$dir/.git" \
+		-o -path "$dir/.git/*" \
+		-o -path "$dir/.github" \
+		-o -path "$dir/.github/*" \) -prune \
 		-o -mindepth 1 -print -quit | grep -q .; then
 		return 0
 	fi
@@ -114,7 +133,8 @@ parse_args() {
 			;;
 		-h | --help)
 			flag_used=1
-			warn "CLI flag detected; using non-default options instead of standard behavior."
+			warn "CLI flag detected; using non-default" \
+				"options instead of standard behavior."
 			usage
 			exit 0
 			;;
@@ -125,7 +145,8 @@ parse_args() {
 		esac
 	done
 	if [ "$flag_used" -eq 1 ]; then
-		warn "CLI flag detected; using non-default options instead of standard behavior."
+		warn "CLI flag detected; using non-default" \
+			"options instead of standard behavior."
 	fi
 }
 
@@ -133,7 +154,9 @@ resolve_base_dir() {
 	if [ -z "${BASE_DIR+x}" ]; then
 		if [ $NON_INTERACTIVE -eq 0 ] && [ -t 0 ]; then
 			if ! read -r -p "BASE_DIR [${DEFAULT_BASE_DIR}]: " BASE_DIR; then
-				warn "Could not read BASE_DIR from input; using default: $DEFAULT_BASE_DIR"
+				warn "Could not read BASE_DIR from" \
+					"input; using default:" \
+					"$DEFAULT_BASE_DIR"
 				BASE_DIR="$DEFAULT_BASE_DIR"
 			fi
 			BASE_DIR="${BASE_DIR:-$DEFAULT_BASE_DIR}"
@@ -171,19 +194,26 @@ sync_single_repo() {
 	cleanup_on_error() {
 		local restore_failed=0
 
-		if [ -n "${backup_dir:-}" ] && [ -d "$backup_dir" ] && [ "$restored" -eq 0 ]; then
+		if [ -n "${backup_dir:-}" ] &&
+			[ -d "$backup_dir" ] &&
+			[ "$restored" -eq 0 ]; then
 			warn "Restoring previous directory for $name from $backup_dir"
 			if [ -e "$target" ] && ! rm -rf -- "$target"; then
-				error "Failed to remove partially synced directory: $target"
+				error "Failed to remove partially" \
+					"synced directory: $target"
 				restore_failed=1
 			fi
 			if ! mv -- "$backup_dir" "$target"; then
-				error "Failed to restore backup directory $backup_dir to $target"
+				error "Failed to restore backup" \
+					"directory $backup_dir" \
+					"to $target"
 				restore_failed=1
 			fi
 			restored=1
 			if [ "$restore_failed" -ne 0 ]; then
-				error "Automatic restore failed for $name; manual recovery may be required."
+				error "Automatic restore failed for" \
+					"$name; manual recovery may be" \
+					"required."
 			fi
 		fi
 	}
@@ -207,7 +237,9 @@ sync_single_repo() {
 		if [ -n "${backup_dir:-}" ] && [ -d "$backup_dir" ]; then
 			warn "Restoring previous directory for $name from $backup_dir"
 			if ! mv -- "$backup_dir" "$target"; then
-				error "Failed to restore backup directory $backup_dir to $target"
+				error "Failed to restore backup" \
+					"directory $backup_dir" \
+					"to $target"
 				return 1
 			fi
 		fi
@@ -234,7 +266,9 @@ sync_repositories() {
 	while IFS=$'\t' read -r name ssh_url default_branch; do
 		[ -n "$name" ] || continue
 		sync_single_repo "$name" "$ssh_url" "$default_branch"
-	done < <(gh api --paginate "users/${OWNER}/repos" --jq '.[] | [.name, .ssh_url, .default_branch] | @tsv')
+	done < <(gh api --paginate \
+		"users/${OWNER}/repos" \
+		--jq '.[] | [.name, .ssh_url, .default_branch] | @tsv')
 
 	log "Sync complete"
 }

@@ -25,7 +25,9 @@ usage() {
 Usage: update-xd-torrent.bash [--skip-service-and-user-setup]
 
 Options:
-  --skip-service-and-user-setup  Skip installing and enabling xd.service.
+  --skip-service-and-user-setup
+                         Skip installing and enabling
+                         xd.service.
   -h, --help                     Show this help message and exit.
 EOF
 }
@@ -40,7 +42,8 @@ parse_args() {
 			;;
 		-h | --help)
 			flag_used=1
-			warn "CLI flag detected; using non-default options instead of standard behavior."
+			warn "CLI flag detected; using non-default" \
+				"options instead of standard behavior."
 			usage
 			exit 0
 			;;
@@ -51,7 +54,8 @@ parse_args() {
 		shift
 	done
 	if [ "$flag_used" -eq 1 ]; then
-		warn "CLI flag detected; using non-default options instead of standard behavior."
+		warn "CLI flag detected; using non-default" \
+			"options instead of standard behavior."
 	fi
 }
 
@@ -68,15 +72,23 @@ else
 	RESET=""
 fi
 
-log() { printf '%s %b[INFO]%b ✅ %s\n' "$(date '+%F %T')" "$GREEN" "$RESET" "$*"; }
-warn() { printf '%s %b[WARN]%b ⚠️ %s\n' "$(date '+%F %T')" "$YELLOW" "$RESET" "$*"; }
+log() {
+	printf '%s %b[INFO]%b  %s\n' \
+		"$(date '+%F %T')" "$GREEN" "$RESET" "$*"
+}
+warn() {
+	printf '%s %b[WARN]%b  %s\n' \
+		"$(date '+%F %T')" "$YELLOW" "$RESET" "$*"
+}
 error() {
-	printf '%s %b[ERROR]%b ❌ %s\n' "$(date '+%F %T')" "$RED" "$RESET" "$*" >&2
+	printf '%s %b[ERROR]%b %s\n' \
+		"$(date '+%F %T')" "$RED" "$RESET" "$*" >&2
 	exit 1
 }
 
 require_cmd() {
-	command -v "$1" >/dev/null 2>&1 || error "Required command '$1' not found."
+	command -v "$1" >/dev/null 2>&1 ||
+		error "Required command '$1' not found."
 }
 
 detect_root_cmd() {
@@ -122,10 +134,17 @@ ensure_brew_access() {
 
 	if [[ -n $brew_prefix && -d $brew_prefix/Cellar ]]; then
 		local restricted
-		restricted="$(find "$brew_prefix/Cellar" -maxdepth 3 -type d ! -perm -o+rx 2>/dev/null | head -1 || true)"
+		restricted="$(find "$brew_prefix/Cellar" \
+			-maxdepth 3 -type d ! -perm -o+rx \
+			2>/dev/null | head -1 || true)"
 		if [[ -n $restricted ]]; then
-			warn "Some Homebrew cellar directories have restricted permissions."
-			warn "Run this to fix: run0 find $brew_prefix/Cellar -maxdepth 4 -type d ! -perm -o+rx -exec chmod o+rx {} \\;"
+			warn "Some Homebrew cellar" \
+				"directories have restricted" \
+				"permissions."
+			warn "Run this to fix: run0 find" \
+				"$brew_prefix/Cellar -maxdepth 4" \
+				"-type d ! -perm -o+rx" \
+				'-exec chmod o+rx {} \;'
 		fi
 	fi
 }
@@ -145,7 +164,9 @@ ensure_go() {
 			brew install go
 		fi
 	else
-		error "Go is not installed and Homebrew is not available. Please install Go manually."
+		error "Go is not installed and Homebrew" \
+			"is not available. Please install Go" \
+			"manually."
 	fi
 
 	command -v go >/dev/null 2>&1 || error "Go installation failed."
@@ -166,12 +187,17 @@ clone_or_update_repo() {
 	git fetch --tags --prune origin || git fetch --tags --prune
 
 	# Determine latest tag (by tag creation date)
-	latest_tag=$(git describe --tags "$(git rev-list --tags --max-count=1)" 2>/dev/null || true)
+	latest_tag=$(git describe --tags \
+		"$(git rev-list --tags --max-count=1)" \
+		2>/dev/null || true)
 
 	if [ -n "$latest_tag" ]; then
-		local_tag=$(git describe --tags --exact-match HEAD 2>/dev/null || true)
+		local_tag=$(git describe --tags --exact-match \
+			HEAD 2>/dev/null || true)
 		if [ "$local_tag" = "$latest_tag" ]; then
-			log "Local repository is already at latest tag '$latest_tag'. Skipping build."
+			log "Local repository is already at" \
+				"latest tag '$latest_tag'." \
+				"Skipping build."
 			SKIP_BUILD=1
 			return
 		fi
@@ -186,10 +212,13 @@ clone_or_update_repo() {
 build_and_install_XD() {
 	log "Building XD..."
 	env -u LD_PRELOAD make
-	# Adjust Makefile installation prefix: change $(PREFIX)/bin -> $(PREFIX)/local/bin
+	# Adjust Makefile installation prefix:
+	# change $(PREFIX)/bin -> $(PREFIX)/local/bin
 	if [ -f Makefile ]; then
 		log "Patching Makefile install path..."
-		sed -i "s|\$(PREFIX)/bin|\$(PREFIX)/local/bin|g" Makefile || true
+		sed -i \
+			"s|\$(PREFIX)/bin|\$(PREFIX)/local/bin|g" \
+			Makefile || true
 	fi
 	log "Installing XD using 'make install'..."
 	run_root make install PREFIX=/usr
@@ -220,12 +249,14 @@ install_user_service() {
 
 	log "Reloading systemd --user units..."
 	if ! systemctl --user daemon-reload; then
-		error "systemctl --user daemon-reload failed (ensure a user systemd session is running)"
+		error "systemctl --user daemon-reload failed" \
+			"(ensure a user systemd session is running)"
 	fi
 
 	log "Enabling xd.service at login..."
 	if ! systemctl --user enable xd.service >/dev/null 2>&1; then
-		error "failed to enable xd.service (ensure user systemd is active)"
+		error "failed to enable xd.service" \
+			"(ensure user systemd is active)"
 	fi
 
 	if [ "$WAS_ACTIVE" -eq 1 ]; then
@@ -239,7 +270,9 @@ install_user_service() {
 	fi
 
 	if [ ! -f "$config_file" ]; then
-		warn "XD config not found at $config_file (create it before starting xd.service)."
+		warn "XD config not found at $config_file" \
+			"(create it before starting" \
+			"xd.service)."
 	fi
 }
 

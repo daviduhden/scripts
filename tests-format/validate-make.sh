@@ -8,8 +8,9 @@ printf '%s\n' "[INFO] Logging to: $TMPLOG" >&3
 exec >"$TMPLOG" 2>&1
 
 # validate-make.sh
-# - Recursively finds all Makefiles under ROOT_DIR (default: current directory)
-#   and checks formatting with makefmt and Makefile syntax.
+# - Recursively finds all Makefiles under ROOT_DIR
+#   (default: current directory) and checks formatting
+#   with makefmt and Makefile syntax.
 # - Usage: ./validate-make.sh [ROOT_DIR]
 # - Requires: makefmt, gmake in PATH
 #
@@ -42,7 +43,9 @@ run_validate_make() {
 	IS_OPENBSD=0
 	if [ "$OS_NAME" = "OpenBSD" ]; then
 		IS_OPENBSD=1
-		printf '%s\n' "[INFO] OpenBSD detected: checkmake and mbake are not ported"
+		printf '%s\n' \
+			"[INFO] OpenBSD detected: checkmake and mbake" \
+			" are not ported"
 	fi
 
 	TMPDIR_BASE="${TMPDIR:-/tmp}"
@@ -57,7 +60,12 @@ run_validate_make() {
 	elif command -v mbake >/dev/null 2>&1; then
 		UNFMT="$TMPDIR_BASE/unformatted-make-$$.txt"
 
-		find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name 'Makefile' -o -name 'makefile' -o -name 'GNUmakefile' -o -name '*.mk' \) -print |
+		find "$ROOT_DIR" \
+			\( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) \
+			-prune -o -type f \
+			\( -name 'Makefile' -o -name 'makefile' \
+			-o -name 'GNUmakefile' -o -name '*.mk' \) \
+			-print |
 			while IFS= read -r f; do
 				[ -n "$f" ] || continue
 				if ! mbake format --check "$f" >/dev/null 2>&1; then
@@ -84,14 +92,21 @@ run_validate_make() {
 
 		rm -f "$UNFMT"
 	else
-		printf '%s\n' "[INFO] mbake not installed; skipping Makefile formatting"
+		printf '%s\n' \
+			"[INFO] mbake not installed;" \
+			" skipping Makefile formatting"
 	fi
 
 	if [ "$IS_OPENBSD" -eq 1 ]; then
 		printf '%s\n' "[INFO] OpenBSD: skipping checkmake"
 	elif command -v checkmake >/dev/null 2>&1; then
 		printf '%s\n' "[INFO] Running checkmake (Makefile linter)..."
-		find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name 'Makefile' -o -name 'makefile' -o -name 'GNUmakefile' -o -name '*.mk' \) -print |
+		find "$ROOT_DIR" \
+			\( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) \
+			-prune -o -type f \
+			\( -name 'Makefile' -o -name 'makefile' \
+			-o -name 'GNUmakefile' -o -name '*.mk' \) \
+			-print |
 			while IFS= read -r f; do
 				[ -n "$f" ] || continue
 				if ! checkmake "$f" >/dev/null 2>&1; then
@@ -104,13 +119,20 @@ run_validate_make() {
 
 	# Run bmake/make dry-run to ensure BSD make compatibility
 	MAKE_CMD="bmake"
-	if [ "$IS_OPENBSD" -eq 1 ] && ! command -v bmake >/dev/null 2>&1 && command -v make >/dev/null 2>&1; then
+	if [ "$IS_OPENBSD" -eq 1 ] &&
+		! command -v bmake >/dev/null 2>&1 &&
+		command -v make >/dev/null 2>&1; then
 		MAKE_CMD="make"
 	fi
 
 	if command -v "$MAKE_CMD" >/dev/null 2>&1; then
 		printf '%s\n' "[INFO] Running $MAKE_CMD -n -f (bsdmake dry-run)..."
-		find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name 'Makefile' -o -name 'makefile' -o -name 'GNUmakefile' -o -name '*.mk' \) -print |
+		find "$ROOT_DIR" \
+			\( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) \
+			-prune -o -type f \
+			\( -name 'Makefile' -o -name 'makefile' \
+			-o -name 'GNUmakefile' -o -name '*.mk' \) \
+			-print |
 			while IFS= read -r f; do
 				[ -n "$f" ] || continue
 				if ! "$MAKE_CMD" -n -f "$f" >/dev/null 2>&1; then
@@ -130,7 +152,9 @@ run_validate_make() {
 	fi
 
 	if [ "${issues:-0}" -ne 0 ]; then
-		printf '%s\n' "[INFO] Completed with $issues issue(s) (format changes and/or errors)"
+		printf '%s\n' \
+			"[INFO] Completed with $issues issue(s)" \
+			" (format changes and/or errors)"
 		printf '%s\n' "[INFO] Affected files (unique, first 200):"
 		sort -u "$TMP_FAILS" | sed -n '1,200p' | sed 's/^/  - /'
 		exit 2

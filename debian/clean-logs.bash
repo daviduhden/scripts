@@ -3,8 +3,10 @@
 set -euo pipefail
 
 # Log cleanup script
-# - Removes *.gz files under /var/log and *.old files under / (root filesystem only).
-# - Supports a dry-run mode via DRY_RUN=1 or the --dry-run / -n option to only list files.
+# - Removes *.gz files under /var/log and *.old files
+#   under / (root filesystem only).
+# - Supports a dry-run mode via DRY_RUN=1 or the
+#   --dry-run / -n option to only list files.
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
@@ -13,22 +15,18 @@ set -euo pipefail
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
-# Simple colors for messages
-if [ -t 1 ] && [ "${NO_COLOR:-0}" != "1" ]; then
-	GREEN="\033[32m"
-	YELLOW="\033[33m"
-	RED="\033[31m"
-	RESET="\033[0m"
-else
-	GREEN=""
-	YELLOW=""
-	RED=""
-	RESET=""
-fi
-
-log() { printf '%s %b[INFO]%b ✅ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$GREEN" "$RESET" "$*"; }
-warn() { printf '%s %b[WARN]%b ⚠️ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$YELLOW" "$RESET" "$*"; }
-error() { printf '%s %b[ERROR]%b ❌ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$RED" "$RESET" "$*" >&2; }
+log() {
+	printf '%s [INFO] %s\n' \
+		"$(date '+%Y-%m-%d %H:%M:%S')" "$*"
+}
+warn() {
+	printf '%s [WARN] %s\n' \
+		"$(date '+%Y-%m-%d %H:%M:%S')" "$*"
+}
+error() {
+	printf '%s [ERROR] %s\n' \
+		"$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2
+}
 
 require_cmd() {
 	command -v "$1" >/dev/null 2>&1 || {
@@ -45,7 +43,9 @@ parse_args() {
 	case "${1:-}" in
 	--dry-run | -n)
 		DRY_RUN=1
-		warn "CLI flag detected; using non-default options instead of standard behavior."
+		warn "CLI flag detected;" \
+			"using non-default options" \
+			"instead of standard behavior."
 		shift
 		;;
 	esac
@@ -53,15 +53,20 @@ parse_args() {
 
 cleanup_gz_logs() {
 	if [ "$DRY_RUN" -eq 1 ]; then
-		log "DRY RUN: listing *.gz files under /var/log (no deletion will occur):"
-		if ! find /var/log -xdev -type f -name '*.gz' -print; then
-			error "Failed to list *.gz files under /var/log."
+		log "DRY RUN: listing *.gz files" \
+			"under /var/log (no deletion will occur):"
+		if ! find /var/log -xdev \
+			-type f -name '*.gz' -print; then
+			error "Failed to list *.gz" \
+				"files under /var/log."
 			return 1
 		fi
 	else
 		log "Deleting *.gz files under /var/log..."
-		if ! find /var/log -xdev -type f -name '*.gz' -print -delete; then
-			error "Failed while deleting *.gz files under /var/log."
+		if ! find /var/log -xdev \
+			-type f -name '*.gz' -print -delete; then
+			error "Failed while deleting *.gz" \
+				"files under /var/log."
 			return 1
 		fi
 	fi
@@ -69,15 +74,21 @@ cleanup_gz_logs() {
 
 cleanup_old_files() {
 	if [ "$DRY_RUN" -eq 1 ]; then
-		log "DRY RUN: listing *.old files under / (no deletion will occur):"
-		if ! find / -xdev -type f -name '*.old' -print; then
-			error "Failed to list *.old files under /."
+		log "DRY RUN: listing *.old files" \
+			"under / (no deletion will occur):"
+		if ! find / -xdev -type f \
+			-name '*.old' -print; then
+			error "Failed to list *.old" \
+				"files under /."
 			return 1
 		fi
 	else
-		log "Deleting *.old files under / (use with care)..."
-		if ! find / -xdev -type f -name '*.old' -print -delete; then
-			error "Failed while deleting *.old files under /."
+		log "Deleting *.old files under /" \
+			"(use with care)..."
+		if ! find / -xdev -type f \
+			-name '*.old' -print -delete; then
+			error "Failed while deleting *.old" \
+				"files under /."
 			return 1
 		fi
 	fi

@@ -7,8 +7,10 @@ set -euo pipefail
 #  - Prefers GitHub CLI (gh repo sync) if available
 #  - Falls back to plain git fetch/reset if needed
 #  - Falls back to downloading a GitHub ZIP if git-based methods fail
-#  - Applies safe file permissions and restarts the configured web service
-#  - Uses a simple lock directory to avoid concurrent runs (safe for cron)
+#  - Applies safe file permissions and restarts
+#    the configured web service
+#  - Uses a simple lock directory to avoid
+#    concurrent runs (safe for cron)
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
@@ -16,31 +18,27 @@ set -euo pipefail
 ###################
 # PATH and colors #
 ###################
-PATH=/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+PATH=/usr/local/go/bin:/usr/local/sbin:/usr/local/bin
+PATH="${PATH}:/usr/sbin:/usr/bin:/sbin:/bin"
 export PATH
 
-if [ -t 1 ] && [ "${NO_COLOR:-0}" != "1" ]; then
-	GREEN="\033[32m"
-	YELLOW="\033[33m"
-	RED="\033[31m"
-	RESET="\033[0m"
-else
-	GREEN=""
-	YELLOW=""
-	RED=""
-	RESET=""
-fi
-
-log() { printf '%s %b[INFO]%b ✅ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$GREEN" "$RESET" "$*"; }
-warn() { printf '%s %b[WARN]%b ⚠️  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$YELLOW" "$RESET" "$*"; }
-error() { printf '%s %b[ERROR]%b ❌ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$RED" "$RESET" "$*" >&2; }
+log() { printf '%s [INFO] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
+warn() { printf '%s [WARN] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
+error() {
+	printf '%s [ERROR] %s\n' \
+		"$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2
+}
 
 has_repo_content() {
 	local dir="$1"
 	[ -d "$dir" ] || return 1
 	if find "$dir" -mindepth 1 \
-		\( -path "$dir/.git" -o -path "$dir/.git/*" -o -path "$dir/.github" -o -path "$dir/.github/*" \) -prune \
-		-o -print | head -n 1 | grep -q .; then
+		\( -path "$dir/.git" \
+		-o -path "$dir/.git/*" \
+		-o -path "$dir/.github" \
+		-o -path "$dir/.github/*" \) \
+		-prune -o -print | head -n 1 |
+		grep -q .; then
 		return 0
 	fi
 	return 1
@@ -56,12 +54,14 @@ fetch_lfs_files() {
 		return 1
 	fi
 	if ! command -v git-lfs >/dev/null 2>&1; then
-		warn "git-lfs not installed; LFS files will not be downloaded."
+		warn "git-lfs not installed;" \
+			"LFS files will not be downloaded."
 		return 1
 	fi
 	if [ -d "$dir/.git" ]; then
 		log "Fetching Git LFS files in $dir..."
-		git -C "$dir" lfs pull >/dev/null 2>&1 || warn "git lfs pull failed in $dir"
+		git -C "$dir" lfs pull >/dev/null 2>&1 ||
+			warn "git lfs pull failed in $dir"
 	fi
 }
 
@@ -73,7 +73,8 @@ GH_HOST="${GH_HOST:-github.com}"
 REPO_SLUG="${REPO_SLUG:-daviduhden/daviduhden-website}"
 
 if command -v getent >/dev/null 2>&1; then
-	GH_HOME="$(getent passwd "$GH_USER" | awk -F: '{print $6}')"
+	GH_HOME="$(getent passwd "$GH_USER" |
+		awk -F: '{print $6}')"
 else
 	GH_HOME="/home/$GH_USER"
 fi
@@ -90,16 +91,31 @@ run_as_gh_user() {
 
 stage_from_source() {
 	local srcdir="$1"
-	if [ -d "$WWW_DIR/.git" ]; then rm -rf "$WWW_DIR/.git"; fi
-	if [ -d "$WWW_DIR/.github" ]; then rm -rf "$WWW_DIR/.github"; fi
-	if [ -e "$WWW_DIR/.gitattributes" ]; then rm -f "$WWW_DIR/.gitattributes"; fi
+	if [ -d "$WWW_DIR/.git" ]; then
+		rm -rf "$WWW_DIR/.git"
+	fi
+	if [ -d "$WWW_DIR/.github" ]; then
+		rm -rf "$WWW_DIR/.github"
+	fi
+	if [ -e "$WWW_DIR/.gitattributes" ]; then
+		rm -f "$WWW_DIR/.gitattributes"
+	fi
 
 	if command -v rsync >/dev/null 2>&1; then
-		if ! rsync -a --delete --exclude=".git" --exclude=".github" --exclude=".gitattributes" "$srcdir"/ "$WWW_DIR"/; then
+		if ! rsync -a --delete \
+			--exclude=".git" \
+			--exclude=".github" \
+			--exclude=".gitattributes" \
+			"$srcdir"/ "$WWW_DIR"/; then
 			return 1
 		fi
 	else
-		if ! find "$WWW_DIR" -mindepth 1 -maxdepth 1 ! -name ".git" ! -name ".github" ! -name ".gitattributes" -exec rm -rf {} +; then
+		if ! find "$WWW_DIR" -mindepth 1 \
+			-maxdepth 1 \
+			! -name ".git" \
+			! -name ".github" \
+			! -name ".gitattributes" \
+			-exec rm -rf {} +; then
 			return 1
 		fi
 		if ! cp -a "$srcdir"/. "$WWW_DIR"/; then
@@ -107,7 +123,9 @@ stage_from_source() {
 		fi
 	fi
 
-	if ! rm -rf "$WWW_DIR/.git" "$WWW_DIR/.github" "$WWW_DIR/.gitattributes"; then
+	if ! rm -rf "$WWW_DIR/.git" \
+		"$WWW_DIR/.github" \
+		"$WWW_DIR/.gitattributes"; then
 		return 1
 	fi
 	return 0
@@ -123,28 +141,41 @@ SERVICE_NAME="apache2"
 OWNER_USER="www-data"
 OWNER_GROUP="www-data"
 
-ZIP_URL="https://${GH_HOST}/${REPO_SLUG}/archive/refs/heads/${BRANCH}.zip"
+ZIP_URL="https://${GH_HOST}/${REPO_SLUG}"
+ZIP_URL="${ZIP_URL}/archive/refs/heads/${BRANCH}.zip"
 
 ###################
 # GitHub CLI sync #
 ###################
 sync_with_gh_cli() {
-	local repo_slug="$REPO_SLUG" attempt=1 tmpdir stagedir
+	local repo_slug="$REPO_SLUG" attempt=1
+	local tmpdir stagedir
 
 	if ! command -v gh >/dev/null 2>&1; then return 1; fi
 	if ! command -v git >/dev/null 2>&1; then return 1; fi
 	[ -f "${GH_CONFIG_DIR}/hosts.yml" ] || return 1
-	run_as_gh_user env GH_CONFIG_DIR="$GH_CONFIG_DIR" GH_HOST="$GH_HOST" gh auth status --hostname "$GH_HOST" >/dev/null 2>&1 || return 1
+	run_as_gh_user env \
+		GH_CONFIG_DIR="$GH_CONFIG_DIR" \
+		GH_HOST="$GH_HOST" \
+		gh auth status --hostname "$GH_HOST" \
+		>/dev/null 2>&1 || return 1
 
-	tmpdir="$(run_as_gh_user mktemp -d "/tmp/site-sync.XXXXXX")" || return 1
+	tmpdir="$(run_as_gh_user mktemp \
+		-d "/tmp/site-sync.XXXXXX")" || return 1
 	stagedir="$tmpdir/src"
 
 	while [ "$attempt" -le 5 ]; do
-		if run_as_gh_user env GH_CONFIG_DIR="$GH_CONFIG_DIR" GH_HOST="$GH_HOST" \
-			gh repo clone "$repo_slug" "$stagedir" -- --branch "$BRANCH" --single-branch >/dev/null 2>&1; then
+		if run_as_gh_user env \
+			GH_CONFIG_DIR="$GH_CONFIG_DIR" \
+			GH_HOST="$GH_HOST" \
+			gh repo clone "$repo_slug" \
+			"$stagedir" -- --branch "$BRANCH" \
+			--single-branch \
+			>/dev/null 2>&1; then
 			break
 		fi
-		log "gh repo clone attempt $attempt failed; retrying..."
+		log "gh repo clone attempt $attempt" \
+			"failed; retrying..."
 		attempt=$((attempt + 1))
 	done
 	if [ $attempt -gt 5 ]; then
@@ -158,7 +189,6 @@ sync_with_gh_cli() {
 		return 1
 	fi
 
-	# Fetch LFS
 	fetch_lfs_files "$stagedir"
 
 	if ! stage_from_source "$stagedir"; then
@@ -175,18 +205,27 @@ sync_with_gh_cli() {
 ############
 sync_with_git() {
 	local origin_url tmpdir stagedir
-	if ! command -v git >/dev/null 2>&1; then return 1; fi
-
-	if git -C "$WWW_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-		origin_url=$(git -C "$WWW_DIR" remote get-url origin 2>/dev/null || printf '')
+	if ! command -v git >/dev/null 2>&1; then
+		return 1
 	fi
-	[ -z "$origin_url" ] && [ -n "$REPO_SLUG" ] && origin_url="https://${GH_HOST}/${REPO_SLUG}.git"
+
+	if git -C "$WWW_DIR" rev-parse \
+		--is-inside-work-tree >/dev/null 2>&1; then
+		origin_url=$(git -C "$WWW_DIR" \
+			remote get-url origin 2>/dev/null ||
+			printf '')
+	fi
+	[ -z "$origin_url" ] &&
+		[ -n "$REPO_SLUG" ] &&
+		origin_url="https://${GH_HOST}/${REPO_SLUG}.git"
 	[ -z "$origin_url" ] && return 1
 
 	tmpdir=$(mktemp -d "/tmp/site-sync.XXXXXX") || return 1
 	stagedir="$tmpdir/src"
 
-	if ! git clone --branch "$BRANCH" --single-branch "$origin_url" "$stagedir" >/dev/null 2>&1; then
+	if ! git clone --branch "$BRANCH" \
+		--single-branch "$origin_url" \
+		"$stagedir" >/dev/null 2>&1; then
 		rm -rf "$tmpdir"
 		return 1
 	fi
@@ -199,7 +238,6 @@ sync_with_git() {
 		return 1
 	}
 
-	# Fetch LFS
 	fetch_lfs_files "$stagedir"
 
 	if ! stage_from_source "$stagedir"; then
@@ -220,7 +258,8 @@ sync_with_github_zip() {
 	zipfile="$tmpdir/source.zip"
 
 	if command -v curl >/dev/null 2>&1; then
-		if ! curl -fLsS --retry 5 "$ZIP_URL" -o "$zipfile"; then
+		if ! curl -fLsS --retry 5 "$ZIP_URL" \
+			-o "$zipfile"; then
 			rm -rf "$tmpdir"
 			return 1
 		fi
@@ -240,7 +279,8 @@ sync_with_github_zip() {
 		rm -rf "$tmpdir"
 		return 1
 	fi
-	srcdir=$(find "$unpack_dir" -mindepth 1 -maxdepth 1 -type d | head -n 1)
+	srcdir=$(find "$unpack_dir" -mindepth 1 \
+		-maxdepth 1 -type d | head -n 1)
 
 	[ -d "$srcdir" ] || {
 		rm -rf "$tmpdir"
@@ -263,7 +303,8 @@ post_update_steps() {
 	cd "$WWW_DIR" || return 1
 
 	log "Setting ownership to $OWNER_USER:$OWNER_GROUP..."
-	chown -R "$OWNER_USER":"$OWNER_GROUP" "$WWW_DIR" || warn "failed ownership"
+	chown -R "$OWNER_USER":"$OWNER_GROUP" "$WWW_DIR" ||
+		warn "failed ownership"
 
 	log "Setting file permissions..."
 	find . -type d -exec chmod 755 {} +
@@ -275,22 +316,35 @@ post_update_steps() {
 		return 1
 	fi
 
-	# Certbot renewal
 	if command -v certbot >/dev/null 2>&1; then
 		log "Running certbot..."
 		case "$SERVICE_NAME" in
 		nginx)
-			if certbot --nginx renew --non-interactive >/dev/null 2>&1; then systemctl restart "$SERVICE_NAME"; fi
+			if certbot --nginx renew \
+				--non-interactive \
+				>/dev/null 2>&1; then
+				systemctl restart "$SERVICE_NAME"
+			fi
 			;;
 		apache2 | apache)
-			if certbot --apache renew --non-interactive >/dev/null 2>&1; then systemctl restart "$SERVICE_NAME"; fi
+			if certbot --apache renew \
+				--non-interactive \
+				>/dev/null 2>&1; then
+				systemctl restart "$SERVICE_NAME"
+			fi
 			;;
 		*)
-			if certbot certonly --non-interactive -d "$WWW_HOST" >/dev/null 2>&1; then systemctl restart "$SERVICE_NAME"; fi
+			if certbot certonly \
+				--non-interactive \
+				-d "$WWW_HOST" \
+				>/dev/null 2>&1; then
+				systemctl restart "$SERVICE_NAME"
+			fi
 			;;
 		esac
 	else
-		warn "certbot not installed; skipping certificate renewal"
+		warn "certbot not installed;" \
+			"skipping certificate renewal"
 	fi
 	return 0
 }
@@ -315,7 +369,9 @@ main() {
 	fi
 	trap 'rm -rf "$LOCKDIR"' EXIT INT TERM
 
-	if ! sync_with_gh_cli && ! sync_with_git && ! sync_with_github_zip; then
+	if ! sync_with_gh_cli &&
+		! sync_with_git &&
+		! sync_with_github_zip; then
 		error "all sync methods failed."
 		exit 1
 	fi

@@ -24,9 +24,18 @@ else
 	RESET=""
 fi
 
-log() { printf '%s %b[INFO]%b ✅ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$GREEN" "$RESET" "$*"; }
-warn() { printf '%s %b[WARN]%b ⚠️ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$YELLOW" "$RESET" "$*"; }
-error() { printf '%s %b[ERROR]%b ❌ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$RED" "$RESET" "$*" >&2; }
+log() {
+	printf '%s %b[INFO]%b  %s\n' \
+		"$(date '+%Y-%m-%d %H:%M:%S')" "$GREEN" "$RESET" "$*"
+}
+warn() {
+	printf '%s %b[WARN]%b  %s\n' \
+		"$(date '+%Y-%m-%d %H:%M:%S')" "$YELLOW" "$RESET" "$*"
+}
+error() {
+	printf '%s %b[ERROR]%b %s\n' \
+		"$(date '+%Y-%m-%d %H:%M:%S')" "$RED" "$RESET" "$*" >&2
+}
 
 require_cmd() {
 	if ! command -v "$1" >/dev/null 2>&1; then
@@ -88,13 +97,15 @@ install_arti_unit_and_config() {
 enable_arti_service() {
 	log "Reloading systemd --user units..."
 	if ! systemctl --user daemon-reload; then
-		error "systemctl --user daemon-reload failed (ensure a user systemd session is running)"
+		error "systemctl --user daemon-reload failed" \
+			"(ensure a user systemd session is running)"
 		exit 1
 	fi
 
 	log "Enabling and starting arti.service..."
 	if ! systemctl --user enable --now arti.service; then
-		error "failed to enable/start arti.service (ensure user systemd is active)"
+		error "failed to enable/start arti.service" \
+			"(ensure user systemd is active)"
 		exit 1
 	fi
 }
@@ -103,10 +114,12 @@ maybe_install_bridge_service() {
 	if command -v socat >/dev/null 2>&1; then
 		BRIDGE_UNIT="${SYSTEMD_USER_DIR}/arti-socks-proxy.service"
 		if [[ -f $BRIDGE_SRC ]]; then
-			log "Detected socat; installing arti-socks-proxy.service from ${BRIDGE_SRC}"
+			log "Detected socat; installing" \
+				"arti-socks-proxy.service from ${BRIDGE_SRC}"
 			install -m 0644 "$BRIDGE_SRC" "$BRIDGE_UNIT"
 		else
-			warn "Bridge unit template not found at ${BRIDGE_SRC}; skipping bridge install"
+			warn "Bridge unit template not found at" \
+				"${BRIDGE_SRC}; skipping bridge install"
 		fi
 
 		log "Reloading systemd --user units (bridge)..."
@@ -121,7 +134,8 @@ maybe_install_bridge_service() {
 			log "arti-socks-proxy.service enabled and running."
 		fi
 	else
-		warn "socat not found; skipping installation of arti-socks-proxy.service"
+		warn "socat not found; skipping installation" \
+			"of arti-socks-proxy.service"
 	fi
 }
 

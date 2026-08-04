@@ -24,17 +24,27 @@ else
 	RESET=""
 fi
 
-log() { printf '%s %b[INFO]%b  %s\n' "$(date '+%F %T')" "$GREEN" "$RESET" "$*"; }
-warn() { printf '%s %b[WARN]%b  %s\n' "$(date '+%F %T')" "$YELLOW" "$RESET" "$*"; }
+log() {
+	printf '%s %b[INFO]%b  %s\n' \
+		"$(date '+%F %T')" "$GREEN" "$RESET" "$*"
+}
+warn() {
+	printf '%s %b[WARN]%b  %s\n' \
+		"$(date '+%F %T')" "$YELLOW" "$RESET" "$*"
+}
 error() {
-	printf '%s %b[ERROR]%b %s\n' "$(date '+%F %T')" "$RED" "$RESET" "$*" >&2
+	printf '%s %b[ERROR]%b %s\n' \
+		"$(date '+%F %T')" "$RED" "$RESET" "$*" >&2
 	exit 1
 }
 
-require_root() { [[ ${EUID:-$(id -u)} -eq 0 ]] || error "Root required"; }
+require_root() {
+	[[ ${EUID:-$(id -u)} -eq 0 ]] || error "Root required"
+}
 have_cmd() { command -v "$1" >/dev/null 2>&1; }
 require_cmd() {
-	command -v "$1" >/dev/null 2>&1 || error "Required command '$1' not found"
+	command -v "$1" >/dev/null 2>&1 ||
+		error "Required command '$1' not found"
 }
 
 # Fedora's ClamAV account naming has varied across releases/packages.
@@ -50,10 +60,12 @@ resolve_clamav_account() {
 		fi
 	done
 
-	[[ -n "$CLAMAV_USER" ]] || error "No ClamAV service user found (tried: clamav, clamscan)"
+	[[ -n $CLAMAV_USER ]] || error \
+		"No ClamAV service user found (tried: clamav, clamscan)"
 
 	CLAMAV_GROUP="$(id -gn "$CLAMAV_USER")"
-	[[ -n "$CLAMAV_GROUP" ]] || error "Could not resolve primary group for $CLAMAV_USER"
+	[[ -n $CLAMAV_GROUP ]] || error \
+		"Could not resolve primary group for $CLAMAV_USER"
 
 	log "Using ClamAV service account: ${CLAMAV_USER}:${CLAMAV_GROUP}"
 }
@@ -65,9 +77,12 @@ resolve_clamav_account() {
 install_packages() {
 	log "Installing ClamAV packages"
 
-	for pkg in clamd clamav clamav-freshclam policycoreutils-python-utils; do
+	for pkg in clamd clamav clamav-freshclam \
+		policycoreutils-python-utils; do
 		if ! rpm -q "$pkg" >/dev/null 2>&1; then
-			rpm-ostree install -y "$pkg" || warn "Failed to layer $pkg (may already be installed)"
+			rpm-ostree install -y "$pkg" ||
+				warn "Failed to layer $pkg" \
+					"(may already be installed)"
 		else
 			log "$pkg is already installed, skipping"
 		fi
@@ -98,17 +113,25 @@ fix_permissions() {
 fix_selinux() {
 	log "Configuring SELinux file contexts"
 
-	semanage fcontext -a -t antivirus_db_t "/var/lib/clamav(/.*)?" 2>/dev/null ||
-		semanage fcontext -m -t antivirus_db_t "/var/lib/clamav(/.*)?"
+	semanage fcontext -a -t antivirus_db_t \
+		"/var/lib/clamav(/.*)?" 2>/dev/null ||
+		semanage fcontext -m -t antivirus_db_t \
+			"/var/lib/clamav(/.*)?"
 
-	semanage fcontext -a -t antivirus_log_t "/var/log/clamav(/.*)?" 2>/dev/null ||
-		semanage fcontext -m -t antivirus_log_t "/var/log/clamav(/.*)?"
+	semanage fcontext -a -t antivirus_log_t \
+		"/var/log/clamav(/.*)?" 2>/dev/null ||
+		semanage fcontext -m -t antivirus_log_t \
+			"/var/log/clamav(/.*)?"
 
-	semanage fcontext -a -t antivirus_log_t "/var/log/freshclam.log" 2>/dev/null ||
-		semanage fcontext -m -t antivirus_log_t "/var/log/freshclam.log"
+	semanage fcontext -a -t antivirus_log_t \
+		"/var/log/freshclam.log" 2>/dev/null ||
+		semanage fcontext -m -t antivirus_log_t \
+			"/var/log/freshclam.log"
 
-	semanage fcontext -a -t antivirus_var_run_t "/run/clamd.scan(/.*)?" 2>/dev/null ||
-		semanage fcontext -m -t antivirus_var_run_t "/run/clamd.scan(/.*)?"
+	semanage fcontext -a -t antivirus_var_run_t \
+		"/run/clamd.scan(/.*)?" 2>/dev/null ||
+		semanage fcontext -m -t antivirus_var_run_t \
+			"/run/clamd.scan(/.*)?"
 
 	restorecon -RF \
 		/var/lib/clamav \
@@ -135,8 +158,9 @@ configure_freshclam() {
 run_freshclam() {
 	log "Running freshclam database update"
 
-	# freshclam uses a single lock for its log and database. Stop an already
-	# running updater before doing the foreground update, then restore it.
+	# freshclam uses a single lock for its log and database.
+	# Stop an already running updater before doing the
+	# foreground update, then restore it.
 	local freshclam_service=""
 	for candidate in clamav-freshclam.service freshclam.service; do
 		if systemctl is-active --quiet "$candidate"; then
@@ -147,11 +171,11 @@ run_freshclam() {
 	done
 
 	if ! freshclam; then
-		[[ -n "$freshclam_service" ]] && systemctl start "$freshclam_service"
+		[[ -n $freshclam_service ]] && systemctl start "$freshclam_service"
 		error "freshclam failed"
 	fi
 
-	[[ -n "$freshclam_service" ]] && systemctl start "$freshclam_service"
+	[[ -n $freshclam_service ]] && systemctl start "$freshclam_service"
 }
 
 #######################
@@ -172,8 +196,9 @@ configure_clamd() {
 		-e 's|^#OnAccessExcludeRootUID .*|OnAccessExcludeRootUID yes|' \
 		/etc/clamd.d/scan.conf
 
-	# clamd otherwise rotates only when explicitly configured. Remove any
-	# previous/commented copies first so repeated setup runs stay idempotent.
+	# clamd otherwise rotates only when explicitly configured.
+	# Remove any previous/commented copies first so repeated
+	# setup runs stay idempotent.
 	sed -i \
 		-e '/^#\?LogFileMaxSize[[:space:]]/d' \
 		-e '/^#\?LogRotate[[:space:]]/d' \
@@ -190,10 +215,11 @@ configure_clamd() {
 configure_log_rotation() {
 	log "Configuring ClamAV log rotation"
 
-	# clamonacc, periodic scans and freshclam do not all honor clamd's
-	# LogFileMaxSize. The clamd*.log glob also prunes historical files created
-	# by clamd's own rotation. copytruncate lets active services keep their
-	# file descriptors while preventing unbounded growth.
+	# clamonacc, periodic scans and freshclam do not all
+	# honor clamd's LogFileMaxSize. The clamd*.log glob also
+	# prunes historical files created by clamd's own rotation.
+	# copytruncate lets active services keep their file
+	# descriptors while preventing unbounded growth.
 	cat >/etc/logrotate.d/clamav <<EOF
 /var/log/clamav/clamd*.log /var/log/clamav/clamonacc.log /var/log/clamav/periodic.log /var/log/freshclam.log {
     size 50M
@@ -216,15 +242,20 @@ EOF
 configure_clamonacc() {
 	log "Configuring clamonacc (on-access scanning)"
 
-	# Prefer Fedora's packaged unit when available. Creating a second unit
-	# named clamonacc.service can otherwise run two on-access scanners.
+	# Prefer Fedora's packaged unit when available.
+	# Creating a second unit named clamonacc.service can
+	# otherwise run two on-access scanners.
 	if systemctl cat clamav-clamonacc.service >/dev/null 2>&1; then
-		# Remove the custom unit from older versions of this script so it
-		# cannot remain enabled alongside Fedora's packaged unit.
+		# Remove the custom unit from older versions of this
+		# script so it cannot remain enabled alongside
+		# Fedora's packaged unit.
 		systemctl disable --now clamonacc.service >/dev/null 2>&1 || true
 		rm -f /etc/systemd/system/clamonacc.service
-		install -d -m 0755 /etc/systemd/system/clamav-clamonacc.service.d
-		cat >/etc/systemd/system/clamav-clamonacc.service.d/10-secureblue.conf <<'EOF'
+		install -d -m 0755 \
+			/etc/systemd/system/clamav-clamonacc.service.d
+		cat \
+			>/etc/systemd/system/clamav-clamonacc.service.d/10-secureblue.conf \
+			<<'EOF'
 [Unit]
 After=clamd@scan.service
 Requires=clamd@scan.service
@@ -356,7 +387,7 @@ run_setup() {
 	configure_log_rotation
 	configure_clamonacc
 	configure_periodic_scan
-	log "ClamAV installation and configuration completed successfully 🎉"
+	log "ClamAV installation and configuration completed successfully"
 }
 
 ########

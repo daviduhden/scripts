@@ -8,10 +8,11 @@ printf '%s\n' "[INFO] Logging to: $TMPLOG" >&3
 exec >"$TMPLOG" 2>&1
 
 # validate-shell.sh
-# - Recursively finds all shell scripts under ROOT_DIR (default: current directory)
-#   and checks formatting with shfmt, shell syntax, bash syntax,
-#   ksh syntax and runs shellcheck (if available
-#   treating warnings as errors).
+# - Recursively finds all shell scripts under ROOT_DIR
+#   (default: current directory) and checks formatting
+#   with shfmt, shell syntax, bash syntax, ksh syntax and
+#   runs shellcheck (if available treating warnings as
+#   errors).
 # - Usage: ./validate-shell.sh [ROOT_DIR]
 # - Requires: shfmt, shellcheck, ksh (optional) in PATH
 #
@@ -42,7 +43,9 @@ run_validate_shell() {
 
 	OS_NAME=$(uname -s 2>/dev/null || printf '%s' unknown)
 	if [ "$OS_NAME" = "OpenBSD" ]; then
-		printf '%s\n' "[INFO] OpenBSD detected: install shfmt, shellcheck and bash (if needed)"
+		printf '%s\n' \
+			"[INFO] OpenBSD detected: install shfmt," \
+			" shellcheck and bash (if needed)"
 	fi
 
 	TMPDIR_BASE="${TMPDIR:-/tmp}"
@@ -55,7 +58,11 @@ run_validate_shell() {
 	if command -v shfmt >/dev/null 2>&1; then
 		UNFMT_SH="$TMPDIR_BASE/unformatted-sh-$$.txt"
 
-		find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name '*.sh' -o -name '*.bash' -o -name '*.ksh' \) -print |
+		find "$ROOT_DIR" \
+			\( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) \
+			-prune -o -type f \
+			\( -name '*.sh' -o -name '*.bash' -o -name '*.ksh' \) \
+			-print |
 			while IFS= read -r f; do
 				[ -n "$f" ] || continue
 				shfmt -l "$f"
@@ -85,7 +92,9 @@ run_validate_shell() {
 
 	printf '%s\n' "[INFO] Running shell syntax checks..."
 
-	find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f -name '*.sh' -print |
+	find "$ROOT_DIR" \
+		\( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) \
+		-prune -o -type f -name '*.sh' -print |
 		while IFS= read -r f; do
 			[ -n "$f" ] || continue
 			if ! sh -n "$f" 2>/dev/null; then
@@ -98,7 +107,9 @@ run_validate_shell() {
 
 	if command -v bash >/dev/null 2>&1; then
 		printf '%s\n' "[INFO] Running bash syntax checks..."
-		find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f -name '*.bash' -print |
+		find "$ROOT_DIR" \
+			\( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) \
+			-prune -o -type f -name '*.bash' -print |
 			while IFS= read -r f; do
 				[ -n "$f" ] || continue
 				if ! bash -n "$f" 2>/dev/null; then
@@ -112,25 +123,46 @@ run_validate_shell() {
 		printf '%s\n' "[INFO] bash not found; skipping bash syntax checks"
 	fi
 
-	if command -v ksh >/dev/null 2>&1; then
-		printf '%s\n' "[INFO] Running ksh syntax checks..."
-		find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f -name '*.ksh' -print |
+	KSH_CMD=""
+	if [ "$OS_NAME" = "Linux" ] &&
+		command -v oksh >/dev/null 2>&1; then
+		KSH_CMD="oksh"
+	elif command -v ksh >/dev/null 2>&1; then
+		KSH_CMD="ksh"
+	fi
+
+	if [ -n "$KSH_CMD" ]; then
+		printf '%s\n' \
+			"[INFO] Running ksh syntax checks" \
+			" (using ${KSH_CMD})..."
+		find "$ROOT_DIR" \
+			\( -path "$ROOT_DIR/.git" -o \
+			-path "$ROOT_DIR/.git/*" \) \
+			-prune -o -type f -name '*.ksh' -print |
 			while IFS= read -r f; do
 				[ -n "$f" ] || continue
-				if ! ksh -n "$f" 2>/dev/null; then
-					printf '%s\n' "[ERROR] ksh syntax error in: $f" 1>&2
+				if ! "$KSH_CMD" -n "$f" 2>/dev/null; then
+					printf '%s\n' \
+						"[ERROR] ksh syntax" \
+						" error in: $f" 1>&2
 					printf "%s\n" "$f"
 				fi
 			done | while IFS= read -r bad; do
 			[ -n "$bad" ] && note_fail "$bad"
 		done
 	else
-		printf '%s\n' "[INFO] ksh not found; skipping ksh syntax checks"
+		printf '%s\n' \
+			"[INFO] ksh not found;" \
+			" skipping ksh syntax checks"
 	fi
 
 	if command -v shellcheck >/dev/null 2>&1; then
 		printf '%s\n' "[INFO] Running shellcheck..."
-		find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name '*.bash' -o -name '*.ksh' -o -name '*.sh' \) -print |
+		find "$ROOT_DIR" \
+			\( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) \
+			-prune -o -type f \
+			\( -name '*.bash' -o -name '*.ksh' -o -name '*.sh' \) \
+			-print |
 			while IFS= read -r f; do
 				[ -n "$f" ] || continue
 				if ! shellcheck -x "$f"; then
@@ -150,7 +182,9 @@ run_validate_shell() {
 	fi
 
 	if [ "${issues:-0}" -ne 0 ]; then
-		printf '%s\n' "[INFO] Completed with $issues issue(s) (format changes and/or errors)"
+		printf '%s\n' \
+			"[INFO] Completed with $issues issue(s)" \
+			" (format changes and/or errors)"
 		printf '%s\n' "[INFO] Affected files (unique, first 200):"
 		sort -u "$TMP_FAILS" | sed -n '1,200p' | sed 's/^/  - /'
 		exit 2

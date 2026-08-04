@@ -15,27 +15,19 @@ export PATH
 
 REPO_OWNER="microsoft"
 REPO_NAME="edit"
-GITHUB_API="https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest"
+GITHUB_API="https://api.github.com/repos/${REPO_OWNER}"
+GITHUB_API="${GITHUB_API}/${REPO_NAME}/releases/latest"
 
 INSTALL_DIR="/usr/local/bin"
 TMPDIR="$(mktemp -d)"
 ROOT_CMD=""
 
-if [ -t 1 ] && [ "${NO_COLOR:-0}" != "1" ]; then
-	GREEN="\033[32m"
-	YELLOW="\033[33m"
-	RED="\033[31m"
-	RESET="\033[0m"
-else
-	GREEN=""
-	YELLOW=""
-	RED=""
-	RESET=""
-fi
-
-log() { printf '%s %b[INFO]%b ✅ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$GREEN" "$RESET" "$*"; }
-warn() { printf '%s %b[WARN]%b ⚠️ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$YELLOW" "$RESET" "$*"; }
-error() { printf '%s %b[ERROR]%b ❌ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$RED" "$RESET" "$*" >&2; }
+log() { printf '%s [INFO] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
+warn() { printf '%s [WARN] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
+error() {
+	printf '%s [ERROR] %s\n' \
+		"$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2
+}
 
 detect_root_cmd() {
 	if [ "${EUID:-$(id -u)}" -eq 0 ]; then
@@ -96,13 +88,17 @@ get_installed_version() {
 	fi
 
 	version="$(
-		edit --version 2>/dev/null |
-			awk 'match($0,/[0-9]+\.[0-9]+\.[0-9]+/){print substr($0,RSTART,RLENGTH); exit}'
+		edit --version 2>/dev/null | awk \
+			'match($0,/[0-9]+\.[0-9]+\.[0-9]+/){
+				print substr($0,RSTART,RLENGTH);
+				exit}'
 	)"
 	if [[ -z ${version:-} ]]; then
 		version="$(
-			edit -v 2>/dev/null |
-				awk 'match($0,/[0-9]+\.[0-9]+\.[0-9]+/){print substr($0,RSTART,RLENGTH); exit}'
+			edit -v 2>/dev/null | awk \
+				'match($0,/[0-9]+\.[0-9]+\.[0-9]+/){
+					print substr($0,RSTART,RLENGTH);
+					exit}'
 		)"
 	fi
 
@@ -119,7 +115,9 @@ version_is_up_to_date() {
 	local installed="$1"
 	local latest="$2"
 
-	[[ "$(printf '%s\n%s\n' "$latest" "$installed" | sort -V | tail -n1)" == "$installed" ]]
+	[[ "$(printf '%s\n%s\n' \
+		"$latest" "$installed" |
+		sort -V | tail -n1)" == "$installed" ]]
 }
 
 get_release_asset_from_json() {
@@ -164,7 +162,8 @@ run_update() {
 	latest="$(get_latest_version_from_json "$release_json")"
 
 	if [[ -z ${latest:-} ]]; then
-		error "Could not determine latest version from GitHub release metadata."
+		error "Could not determine latest version" \
+			"from GitHub release metadata."
 		exit 1
 	fi
 
@@ -176,7 +175,8 @@ run_update() {
 
 	log "Latest available version: $latest"
 
-	if [[ -n $installed ]] && version_is_up_to_date "$installed" "$latest"; then
+	if [[ -n $installed ]] &&
+		version_is_up_to_date "$installed" "$latest"; then
 		log "edit is already up to date. Nothing to do."
 		return 0
 	fi
@@ -196,7 +196,8 @@ run_update() {
 
 check_prereqs() {
 	detect_root_cmd
-	ensure_cmd curl tar grep awk sort uname find mktemp head install sed
+	ensure_cmd curl tar grep awk sort uname find \
+		mktemp head install sed
 }
 
 main() {

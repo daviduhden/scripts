@@ -30,30 +30,18 @@ SUITE_CODENAME=""
 ARCH_FILTER=""
 APT_CMD=""
 
-# Simple colors for messages
-if [ -t 1 ] && [ "${NO_COLOR:-0}" != "1" ]; then
-	GREEN="\033[32m"
-	YELLOW="\033[33m"
-	RED="\033[31m"
-	RESET="\033[0m"
-else
-	GREEN=""
-	YELLOW=""
-	RED=""
-	RESET=""
-fi
-
-log() { printf '%s %b[INFO]%b ✅ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$GREEN" "$RESET" "$*"; }
-warn() { printf '%s %b[WARN]%b ⚠️ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$YELLOW" "$RESET" "$*"; }
+log() { printf '%s [INFO] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
+warn() { printf '%s [WARN] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
 error() {
-	printf '%s %b[ERROR]%b ❌ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$RED" "$RESET" "$*" >&2
+	printf '%s [ERROR] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2
 	exit 1
 }
 
 # Helper to ensure required commands exist
 require_cmd() {
 	if ! command -v "$1" >/dev/null 2>&1; then
-		error "required command '$1' is not installed or not in PATH."
+		error "required command '$1' is not" \
+			"installed or not in PATH."
 	fi
 }
 
@@ -64,7 +52,8 @@ net_curl() {
 
 require_root() {
 	if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
-		error "This script must be run as root. Try: sudo $0"
+		error "This script must be run as root." \
+			"Try: sudo $0"
 	fi
 }
 
@@ -74,7 +63,9 @@ detect_apt_cmd() {
 	elif command -v apt >/dev/null 2>&1; then
 		APT_CMD="apt"
 	else
-		error "neither 'apt-get' nor 'apt' is available. This script supports only Debian-like/Ubuntu-like systems."
+		error "neither 'apt-get' nor 'apt'" \
+			"is available. This script supports only" \
+			"Debian-like/Ubuntu-like systems."
 	fi
 }
 
@@ -83,20 +74,32 @@ load_os_release() {
 		# shellcheck source=/dev/null
 		source /etc/os-release
 	else
-		error "/etc/os-release not found. Cannot detect distribution."
+		error "/etc/os-release not found." \
+			"Cannot detect distribution."
 	fi
 }
 
 normalize_os_id() {
 	OS_ID="${ID:-}"
-	if [[ $OS_ID != "debian" && $OS_ID != "devuan" && $OS_ID != "raspbian" && $OS_ID != "ubuntu" && ${ID_LIKE:-} == *"ubuntu"* ]]; then
+	if [[ $OS_ID != "debian" &&
+		$OS_ID != "devuan" &&
+		$OS_ID != "raspbian" &&
+		$OS_ID != "ubuntu" &&
+		${ID_LIKE:-} == *"ubuntu"* ]]; then
 		OS_ID="ubuntu"
 	fi
 }
 
 validate_supported_base() {
-	if [[ ${ID_LIKE:-} != *"debian"* && ${ID_LIKE:-} != *"ubuntu"* && $OS_ID != "debian" && $OS_ID != "devuan" && $OS_ID != "raspbian" && $OS_ID != "ubuntu" ]]; then
-		error "this script is intended for Debian/Devuan/Ubuntu-based systems (bookworm or newer)."
+	if [[ ${ID_LIKE:-} != *"debian"* &&
+		${ID_LIKE:-} != *"ubuntu"* &&
+		$OS_ID != "debian" &&
+		$OS_ID != "devuan" &&
+		$OS_ID != "raspbian" &&
+		$OS_ID != "ubuntu" ]]; then
+		error "this script is intended for" \
+			"Debian/Devuan/Ubuntu-based systems" \
+			"(bookworm or newer)."
 	fi
 }
 
@@ -110,8 +113,12 @@ log_detected_platform() {
 install_tor_key() {
 	log "Importing Tor Project signing key..."
 	install -d -m 0755 /usr/share/keyrings
-	net_curl "https://deb.torproject.org/torproject.org/A3C4F0F979CAA22CDBA8F512EE8CBC9E886DDD89.asc" |
-		gpg --dearmor -o /usr/share/keyrings/deb.torproject.org-keyring.gpg
+	local key_url
+	key_url="https://deb.torproject.org/torproject.org"
+	key_url="${key_url}/A3C4F0F979CAA22CDBA8F512EE8CBC9E886DDD89.asc"
+	net_curl "$key_url" |
+		gpg --dearmor \
+			-o /usr/share/keyrings/deb.torproject.org-keyring.gpg
 }
 
 write_tor_sources() {
@@ -142,8 +149,10 @@ install_tor_packages() {
 	log "Updating APT index (including Tor repository)..."
 	"$APT_CMD" update
 
-	log "Installing tor, torsocks, obfs4proxy and deb.torproject.org-keyring..."
-	"$APT_CMD" install -y tor torsocks obfs4proxy deb.torproject.org-keyring
+	log "Installing tor, torsocks, obfs4proxy and" \
+		"deb.torproject.org-keyring..."
+	"$APT_CMD" install -y tor torsocks obfs4proxy \
+		deb.torproject.org-keyring
 }
 
 run_setup() {
@@ -158,11 +167,11 @@ run_setup() {
 
 	log "Enabling and starting tor service..."
 	enable_and_start_tor
-	log "Done. Tor should now be installed and (where supported) enabled and running."
+	log "Done. Tor should now be installed and" \
+		"(where supported) enabled and running."
 }
 
 get_suite_codename() {
-	# Detect OS codename
 	if [[ -n ${DEBIAN_CODENAME:-} ]]; then
 		OS_CODENAME="${DEBIAN_CODENAME}"
 	elif [[ -n ${UBUNTU_CODENAME:-} ]]; then
@@ -170,7 +179,9 @@ get_suite_codename() {
 	elif [[ -n ${VERSION_CODENAME:-} ]]; then
 		OS_CODENAME="${VERSION_CODENAME}"
 	else
-		error "could not detect distribution codename (DEBIAN_CODENAME/UBUNTU_CODENAME/VERSION_CODENAME missing)."
+		error "could not detect distribution codename" \
+			"(DEBIAN_CODENAME/UBUNTU_CODENAME" \
+			"/VERSION_CODENAME missing)."
 	fi
 
 	case "$OS_ID" in
@@ -183,7 +194,10 @@ get_suite_codename() {
 			SUITE_CODENAME="trixie"
 			;;
 		*)
-			error "unsupported Devuan codename '$OS_CODENAME'. Supported: daedalus (-> bookworm), excalibur (-> trixie)."
+			error "unsupported Devuan codename" \
+				"'$OS_CODENAME'. Supported:" \
+				"daedalus (-> bookworm)," \
+				"excalibur (-> trixie)."
 			;;
 		esac
 		;;
@@ -193,7 +207,9 @@ get_suite_codename() {
 			SUITE_CODENAME="$OS_CODENAME"
 			;;
 		*)
-			error "unsupported Ubuntu codename '$OS_CODENAME'. Supported: jammy, noble."
+			error "unsupported Ubuntu codename" \
+				"'$OS_CODENAME'." \
+				"Supported: jammy, noble."
 			;;
 		esac
 		;;
@@ -205,7 +221,10 @@ get_suite_codename() {
 	case "$SUITE_CODENAME" in
 	bookworm | trixie | jammy | noble) ;;
 	*)
-		error "unsupported release '$SUITE_CODENAME'. Supported: bookworm, trixie, jammy, noble (or Devuan daedalus/excalibur)."
+		error "unsupported release" \
+			"'$SUITE_CODENAME'. Supported:" \
+			"bookworm, trixie, jammy, noble" \
+			"(or Devuan daedalus/excalibur)."
 		;;
 	esac
 }
@@ -223,7 +242,9 @@ detect_architecture() {
 		ARCH_FILTER="$native"
 		;;
 	*)
-		error "unsupported native architecture '$native'. Tor Project APT repository supports only amd64 and arm64."
+		error "unsupported native architecture" \
+			"'$native'. Tor Project APT repository" \
+			"supports only amd64 and arm64."
 		;;
 	esac
 }
@@ -232,19 +253,16 @@ ensure_base_dependencies() {
 	log "Updating APT index for base repositories..."
 	"$APT_CMD" update
 
-	# Ensure gnupg (for gpg) is installed
 	if ! command -v gpg >/dev/null 2>&1; then
 		log "Installing gnupg (for gpg)..."
 		"$APT_CMD" install -y gnupg
 	fi
 
-	# Ensure apt-transport-https is installed (some systems still require it)
 	if ! dpkg -s apt-transport-https >/dev/null 2>&1; then
 		log "Installing apt-transport-https..."
 		"$APT_CMD" install -y apt-transport-https
 	fi
 
-	# Ensure apt-transport-tor is installed for onion transport
 	if ! dpkg -s apt-transport-tor >/dev/null 2>&1; then
 		log "Installing apt-transport-tor..."
 		"$APT_CMD" install -y apt-transport-tor
@@ -258,11 +276,16 @@ choose_repo_transport() {
 	local choice=""
 
 	while :; do
-		read -r -p "Choice [1/2] (default: 1): " choice || choice=""
+		read -r -p "Choice [1/2] (default: 1): " choice ||
+			choice=""
 		choice=${choice:-1}
 		case "$choice" in
 		1)
-			REPO_URL="tor+http://apow7mjfryruh65chtdydfmqfpj5btws7nbocgtaovhvezgccyjazpqd.onion/torproject.org"
+			REPO_URL="tor+http://"
+			REPO_URL="${REPO_URL}apow7mjfryruh65chtdydfmqfpj5bt"
+			REPO_URL="${REPO_URL}ws7nbocgtaovhvezgccyjazpqd"
+			REPO_URL="${REPO_URL}.onion"
+			REPO_URL="${REPO_URL}/torproject.org"
 			log "Using onion transport: $REPO_URL"
 			return 0
 			;;
@@ -289,21 +312,26 @@ service_action() {
 }
 
 systemd_unit_exists() {
-	systemctl list-unit-files | grep -q "^$1[[:space:]]"
+	systemctl list-unit-files |
+		grep -q "^$1[[:space:]]"
 }
 
 ensure_systemd_unit_active() {
 	local unit="$1"
 
-	service_action "enable ${unit} with systemd" systemctl enable "$unit" || return 1
+	service_action "enable ${unit} with systemd" \
+		systemctl enable "$unit" || return 1
 
 	if ! systemctl restart "$unit"; then
-		warn "Failed to restart ${unit} with systemd; trying start instead."
-		service_action "start ${unit} with systemd" systemctl start "$unit" || return 1
+		warn "Failed to restart ${unit}" \
+			"with systemd; trying start instead."
+		service_action "start ${unit} with systemd" \
+			systemctl start "$unit" || return 1
 	fi
 
 	if ! systemctl is-active --quiet "$unit"; then
-		warn "systemd reports ${unit} is not active after start/restart."
+		warn "systemd reports ${unit} is not" \
+			"active after start/restart."
 		return 1
 	fi
 
@@ -311,40 +339,56 @@ ensure_systemd_unit_active() {
 }
 
 enable_tor_shepherd() {
-	log "Detected GNU Shepherd. Enabling and starting tor via shepherd..."
-	service_action "enable tor with shepherd" herd enable tor || return 1
-	service_action "start tor with shepherd" herd start tor
+	log "Detected GNU Shepherd. Enabling and" \
+		"starting tor via shepherd..."
+	service_action "enable tor with shepherd" \
+		herd enable tor || return 1
+	service_action "start tor with shepherd" \
+		herd start tor
 }
 
 enable_tor_openrc() {
-	log "Detected OpenRC. Enabling and starting tor via OpenRC..."
-	service_action "enable tor with OpenRC" rc-update add tor default || return 1
+	log "Detected OpenRC. Enabling and" \
+		"starting tor via OpenRC..."
+	service_action "enable tor with OpenRC" \
+		rc-update add tor default || return 1
 
 	if rc-service tor restart; then
 		return 0
 	fi
-	warn "Failed to restart tor with OpenRC; trying start instead."
-	service_action "start tor with OpenRC" rc-service tor start
+	warn "Failed to restart tor with" \
+		"OpenRC; trying start instead."
+	service_action "start tor with OpenRC" \
+		rc-service tor start
 }
 
 enable_tor_runit() {
-	log "Detected runit. Enabling and starting tor via runit..."
-	if [[ -d /etc/sv/tor && ! -e /etc/service/tor ]]; then
+	log "Detected runit. Enabling and" \
+		"starting tor via runit..."
+	if [[ -d /etc/sv/tor &&
+		! -e /etc/service/tor ]]; then
 		mkdir -p /etc/service
-		service_action "link tor into runit service directory" ln -s /etc/sv/tor /etc/service/tor || return 1
+		service_action "link tor into runit" \
+			"service directory" \
+			ln -s /etc/sv/tor \
+			/etc/service/tor || return 1
 	fi
 
 	if sv restart tor; then
 		return 0
 	fi
-	warn "Failed to restart tor with runit; trying start instead."
-	service_action "start tor with runit" sv start tor
+	warn "Failed to restart tor with" \
+		"runit; trying start instead."
+	service_action "start tor with runit" \
+		sv start tor
 }
 
 enable_tor_systemd() {
-	log "Detected systemd. Enabling and starting tor service..."
+	log "Detected systemd. Enabling and" \
+		"starting tor service..."
 	if ! systemctl daemon-reload; then
-		warn "Failed to reload systemd daemon. Continuing with service management."
+		warn "Failed to reload systemd daemon." \
+			"Continuing with service management."
 	fi
 
 	if systemd_unit_exists 'tor.service'; then
@@ -352,38 +396,52 @@ enable_tor_systemd() {
 	elif systemd_unit_exists 'tor@default.service'; then
 		ensure_systemd_unit_active 'tor@default.service'
 	else
-		warn "tor systemd service not found; cannot verify active state."
+		warn "tor systemd service not found;" \
+			"cannot verify active state."
 		return 1
 	fi
 }
 
 enable_tor_s6() {
-	log "Detected s6-based init. tor is installed, but this script does not manage s6 services automatically."
-	log "Please enable and start the 'tor' service using your s6/s6-rc configuration."
+	log "Detected s6-based init. tor is installed," \
+		"but this script does not manage s6 services" \
+		"automatically."
+	log "Please enable and start the 'tor'" \
+		"service using your s6/s6-rc configuration."
 }
 
 enable_tor_sysv() {
 	local failed=0
 
-	log "Detected SysV-style init. Enabling and starting tor via init scripts..."
+	log "Detected SysV-style init. Enabling and" \
+		"starting tor via init scripts..."
 	if command -v update-rc.d >/dev/null 2>&1; then
-		service_action "enable tor with update-rc.d" update-rc.d tor defaults || failed=1
+		service_action "enable tor with update-rc.d" \
+			update-rc.d tor defaults || failed=1
 	elif command -v chkconfig >/dev/null 2>&1; then
-		service_action "enable tor with chkconfig" chkconfig tor on || failed=1
+		service_action "enable tor with chkconfig" \
+			chkconfig tor on || failed=1
 	else
-		warn "No SysV enable helper (update-rc.d/chkconfig) found for tor."
+		warn "No SysV enable helper found for tor."
 		failed=1
 	fi
 
 	if command -v service >/dev/null 2>&1; then
 		if ! service tor restart; then
-			warn "Failed to restart tor via service; trying start instead."
-			service_action "start tor via service" service tor start || failed=1
+			warn "Failed to restart tor via" \
+				"service; trying start instead."
+			service_action "start tor via service" \
+				service tor start || failed=1
 		fi
 	elif [[ -x /etc/init.d/tor ]]; then
 		if ! /etc/init.d/tor restart; then
-			warn "Failed to restart tor via /etc/init.d/tor; trying start instead."
-			service_action "start tor via /etc/init.d/tor" /etc/init.d/tor start || failed=1
+			warn "Failed to restart tor via" \
+				"/etc/init.d/tor; trying start" \
+				"instead."
+			service_action "start tor via" \
+				"/etc/init.d/tor" \
+				/etc/init.d/tor start ||
+				failed=1
 		fi
 	else
 		warn "No SysV tor service script found."
@@ -395,7 +453,8 @@ enable_tor_sysv() {
 
 enable_and_start_tor() {
 	local init_comm
-	init_comm="$(ps -p 1 -o comm= 2>/dev/null | tr -d ' ' || true)"
+	init_comm="$(ps -p 1 -o comm= 2>/dev/null |
+		tr -d ' ' || true)"
 
 	case "$init_comm" in
 	shepherd)
@@ -405,7 +464,8 @@ enable_and_start_tor() {
 		fi
 		;;
 	openrc-init)
-		if command -v rc-update >/dev/null 2>&1 && command -v rc-service >/dev/null 2>&1; then
+		if command -v rc-update >/dev/null 2>&1 &&
+			command -v rc-service >/dev/null 2>&1; then
 			enable_tor_openrc
 			return
 		fi
@@ -432,7 +492,8 @@ enable_and_start_tor() {
 		enable_tor_shepherd
 		return
 	fi
-	if command -v rc-update >/dev/null 2>&1 && command -v rc-service >/dev/null 2>&1; then
+	if command -v rc-update >/dev/null 2>&1 &&
+		command -v rc-service >/dev/null 2>&1; then
 		enable_tor_openrc
 		return
 	fi
@@ -444,17 +505,21 @@ enable_and_start_tor() {
 		enable_tor_systemd
 		return
 	fi
-	if command -v s6-rc >/dev/null 2>&1 || command -v s6-svc >/dev/null 2>&1; then
+	if command -v s6-rc >/dev/null 2>&1 ||
+		command -v s6-svc >/dev/null 2>&1; then
 		enable_tor_s6
 		return
 	fi
-	if command -v service >/dev/null 2>&1 || [[ -x /etc/init.d/tor ]]; then
+	if command -v service >/dev/null 2>&1 ||
+		[[ -x /etc/init.d/tor ]]; then
 		enable_tor_sysv
 		return
 	fi
 
-	warn "could not detect a known service manager (systemd, SysV, OpenRC, runit, s6, shepherd)."
-	warn "tor is installed, but you must start and enable it manually."
+	warn "could not detect a known service manager" \
+		"(systemd, SysV, OpenRC, runit, s6, shepherd)."
+	warn "tor is installed, but you must start and" \
+		"enable it manually."
 	return 1
 }
 

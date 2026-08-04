@@ -19,23 +19,10 @@ REPO="fastfetch-cli/fastfetch"
 API_URL="https://api.github.com/repos/${REPO}/releases/latest"
 REPO_URL="https://github.com/${REPO}.git"
 
-# Simple colors for messages
-if [ -t 1 ] && [ "${NO_COLOR:-0}" != "1" ]; then
-	GREEN="\033[32m"
-	YELLOW="\033[33m"
-	RED="\033[31m"
-	RESET="\033[0m"
-else
-	GREEN=""
-	YELLOW=""
-	RED=""
-	RESET=""
-fi
-
-log() { printf '%s %b[INFO]%b ✅ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$GREEN" "$RESET" "$*"; }
-warn() { printf '%s %b[WARN]%b ⚠️ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$YELLOW" "$RESET" "$*"; }
+log() { printf '%s [INFO] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
+warn() { printf '%s [WARN] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
 error() {
-	printf '%s %b[ERROR]%b ❌ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$RED" "$RESET" "$*" >&2
+	printf '%s [ERROR] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2
 	exit 1
 }
 
@@ -61,7 +48,8 @@ has_cmd() {
 }
 
 ensure_apt() {
-	if ! command -v apt-get >/dev/null 2>&1 && ! command -v apt >/dev/null 2>&1; then
+	if ! command -v apt-get >/dev/null 2>&1 &&
+		! command -v apt >/dev/null 2>&1; then
 		error "neither 'apt-get' nor 'apt' is available."
 	fi
 }
@@ -71,7 +59,9 @@ get_latest_release() {
 	local tag json
 
 	if has_cmd gh; then
-		tag="$(gh release view --repo "$REPO" --json tagName -q .tagName 2>/dev/null || true)"
+		tag="$(gh release view --repo "$REPO" \
+			--json tagName -q .tagName \
+			2>/dev/null || true)"
 		if [[ -n $tag ]]; then
 			printf '%s\n' "$tag"
 			return 0
@@ -118,13 +108,18 @@ download_deb() {
 
 	if has_cmd gh; then
 		log "Attempting download via GitHub CLI..."
-		if gh release download "$version" --repo "$REPO" --pattern "fastfetch-linux-${arch}.deb" --dir "$out_dir" --clobber >/dev/null 2>&1; then
+		if gh release download "$version" \
+			--repo "$REPO" \
+			--pattern "fastfetch-linux-${arch}.deb" \
+			--dir "$out_dir" --clobber \
+			>/dev/null 2>&1; then
 			return 0
 		fi
 		warn "gh release download failed; falling back to curl."
 	fi
 
-	url="https://github.com/${REPO}/releases/download/${version}/fastfetch-linux-${arch}.deb"
+	url="https://github.com/${REPO}/releases/download"
+	url="${url}/${version}/fastfetch-linux-${arch}.deb"
 	net_curl "$url" -o "$out_file"
 }
 
@@ -139,11 +134,16 @@ run_fastfetch_update() {
 
 	CURRENT_VERSION=""
 	if command -v fastfetch >/dev/null 2>&1; then
-		CURRENT_VERSION="$(fastfetch --version 2>/dev/null | awk 'match($0,/[0-9]+\.[0-9]+\.[0-9]+/){print substr($0,RSTART,RLENGTH); exit}')"
+		CURRENT_VERSION="$(fastfetch --version \
+			2>/dev/null | awk \
+			'match($0,/[0-9]+\.[0-9]+\.[0-9]+/){
+				print substr($0,RSTART,RLENGTH);
+				exit}')"
 	fi
 	if [[ -n $CURRENT_VERSION ]]; then
 		log "Currently installed fastfetch version: ${CURRENT_VERSION}"
-		if [[ $CURRENT_VERSION == "$LATEST_VERSION" || $CURRENT_VERSION == "$LATEST_VERSION_STRIPPED" ]]; then
+		if [[ $CURRENT_VERSION == "$LATEST_VERSION" ||
+			$CURRENT_VERSION == "$LATEST_VERSION_STRIPPED" ]]; then
 			log "Fastfetch is already up to date. Nothing to do."
 			return 0
 		fi
@@ -157,12 +157,16 @@ run_fastfetch_update() {
 	trap 'rm -rf "$TMPDIR" 2>/dev/null || true' EXIT
 
 	log "Downloading fastfetch ${LATEST_VERSION} (${PKG_ARCH})..."
-	if ! download_deb "$LATEST_VERSION" "$PKG_ARCH" "$TMPDIR" "$DEB_FILE"; then
-		error "download failed for fastfetch ${LATEST_VERSION} (${PKG_ARCH})"
+	if ! download_deb "$LATEST_VERSION" \
+		"$PKG_ARCH" "$TMPDIR" "$DEB_FILE"; then
+		error "download failed for fastfetch" \
+			"${LATEST_VERSION} (${PKG_ARCH})"
 	fi
 
 	if [[ ! -f $DEB_FILE ]]; then
-		alt_file="$(find "$TMPDIR" -maxdepth 1 -type f -name 'fastfetch-linux-*.deb' | head -n1)"
+		alt_file="$(find "$TMPDIR" -maxdepth 1 \
+			-type f -name 'fastfetch-linux-*.deb' |
+			head -n1)"
 		if [[ -n $alt_file ]]; then
 			DEB_FILE="$alt_file"
 		else

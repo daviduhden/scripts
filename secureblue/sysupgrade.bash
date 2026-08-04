@@ -22,14 +22,16 @@ set -euo pipefail
 if command -v readlink >/dev/null 2>&1; then
 	SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 else
-	# Fallback: may be relative, but still usable as long as CWD is unchanged
+	# Fallback: may be relative, but still usable as long as
+	# CWD is unchanged
 	SCRIPT_PATH="${BASH_SOURCE[0]}"
 fi
 
 # Basic PATH (important when run from cron)
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-# Add Homebrew to PATH if present (typical multi-user Linuxbrew locations)
+# Add Homebrew to PATH if present
+# (typical multi-user Linuxbrew locations)
 if [[ -d /var/home/linuxbrew/.linuxbrew/bin ]]; then
 	PATH="/var/home/linuxbrew/.linuxbrew/bin:$PATH"
 elif [[ -d /var/home/linuxbrew/bin ]]; then
@@ -42,15 +44,14 @@ export PATH
 export LANG=C.UTF-8
 export LC_ALL=C.UTF-8
 
-# Non-root user for any actions that require a user session (Flatpak --user,
-# ujust, brew). This MUST be explicitly configured (no auto-detection).
+# Non-root user for any actions that require a user session
+# (Flatpak --user, ujust, brew). This MUST be explicitly
+# configured (no auto-detection).
 #
 # Configure via either:
 #   - CLI: --user USERNAME
 #   - Env: SYSUPGRADE_USER=USERNAME
 NONROOT_USER="${SYSUPGRADE_USER:-}"
-# Staging file for Homebrew diagnostics consumed by collect_system_info().
-BREW_DIAGNOSTICS_FILE=""
 
 run_as_user() {
 	local user="$1"
@@ -58,16 +59,11 @@ run_as_user() {
 	runuser -u "$user" -- "$@"
 }
 
-run_logged_cmd() {
-	local log_file="$1" label="$2"
-	shift 2
-
-	printf '\n=== %s ===\n\n' "$label" >>"$log_file"
-	if "$@" >>"$log_file" 2>&1; then
-		return 0
-	fi
-
-	return 1
+run_phase_cmd() {
+	local label="$1"
+	shift
+	printf '\n=== %s ===\n\n' "$label"
+	"$@"
 }
 
 user_home_dir() {
@@ -89,7 +85,8 @@ run_as_user_env() {
 	uid="$(user_uid "$user" || true)"
 
 	if [[ -z ${home:-} || -z ${uid:-} ]]; then
-		warn "Could not determine HOME/UID for user '$user'; skipping command: $*"
+		warn "Could not determine HOME/UID for" \
+			" user '$user'; skipping command: $*"
 		return 1
 	fi
 
@@ -116,22 +113,12 @@ run_as_user_env() {
 	runuser -u "$user" -- env "${env_vars[@]}" "$@"
 }
 
-# Simple colors for messages
-if [ -t 1 ] && [ "${NO_COLOR:-0}" != "1" ]; then
-	GREEN="\033[32m"
-	YELLOW="\033[33m"
-	RED="\033[31m"
-	RESET="\033[0m"
-else
-	GREEN=""
-	YELLOW=""
-	RED=""
-	RESET=""
-fi
-
-log() { printf '%s %b[INFO]%b ✅ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$GREEN" "$RESET" "$*"; }
-warn() { printf '%s %b[WARN]%b ⚠️ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$YELLOW" "$RESET" "$*"; }
-error() { printf '%s %b[ERROR]%b ❌ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$RED" "$RESET" "$*" >&2; }
+log() { printf '%s [INFO] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
+warn() { printf '%s [WARN] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
+error() {
+	printf '%s [ERROR] %s\n' \
+		"$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2
+}
 
 trap 'error "Execution interrupted."; exit 1' INT
 
@@ -169,7 +156,9 @@ mark_phase_skipped() {
 }
 
 print_phase_summary() {
-	local phase status kind mandatory_failures=0 optional_failures=0 successes=0 skipped=0
+	local phase status kind
+	local mandatory_failures=0 optional_failures=0
+	local successes=0 skipped=0
 
 	printf '\nPhase summary:\n'
 	for phase in "${PHASE_ORDER[@]}"; do
@@ -189,18 +178,22 @@ print_phase_summary() {
 		esac
 	done
 
-	log "Phase totals: success=${successes}, skipped=${skipped}, optional_failed=${optional_failures}, mandatory_failed=${mandatory_failures}"
+	log "Phase totals: success=${successes}," \
+		"skipped=${skipped}," \
+		"optional_failed=${optional_failures}," \
+		"mandatory_failed=${mandatory_failures}"
 	if ((mandatory_failures > 0)); then
 		return 1
 	fi
 	return 0
 }
 
-# ---- Helpers ---------------------------------------------------------------
+# ---- Helpers ----
 
 # Usage:
 #   require_cmd cmd1 cmd2 ...        # required: exits on missing
-#   require_cmd --check cmd1 cmd2    # optional check: returns 0/1, no exit
+#   require_cmd --check cmd1 cmd2
+#     optional check: returns 0/1, no exit
 require_cmd() {
 	local mode="fatal"
 	if [[ ${1:-} == "--check" ]]; then
@@ -240,14 +233,18 @@ ensure_root() {
 		log "Re-executing this script via run0 to gain root privileges..."
 		exec run0 -- "$SCRIPT_PATH" "$@"
 	else
-		error "This script must be run as root and 'run0' was not found. Please run as root or install run0."
+		error "This script must be run as root and" \
+			" 'run0' was not found." \
+			" Please run as root or install run0."
 		exit 1
 	fi
 }
 
 validate_nonroot_user() {
 	if [[ -z ${NONROOT_USER:-} ]]; then
-		error "Non-root user is not configured. Set SYSUPGRADE_USER or pass --user USERNAME."
+		error "Non-root user is not configured." \
+			" Set SYSUPGRADE_USER or" \
+			" pass --user USERNAME."
 		exit 1
 	fi
 
@@ -259,7 +256,9 @@ validate_nonroot_user() {
 	local passwd_line uid home shell
 	passwd_line="$(getent passwd "$NONROOT_USER" || true)"
 	if [[ -z ${passwd_line:-} ]]; then
-		error "Configured non-root user '$NONROOT_USER' does not exist (getent passwd failed)."
+		error "Configured non-root user" \
+			" '$NONROOT_USER' does not exist" \
+			" (getent passwd failed)."
 		exit 1
 	fi
 
@@ -268,15 +267,23 @@ validate_nonroot_user() {
 	shell="$(printf '%s' "$passwd_line" | cut -d: -f7)"
 
 	if [[ -z ${uid:-} || ${uid} -lt 1000 || ${uid} -ge 60000 ]]; then
-		warn "Configured user '$NONROOT_USER' has uid='$uid' (expected a normal user uid between 1000 and 59999)."
+		warn "Configured user '${NONROOT_USER}'" \
+			" has uid='${uid}'" \
+			" (expected a normal user uid" \
+			" between 1000 and 59999)."
 	fi
 
 	if [[ -z ${home:-} || ! -d ${home} ]]; then
-		warn "Configured user '$NONROOT_USER' has HOME='${home}', which is missing. Some per-user actions may fail."
+		warn "Configured user '${NONROOT_USER}'" \
+			" has HOME='${home}', which is" \
+			" missing. Some per-user actions" \
+			" may fail."
 	fi
 
 	if [[ -n ${shell:-} && ${shell} =~ (false|nologin)$ ]]; then
-		warn "Configured user '$NONROOT_USER' has shell='${shell}'. Some per-user actions may fail."
+		warn "Configured user '${NONROOT_USER}'" \
+			" has shell='${shell}'." \
+			" Some per-user actions may fail."
 	fi
 }
 
@@ -322,21 +329,25 @@ parse_args() {
 			;;
 		--help | -h)
 			flag_used=1
-			warn "CLI flag detected; using non-default options instead of standard behavior."
+			warn "CLI flag detected; using" \
+				" non-default options instead of" \
+				" standard behavior."
 			usage
 			;;
 		*)
-			# Unknown or positional arg — stop parsing
+			# Unknown or positional arg -- stop parsing
 			break
 			;;
 		esac
 	done
 	if [[ $flag_used -eq 1 ]]; then
-		warn "CLI flag detected; using non-default options instead of standard behavior."
+		warn "CLI flag detected; using" \
+			" non-default options instead of" \
+			" standard behavior."
 	fi
 }
 
-# ---- Maintenance phases ----------------------------------------------------
+# ---- Maintenance phases ----
 
 update_system_image() {
 	local phase_failed=0
@@ -344,16 +355,6 @@ update_system_image() {
 		warn "rpm-ostree not found, cannot update system image."
 		return 1
 	fi
-	disk_usage=$(
-		{
-			printf '\n=== Disk Usage (df -h) ===\n\n'
-			if require_cmd --check df; then
-				df -h
-			else
-				printf 'df not available.\n'
-			fi
-		} 2>&1 || true
-	)
 
 	log "Updating system via rpm-ostree (non-interactive)..."
 	if ! rpm-ostree update; then
@@ -396,8 +397,8 @@ cleanup_inactive_rpm_ostree_requests() {
 	fi
 
 	inactive_line="${inactive_line//,/ }"
-	# shellcheck disable=SC2206
-	local inactive_requests=($inactive_line)
+	local -a inactive_requests
+	read -ra inactive_requests <<<"$inactive_line"
 	if ((${#inactive_requests[@]} == 0)); then
 		log "No inactive rpm-ostree requests detected."
 		return
@@ -430,7 +431,10 @@ update_firmware() {
 			log "No firmware updates available."
 			updates_available=0
 		else
-			warn "fwupdmgr get-updates failed (rc=${rc}); continuing with fwupdmgr update as authoritative step."
+			warn "fwupdmgr get-updates failed" \
+				" (rc=${rc}); continuing with" \
+				" fwupdmgr update as" \
+				" authoritative step."
 		fi
 	fi
 	if ((updates_available == 1)); then
@@ -452,36 +456,55 @@ update_firmware() {
 
 update_homebrew() {
 	local phase_failed=0
-	local phase_log
 	log "Updating Homebrew applications..."
 
 	# Never run "brew" as root. Determine a primary non-root user and
 	# execute brew via that user's context using "runuser"/"run_as_user".
-	local BREW_PREFIX PREFIX_UID PREFIX_GID BREW_USER BREW_CMD BREW_PROXY_AUTO_FLAG BREW_RUN_USER BREW_WORKDIR BREW_UPGRADE_AUTO_FLAG
+	local BREW_PREFIX PREFIX_UID PREFIX_GID BREW_USER
+	local BREW_CMD BREW_PROXY_AUTO_FLAG BREW_RUN_USER
+	local BREW_WORKDIR BREW_UPGRADE_AUTO_FLAG
 	local BREW_CASK_OPTS_MIGRATED
 	local -a BREW_ENV
 	BREW_RUN_USER="$NONROOT_USER"
+
+	local brew_detect_cmd
+	brew_detect_cmd='
+if command -v brew-proxy >/dev/null 2>&1;
+then echo brew-proxy;
+elif command -v brew >/dev/null 2>&1;
+then echo brew; fi
+'
 
 	if ! require_cmd --check runuser; then
 		warn "'runuser' not available; cannot safely run Homebrew update."
 		return 1
 	fi
 
-	# Prefer brew-proxy when present for compatibility with secureblue setups.
-	BREW_CMD="$(runuser -u "$BREW_RUN_USER" -- bash -lc 'if command -v brew-proxy >/dev/null 2>&1; then echo brew-proxy; elif command -v brew >/dev/null 2>&1; then echo brew; fi' 2>/dev/null || true)"
+	# Prefer brew-proxy when present for compatibility
+	# with secureblue setups.
+	BREW_CMD="$(runuser -u "$BREW_RUN_USER" -- \
+		bash -lc "$brew_detect_cmd" \
+		2>/dev/null || true)"
 	if [[ -z ${BREW_CMD:-} ]]; then
-		warn "brew-proxy/brew not available for configured user '$BREW_RUN_USER'."
+		warn "brew-proxy/brew not available for" \
+			" configured user '$BREW_RUN_USER'."
 		return 1
 	fi
 
-	BREW_PREFIX="$(runuser -u "$BREW_RUN_USER" -- "$BREW_CMD" --prefix 2>/dev/null || true)"
+	BREW_PREFIX="$(runuser -u "$BREW_RUN_USER" -- \
+		"$BREW_CMD" --prefix 2>/dev/null || true)"
 	if [[ -z ${BREW_PREFIX:-} && $BREW_CMD == "brew-proxy" ]]; then
-		# brew-proxy may require an interactive auth session even for metadata.
-		# Fall back to direct brew for prefix discovery when available.
-		BREW_PREFIX="$(runuser -u "$BREW_RUN_USER" -- brew --prefix 2>/dev/null || true)"
+		# brew-proxy may require an interactive auth
+		# session even for metadata.
+		# Fall back to direct brew for prefix discovery
+		# when available.
+		BREW_PREFIX="$(runuser -u "$BREW_RUN_USER" -- \
+			brew --prefix 2>/dev/null || true)"
 	fi
 	if [[ -z ${BREW_PREFIX:-} || ! -d $BREW_PREFIX ]]; then
-		warn "Could not determine a valid Homebrew prefix for configured user '$BREW_RUN_USER'."
+		warn "Could not determine a valid Homebrew" \
+			" prefix for configured user" \
+			" '$BREW_RUN_USER'."
 		return 1
 	fi
 
@@ -500,7 +523,9 @@ update_homebrew() {
 	fi
 
 	if [[ $BREW_USER == "root" ]]; then
-		warn "Homebrew prefix at '$BREW_PREFIX' is owned by root; running brew as root is unsafe."
+		warn "Homebrew prefix at '$BREW_PREFIX'" \
+			" is owned by root; running brew as" \
+			" root is unsafe."
 		return 1
 	fi
 
@@ -508,17 +533,25 @@ update_homebrew() {
 		log "Homebrew prefix ownership differs from the configured user."
 		log "Using the Homebrew owner account for this phase."
 		BREW_RUN_USER="$BREW_USER"
-		BREW_CMD="$(runuser -u "$BREW_RUN_USER" -- bash -lc 'if command -v brew-proxy >/dev/null 2>&1; then echo brew-proxy; elif command -v brew >/dev/null 2>&1; then echo brew; fi' 2>/dev/null || true)"
+		BREW_CMD="$(runuser -u "$BREW_RUN_USER" -- \
+			bash -lc "$brew_detect_cmd" \
+			2>/dev/null || true)"
 		if [[ -z ${BREW_CMD:-} ]]; then
-			warn "brew-proxy/brew not available for Homebrew owner '$BREW_RUN_USER'."
+			warn "brew-proxy/brew not available for" \
+				" Homebrew owner" \
+				" '$BREW_RUN_USER'."
 			return 1
 		fi
 	fi
 
 	# When running as the Homebrew owner account, prefer direct brew over
-	# brew-proxy to avoid D-Bus/polkit auth requirements in unattended runs.
-	if [[ $BREW_CMD == "brew-proxy" && $BREW_RUN_USER == "$BREW_USER" ]]; then
-		if runuser -u "$BREW_RUN_USER" -- bash -lc 'command -v brew >/dev/null 2>&1'; then
+	# brew-proxy to avoid D-Bus/polkit auth requirements
+	# in unattended runs.
+	if [[ $BREW_CMD == "brew-proxy" &&
+		$BREW_RUN_USER == "$BREW_USER" ]]; then
+		if runuser -u "$BREW_RUN_USER" -- \
+			bash -lc \
+			'command -v brew >/dev/null 2>&1'; then
 			log "Using direct brew for Homebrew maintenance."
 			BREW_CMD="brew"
 		fi
@@ -542,18 +575,26 @@ update_homebrew() {
 		warn "Could not switch to Homebrew workdir '$BREW_WORKDIR'."
 		return 1
 	fi
-	phase_log="$(mktemp /tmp/secureblue-brew.XXXXXX)"
 
 	# Prefer explicit non-interactive flag for brew-proxy when available.
 	if [[ $BREW_CMD == "brew-proxy" ]]; then
-		if runuser -u "$BREW_RUN_USER" -- "${BREW_ENV[@]}" brew-proxy --help 2>/dev/null | grep -q -- '--yes'; then
+		if runuser -u "$BREW_RUN_USER" -- \
+			"${BREW_ENV[@]}" brew-proxy --help \
+			2>/dev/null | grep -q -- '--yes'; then
 			BREW_PROXY_AUTO_FLAG="--yes"
-		elif runuser -u "$BREW_RUN_USER" -- "${BREW_ENV[@]}" brew-proxy --help 2>/dev/null | grep -q -- '--auto'; then
+		elif runuser -u "$BREW_RUN_USER" -- \
+			"${BREW_ENV[@]}" brew-proxy --help \
+			2>/dev/null | grep -q -- '--auto'; then
 			BREW_PROXY_AUTO_FLAG="--auto"
-		elif runuser -u "$BREW_RUN_USER" -- "${BREW_ENV[@]}" brew-proxy --help 2>/dev/null | grep -q -- '--non-interactive'; then
+		elif runuser -u "$BREW_RUN_USER" -- \
+			"${BREW_ENV[@]}" brew-proxy --help \
+			2>/dev/null | grep -q -- \
+			'--non-interactive'; then
 			BREW_PROXY_AUTO_FLAG="--non-interactive"
 		fi
-	elif runuser -u "$BREW_RUN_USER" -- "${BREW_ENV[@]}" brew upgrade --help 2>/dev/null | grep -q -- '--yes'; then
+	elif runuser -u "$BREW_RUN_USER" -- \
+		"${BREW_ENV[@]}" brew upgrade --help \
+		2>/dev/null | grep -q -- '--yes'; then
 		BREW_UPGRADE_AUTO_FLAG="--yes"
 	fi
 
@@ -561,32 +602,33 @@ update_homebrew() {
 	if [[ -n ${BREW_PROXY_AUTO_FLAG:-} ]]; then
 		log "Using ${BREW_CMD} auto-confirm flag: ${BREW_PROXY_AUTO_FLAG}"
 	fi
-	if ! run_logged_cmd "$phase_log" "brew update" run_as_user "$BREW_RUN_USER" "${BREW_ENV[@]}" "$BREW_CMD" ${BREW_PROXY_AUTO_FLAG:+"$BREW_PROXY_AUTO_FLAG"} update; then
+	if ! run_phase_cmd "brew update" \
+		run_as_user "$BREW_RUN_USER" \
+		"${BREW_ENV[@]}" "$BREW_CMD" \
+		${BREW_PROXY_AUTO_FLAG:+"$BREW_PROXY_AUTO_FLAG"} \
+		update; then
 		warn "brew update failed."
 		phase_failed=1
 	fi
-	if ! run_logged_cmd "$phase_log" "brew upgrade --greedy" run_as_user "$BREW_RUN_USER" "${BREW_ENV[@]}" "$BREW_CMD" ${BREW_PROXY_AUTO_FLAG:+"$BREW_PROXY_AUTO_FLAG"} upgrade ${BREW_UPGRADE_AUTO_FLAG:+"$BREW_UPGRADE_AUTO_FLAG"} --greedy; then
+	if ! run_phase_cmd "brew upgrade --greedy" \
+		run_as_user "$BREW_RUN_USER" \
+		"${BREW_ENV[@]}" "$BREW_CMD" \
+		${BREW_PROXY_AUTO_FLAG:+"$BREW_PROXY_AUTO_FLAG"} \
+		upgrade \
+		${BREW_UPGRADE_AUTO_FLAG:+"$BREW_UPGRADE_AUTO_FLAG"} \
+		--greedy; then
 		warn "brew upgrade failed."
 		phase_failed=1
 	fi
-	if ! run_logged_cmd "$phase_log" "brew cleanup" run_as_user "$BREW_RUN_USER" "${BREW_ENV[@]}" "$BREW_CMD" ${BREW_PROXY_AUTO_FLAG:+"$BREW_PROXY_AUTO_FLAG"} cleanup; then
+	if ! run_phase_cmd "brew cleanup" \
+		run_as_user "$BREW_RUN_USER" \
+		"${BREW_ENV[@]}" "$BREW_CMD" \
+		${BREW_PROXY_AUTO_FLAG:+"$BREW_PROXY_AUTO_FLAG"} \
+		cleanup; then
 		warn "brew cleanup failed."
 	fi
 	if [[ $phase_failed -eq 0 ]]; then
-		BREW_DIAGNOSTICS_FILE="$(mktemp /tmp/secureblue-brew-diagnostics.XXXXXX)"
-		printf '\n---\n\n=== Homebrew Missing ===\n\n' >>"$BREW_DIAGNOSTICS_FILE"
-		if ! run_logged_cmd "$BREW_DIAGNOSTICS_FILE" "brew missing" run_as_user "$BREW_RUN_USER" "${BREW_ENV[@]}" "$BREW_CMD" ${BREW_PROXY_AUTO_FLAG:+"$BREW_PROXY_AUTO_FLAG"} missing; then
-			warn "brew missing failed."
-		fi
-		printf '\n---\n\n=== Homebrew Doctor ===\n\n' >>"$BREW_DIAGNOSTICS_FILE"
-		if ! run_logged_cmd "$BREW_DIAGNOSTICS_FILE" "brew doctor" run_as_user "$BREW_RUN_USER" "${BREW_ENV[@]}" "$BREW_CMD" ${BREW_PROXY_AUTO_FLAG:+"$BREW_PROXY_AUTO_FLAG"} doctor; then
-			warn "brew doctor failed."
-		fi
-	fi
-	if [[ $phase_failed -eq 0 ]]; then
-		log "Homebrew maintenance details written to ${phase_log}."
-	else
-		warn "Homebrew maintenance details written to ${phase_log}."
+		log "Homebrew maintenance completed."
 	fi
 
 	((phase_failed == 0))
@@ -615,14 +657,19 @@ update_flatpak() {
 
 	# Per-user updates
 	if ! require_cmd --check runuser; then
-		warn "'runuser' not available; cannot run per-user Flatpak updates/repairs."
+		warn "'runuser' not available; cannot" \
+			" run per-user Flatpak" \
+			" updates/repairs."
 		return 1
 	fi
 
-	log "Updating and repairing Flatpak user installation for configured user: ${NONROOT_USER}"
+	log "Updating and repairing Flatpak user" \
+		" installation for configured user:" \
+		" ${NONROOT_USER}"
 	local home
 	home="$(user_home_dir "$NONROOT_USER" || true)"
-	if [[ -n ${home:-} && -d $home && -d "$home/.local/share/flatpak" ]]; then
+	if [[ -n ${home:-} && -d $home &&
+		-d "$home/.local/share/flatpak" ]]; then
 		if ! run_as_user_env "$NONROOT_USER" flatpak repair --user; then
 			warn "flatpak user repair failed for $NONROOT_USER."
 			phase_failed=1
@@ -631,12 +678,16 @@ update_flatpak() {
 			warn "flatpak user update failed for $NONROOT_USER."
 			phase_failed=1
 		fi
-		if ! run_as_user_env "$NONROOT_USER" flatpak uninstall --user --unused -y; then
+		if ! run_as_user_env "$NONROOT_USER" \
+			flatpak uninstall --user --unused -y; then
 			warn "flatpak user cleanup failed for $NONROOT_USER."
 			phase_failed=1
 		fi
 	else
-		warn "No per-user Flatpak installation detected for '${NONROOT_USER}' (missing ${home:-<unknown>}/.local/share/flatpak)."
+		warn "No per-user Flatpak installation" \
+			" detected for '${NONROOT_USER}'" \
+			" (missing" \
+			" ${home:-<unknown>}/.local/share/flatpak)."
 		phase_failed=1
 	fi
 
@@ -681,7 +732,9 @@ maintain_filesystems() {
 	done < <(lsblk -rno NAME,FSTYPE,MOUNTPOINT 2>/dev/null)
 
 	if ((${#btrfs_dev_mp[@]} == 0 && ${#ext4_dev_mp[@]} == 0)); then
-		log "No ext4 or btrfs block devices with mountpoints detected; skipping filesystem maintenance."
+		log "No ext4 or btrfs block devices with" \
+			" mountpoints detected; skipping" \
+			" filesystem maintenance."
 		return
 	fi
 
@@ -694,7 +747,9 @@ maintain_filesystems() {
 			local dev mp
 			for dev in "${!btrfs_dev_mp[@]}"; do
 				mp="${btrfs_dev_mp[$dev]}"
-				log "Running non-destructive maintenance on btrfs filesystem $dev (mounted at $mp)..."
+				log "Running non-destructive maintenance on" \
+					" btrfs filesystem $dev" \
+					" (mounted at $mp)..."
 
 				# Scrub: verify data and repair using redundancy if possible
 				if ! btrfs scrub start -Bd "$mp"; then
@@ -702,7 +757,9 @@ maintain_filesystems() {
 					phase_failed=1
 				fi
 
-				# Full balance: reorganize all chunks (can be heavy on large disks, but non-destructive)
+				# Full balance: reorganize all chunks
+				# (can be heavy on large disks, but
+				# non-destructive)
 				if ! btrfs balance start --full-balance "$mp"; then
 					warn "btrfs balance failed for $mp."
 					phase_failed=1
@@ -726,7 +783,9 @@ maintain_filesystems() {
 			local dev mp
 			for dev in "${!ext4_dev_mp[@]}"; do
 				mp="${ext4_dev_mp[$dev]}"
-				log "Running non-destructive maintenance on ext4 filesystem $dev (mounted at $mp)..."
+				log "Running non-destructive maintenance on" \
+					" ext4 filesystem $dev" \
+					" (mounted at $mp)..."
 
 				# Check fragmentation level (non-destructive)
 				if ! e4defrag -c "$mp"; then
@@ -747,232 +806,186 @@ maintain_filesystems() {
 }
 
 run_security_audit() {
-	local audit_dir audit_ts audit_log audit_report
-	audit_dir="/var/log/secureblue"
-	mkdir -p "$audit_dir"
+	local audit_ts audit_log
 
 	if command -v lynis >/dev/null 2>&1; then
 		audit_ts="$(date +%Y%m%d-%H%M%S)"
-		audit_log="${audit_dir}/lynis-audit-${audit_ts}.log"
-		audit_report="${audit_dir}/lynis-report-${audit_ts}.dat"
-		log "Running Lynis security audit (log: ${audit_log}, report: ${audit_report})..."
-		if lynis audit system --quiet --logfile "$audit_log" --report-file "$audit_report"; then
-			chmod 0600 "$audit_log" "$audit_report" || true
+		audit_log="/tmp/lynis-audit-${audit_ts}.log"
+		log "Running Lynis security audit..."
+		local lynis_rc=0
+		lynis audit system --quiet \
+			2>&1 | tee "$audit_log" || lynis_rc=$?
+		if [[ $lynis_rc -eq 0 ]]; then
 			log "Lynis security audit completed."
 		else
-			warn "Lynis security audit encountered errors. See ${audit_log} for details."
+			warn "Lynis security audit encountered" \
+				"errors."
 		fi
+		log "Report saved to ${audit_log}"
 	else
-		warn "lynis not installed; skipping security audit."
-	fi
-
-	if find "$audit_dir" -type f \( -name 'lynis-audit-*.log' -o -name 'lynis-report-*.dat' \) -mtime +7 -print0 2>/dev/null | xargs -0r rm -f; then
-		log "Old security audit logs older than 7 days removed (if any)."
-	else
-		warn "Failed to clean old security audit logs in ${audit_dir}."
+		warn "lynis not installed; skipping" \
+			"security audit."
 	fi
 }
 
 collect_system_info() {
 	if ! require_cmd --check ujust fpaste; then
-		warn "ujust or fpaste not found; cannot collect Secureblue information."
+		warn "ujust or fpaste not found; cannot" \
+			"collect Secureblue information."
 		return 1
 	fi
 
-	local info_log_dir info_log
-	info_log_dir="/var/log/secureblue"
-	mkdir -p "$info_log_dir"
-	info_log="${info_log_dir}/secureblue-info-$(date +%Y%m%d-%H%M%S).log"
-
-	# Use a configured non-root user for any user-context commands.
 	local run_user
 	if require_cmd --check runuser; then
 		run_user="runuser -u ${NONROOT_USER} --"
-		log "Running ujust/flatpak/brew info as configured user: ${NONROOT_USER}"
+		log "Running ujust/flatpak/brew info as" \
+			"configured user: ${NONROOT_USER}"
 	else
 		run_user=""
-		warn "'runuser' not available; ujust/flatpak will run as root; brew info will be skipped."
+		warn "'runuser' not available; ujust/flatpak" \
+			"will run as root; brew info will be skipped."
 	fi
 
-	log "Collecting Secureblue debug information to ${info_log} (non-interactive)..."
+	local info_log
+	info_log="/tmp/secureblue-info-$(date +%Y%m%d-%H%M%S).log"
+
+	log "Collecting Secureblue debug information..."
 
 	print_section() {
 		printf '\n---\n\n=== %s ===\n\n' "$1"
 	}
 
-	local sysinfo rpm_ostree_status flatpaks homebrew_packages
-	local audit_results local_overrides recent_events last_boot_events failed_services brew_services brew_diagnostics disk_usage
-	local content tmpfile
+	{
+		print_section "System Info"
+		fpaste --sysinfo --printonly 2>&1 || true
 
-	sysinfo=$(
-		{
-			print_section "System Info"
-			fpaste --sysinfo --printonly
-		} 2>&1 || true
-	)
+		print_section "Rpm-Ostree Status"
+		if require_cmd --check rpm-ostree; then
+			rpm-ostree status --verbose 2>&1 || true
+		else
+			printf 'rpm-ostree not available.\n'
+		fi
 
-	rpm_ostree_status=$(
-		{
-			print_section "Rpm-Ostree Status"
-			if require_cmd --check rpm-ostree; then
-				rpm-ostree status --verbose
-			else
-				printf 'rpm-ostree not available.\n'
-			fi
-		} 2>&1 || true
-	)
-
-	flatpaks=$(
-		{
-			print_section "Flatpaks Installed"
-			if require_cmd --check flatpak; then
-				if [[ -n ${run_user:-} ]]; then
-					# Run flatpak as the configured non-root user
-					$run_user flatpak list --columns=application,version,options
-				else
-					flatpak list --columns=application,version,options
-				fi
-			else
-				printf 'flatpak not available.\n'
-			fi
-		} 2>&1 || true
-	)
-
-	homebrew_packages=$(
-		{
-			print_section "Homebrew Packages Installed"
-			if require_cmd --check brew; then
-				if [[ -n ${run_user:-} ]]; then
-					# Run brew as the configured non-root user
-					$run_user brew list --versions
-				else
-					warn "Skipping brew list --versions because running brew as root is unsafe."
-				fi
-			else
-				printf 'brew not available.\n'
-			fi
-		} 2>&1 || true
-	)
-
-	audit_results=$(
-		{
-			print_section "Audit Results"
+		print_section "Flatpaks Installed"
+		if require_cmd --check flatpak; then
 			if [[ -n ${run_user:-} ]]; then
-				# Run ujust as the configured non-root user
-				$run_user ujust audit-secureblue
+				$run_user flatpak list \
+					--columns=app,version,options \
+					2>&1 || true
 			else
-				ujust audit-secureblue
+				flatpak list \
+					--columns=app,version,options \
+					2>&1 || true
 			fi
-		} 2>&1 || true
-	)
+		else
+			printf 'flatpak not available.\n'
+		fi
 
-	local_overrides=$(
-		{
-			print_section "Listing Local Overrides"
+		print_section "Homebrew Packages Installed"
+		if require_cmd --check brew; then
 			if [[ -n ${run_user:-} ]]; then
-				# Run ujust as the configured non-root user
-				$run_user ujust check-local-overrides
+				$run_user brew list --versions \
+					2>&1 || true
 			else
-				ujust check-local-overrides
+				warn "Skipping brew list --versions;" \
+					"brew as root is unsafe."
 			fi
-		} 2>&1 || true
-	)
+		else
+			printf 'brew not available.\n'
+		fi
 
-	last_boot_events=$(
-		{
-			print_section "Previous Boot Events (warnings/errors)"
-			journalctl -b -1 -p warning..alert
-		} 2>&1 || true
-	)
+		print_section "Audit Results"
+		if [[ -n ${run_user:-} ]]; then
+			$run_user ujust audit-secureblue \
+				2>&1 || true
+		else
+			ujust audit-secureblue 2>&1 || true
+		fi
 
-	recent_events=$(
-		{
-			print_section "Recent System Events (warnings/errors, last hour)"
-			journalctl -b -p warning..alert --since "1 hour ago"
-		} 2>&1 || true
-	)
+		print_section "Listing Local Overrides"
+		if [[ -n ${run_user:-} ]]; then
+			$run_user ujust \
+				check-local-overrides \
+				2>&1 || true
+		else
+			ujust check-local-overrides \
+				2>&1 || true
+		fi
 
-	failed_services=$(
-		{
-			print_section "Failed Systemd Services (system)"
-			systemctl list-units --state=failed || true
+		print_section \
+			"Previous Boot Events (warnings/errors)"
+		journalctl -b -1 -p warning..alert \
+			2>&1 || true
 
-			print_section "Failed Systemd Services (user: ${NONROOT_USER})"
-			if require_cmd --check runuser; then
-				if ! run_as_user_env "$NONROOT_USER" systemctl --user list-units --state=failed; then
-					printf 'Could not query user systemd instance for %s (no session bus / XDG_RUNTIME_DIR?).\n' "$NONROOT_USER"
-				fi
+		print_section \
+			"Recent System Events (warnings/errors, last hour)"
+		journalctl -b -p warning..alert \
+			--since "1 hour ago" 2>&1 || true
+
+		print_section "Failed Systemd Services (system)"
+		systemctl list-units --state=failed \
+			2>&1 || true
+
+		print_section \
+			"Failed Systemd Services (user: ${NONROOT_USER})"
+		if require_cmd --check runuser; then
+			if ! run_as_user_env "$NONROOT_USER" \
+				systemctl --user list-units \
+				--state=failed 2>&1; then
+				printf '%s\n' \
+					"Could not query user systemd" \
+					" for ${NONROOT_USER}" \
+					" (no session)."
+			fi
+		else
+			printf '%s\n' \
+				"'runuser' not available;" \
+				" skipping user systemd status."
+		fi
+
+		print_section "Homebrew Services Status"
+		if require_cmd --check brew; then
+			if [[ -n ${run_user:-} ]]; then
+				$run_user brew services \
+					info --all 2>&1 || true
 			else
-				printf "'runuser' not available; skipping user systemd status.\n"
+				warn "Skipping brew services info;" \
+					"brew as root is unsafe."
 			fi
-		} 2>&1 || true
-	)
+		else
+			printf 'brew not available.\n'
+		fi
 
-	brew_services=$(
-		{
-			print_section "Homebrew Services Status"
-			if require_cmd --check brew; then
-				if [[ -n ${run_user:-} ]]; then
-					# Run brew services as the configured non-root user
-					$run_user brew services info --all
-				else
-					warn "Skipping brew services info --all because running brew as root is unsafe."
-				fi
-			else
-				printf 'brew not available.\n'
-			fi
-		} 2>&1 || true
-	)
+		print_section "Disk Usage (df -h)"
+		if require_cmd --check df; then
+			df -h 2>&1 || true
+		else
+			printf 'df not available.\n'
+		fi
+	} 2>&1 | tee "$info_log"
 
-	brew_diagnostics=""
-	if [[ -n ${BREW_DIAGNOSTICS_FILE:-} && -f ${BREW_DIAGNOSTICS_FILE} ]]; then
-		brew_diagnostics="$(<"$BREW_DIAGNOSTICS_FILE")"
-		rm -f "$BREW_DIAGNOSTICS_FILE"
-		BREW_DIAGNOSTICS_FILE=""
-	fi
-
-	disk_usage=$(
-		{
-			print_section "Disk Usage (df -h)"
-			if require_cmd --check df; then
-				df -h
-			else
-				printf 'df not available.\n'
-			fi
-		} 2>&1 || true
-	)
-
-	content="${sysinfo}${rpm_ostree_status}${flatpaks}${homebrew_packages}${audit_results}${local_overrides}${last_boot_events}${recent_events}${failed_services}${brew_services}${brew_diagnostics}${disk_usage}"
-
-	tmpfile="$(mktemp /tmp/secureblue-info.XXXXXX)"
-	printf "%s\n" "$content" >"$tmpfile"
-
-	if mv "$tmpfile" "$info_log"; then
-		chmod 0600 "$info_log" || true
-		log "Secureblue information written to ${info_log}."
-	else
-		warn "Failed to write Secureblue information to ${info_log}."
-		rm -f "$tmpfile"
-	fi
-
-	if find "$info_log_dir" -type f -name 'secureblue-info-*.log' -mtime +7 -print0 2>/dev/null | xargs -0r rm -f; then
-		log "Old Secureblue info logs older than 7 days removed (if any)."
-	else
-		warn "Failed to clean old Secureblue info logs in ${info_log_dir}."
-	fi
+	log "Secureblue information saved to ${info_log}"
 }
 
 run_optional_phases() {
 	if [[ -z ${SKIP_AUDIT:-} ]]; then
-		run_phase "security-audit" "optional" "Security audit" run_security_audit
+		run_phase "security-audit" "optional" \
+			"Security audit" run_security_audit
 	else
-		mark_phase_skipped "security-audit" "optional" "Security audit" "flag set"
+		mark_phase_skipped "security-audit" \
+			"optional" "Security audit" \
+			"flag set"
 	fi
 
 	if [[ -z ${SKIP_COLLECT:-} ]]; then
-		run_phase "collect-system-info" "optional" "Collect Secureblue info" collect_system_info
+		run_phase "collect-system-info" "optional" \
+			"Collect Secureblue info" \
+			collect_system_info
 	else
-		mark_phase_skipped "collect-system-info" "optional" "Collect Secureblue info" "flag set"
+		mark_phase_skipped "collect-system-info" \
+			"optional" \
+			"Collect Secureblue info" \
+			"flag set"
 	fi
 }
 
@@ -983,7 +996,7 @@ bootstrap() {
 	validate_nonroot_user
 }
 
-# ---- Main ------------------------------------------------------------------
+# ---- Main ----
 main() {
 	log "Starting update process..."
 	PHASE_ORDER=()
@@ -991,11 +1004,16 @@ main() {
 	PHASE_KIND=()
 	PHASE_LABEL=()
 
-	run_phase "system-image" "mandatory" "System image update" update_system_image
-	run_phase "firmware" "mandatory" "Firmware update" update_firmware
-	run_phase "homebrew" "mandatory" "Homebrew update" update_homebrew
-	run_phase "flatpak" "mandatory" "Flatpak update" update_flatpak
-	run_phase "filesystems" "mandatory" "Filesystem maintenance" maintain_filesystems
+	run_phase "system-image" "mandatory" \
+		"System image update" update_system_image
+	run_phase "firmware" "mandatory" "Firmware update" \
+		update_firmware
+	run_phase "homebrew" "mandatory" "Homebrew update" \
+		update_homebrew
+	run_phase "flatpak" "mandatory" "Flatpak update" \
+		update_flatpak
+	run_phase "filesystems" "mandatory" \
+		"Filesystem maintenance" maintain_filesystems
 	run_optional_phases
 
 	if print_phase_summary; then

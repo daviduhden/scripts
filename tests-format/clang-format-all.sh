@@ -8,8 +8,9 @@ printf '%s\n' "[INFO] Logging to: $TMPLOG" >&3
 exec >"$TMPLOG" 2>&1
 
 # clang-format-all.sh
-# - Recursively finds all C/C++ source files under ROOT_DIR (default: current
-#   directory excluding .git) and applies formatting.
+# - Recursively finds all C/C++ source files under ROOT_DIR
+#   (default: current directory excluding .git) and applies
+#   formatting.
 # - Prefers knfmt when available; otherwise falls back to clang-format.
 # - Usage: ./clang-format-all.sh [ROOT_DIR]
 # - Requires: knfmt or clang-format in PATH
@@ -52,20 +53,37 @@ run_clang_format_all() {
 		FORMATTER="clang-format"
 	else
 		if [ "$OS_NAME" = "OpenBSD" ]; then
-			printf '%s\n' "[INFO] Neither knfmt nor clang-format found (install devel/knfmt or clang-tools-extra); skipping C/C++ formatting"
+			printf '%s\n' \
+				"[INFO] Neither knfmt nor clang-format found" \
+				" (install devel/knfmt or clang-tools-extra);" \
+				" skipping C/C++ formatting"
 		else
-			printf '%s\n' "[INFO] Neither knfmt nor clang-format found in PATH; skipping C/C++ formatting"
+			printf '%s\n' \
+				"[INFO] Neither knfmt nor clang-format found in PATH;" \
+				" skipping C/C++ formatting"
 		fi
 		exit 0
 	fi
 
-	if ! find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name "*.[ch]" -o -name "*.cc" -o -name "*.cpp" -o -name "*.cxx" -o -name "*.hh" -o -name "*.hpp" -o -name "*.hxx" \) -print | sed -n '1p' | grep -q .; then
+	if ! find "$ROOT_DIR" \
+		\( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) \
+		-prune -o -type f \
+		\( -name "*.[ch]" -o -name "*.cc" -o -name "*.cpp" \
+		-o -name "*.cxx" -o -name "*.hh" -o -name "*.hpp" \
+		-o -name "*.hxx" \) \
+		-print | sed -n '1p' | grep -q .; then
 		printf '%s\n' "[INFO] No C/C++ source files found under: $ROOT_DIR"
 		exit 0
 	fi
 
 	printf '%s\n' "[INFO] Applying C/C++ formatting with $FORMATTER..."
-	find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name "*.[ch]" -o -name "*.cc" -o -name "*.cpp" -o -name "*.cxx" -o -name "*.hh" -o -name "*.hpp" -o -name "*.hxx" \) -print |
+	find "$ROOT_DIR" \
+		\( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) \
+		-prune -o -type f \
+		\( -name "*.[ch]" -o -name "*.cc" -o -name "*.cpp" \
+		-o -name "*.cxx" -o -name "*.hh" -o -name "*.hpp" \
+		-o -name "*.hxx" \) \
+		-print |
 		while IFS= read -r f; do
 			[ -n "$f" ] || continue
 			if [ "$FORMATTER" = "knfmt" ]; then

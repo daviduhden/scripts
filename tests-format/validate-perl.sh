@@ -8,8 +8,9 @@ printf '%s\n' "[INFO] Logging to: $TMPLOG" >&3
 exec >"$TMPLOG" 2>&1
 
 # validate-perl.sh
-# - Recursively finds all Perl files under ROOT_DIR (default: current directory)
-#   and checks formatting with perltidy and Perl syntax.
+# - Recursively finds all Perl files under ROOT_DIR
+#   (default: current directory) and checks formatting
+#   with perltidy and Perl syntax.
 # - Usage: ./validate-perl.sh [ROOT_DIR]
 # - Requires: perltidy, perl in PATH
 #
@@ -54,7 +55,12 @@ run_validate_perl() {
 		UNFMT="$TMPDIR_BASE/unformatted-perl-$$.txt"
 
 		# Detect files that would change formatting
-		find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name '*.pl' -o -name '*.pm' -o -name '*.t' -o -name '*.psgi' \) -print |
+		find "$ROOT_DIR" \
+			\( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) \
+			-prune -o -type f \
+			\( -name '*.pl' -o -name '*.pm' \
+			-o -name '*.t' -o -name '*.psgi' \) \
+			-print |
 			while IFS= read -r f; do
 				[ -n "$f" ] || continue
 				if ! perltidy -ast -se -o /dev/null "$f" >/dev/null 2>&1; then
@@ -68,8 +74,11 @@ run_validate_perl() {
 
 			while IFS= read -r file; do
 				[ -n "$file" ] || continue
-				# Format in-place without backups (backup extension "/" disables backups)
-				if perltidy --backup-and-modify-in-place --backup-file-extension=/ -se "$file" >/dev/null 2>&1; then
+				# Format in-place without backups
+				# (backup extension "/" disables backups)
+				if perltidy --backup-and-modify-in-place \
+					--backup-file-extension=/ \
+					-se "$file" >/dev/null 2>&1; then
 					note_fail "$file"
 				else
 					printf '%s\n' "[WARN] perltidy failed for: $file" 1>&2
@@ -82,11 +91,18 @@ run_validate_perl() {
 
 		rm -f "$UNFMT"
 	else
-		printf '%s\n' "[INFO] perltidy not installed; skipping Perl formatting"
+		printf '%s\n' \
+			"[INFO] perltidy not installed;" \
+			" skipping Perl formatting"
 	fi
 
 	printf '%s\n' "[INFO] Running Perl syntax checks..."
-	find "$ROOT_DIR" \( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o -type f \( -name '*.pl' -o -name '*.pm' -o -name '*.t' -o -name '*.psgi' \) -print |
+	find "$ROOT_DIR" \
+		\( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) \
+		-prune -o -type f \
+		\( -name '*.pl' -o -name '*.pm' \
+		-o -name '*.t' -o -name '*.psgi' \) \
+		-print |
 		while IFS= read -r f; do
 			[ -n "$f" ] || continue
 			set +e
@@ -95,7 +111,9 @@ run_validate_perl() {
 			set -e
 			if [ "${perlc_rc:-0}" -ne 0 ]; then
 				if printf "%s" "$perlc_out" | grep -qi "Can.t locate"; then
-					printf '%s\n' "[WARN] Skipping syntax check for $f due to missing modules" 1>&2
+					printf '%s\n' \
+						"[WARN] Skipping syntax check for $f" \
+						" due to missing modules" 1>&2
 				else
 					printf '%s\n' "[ERROR] Perl syntax error in: $f" 1>&2
 					printf "%s\n" "$f"
@@ -111,7 +129,9 @@ run_validate_perl() {
 	fi
 
 	if [ "${issues:-0}" -ne 0 ]; then
-		printf '%s\n' "[INFO] Completed with $issues issue(s) (format changes and/or errors)"
+		printf '%s\n' \
+			"[INFO] Completed with $issues issue(s)" \
+			" (format changes and/or errors)"
 		printf '%s\n' "[INFO] Affected files (unique, first 200):"
 		sort -u "$TMP_FAILS" | sed -n '1,200p' | sed 's/^/  - /'
 		exit 2

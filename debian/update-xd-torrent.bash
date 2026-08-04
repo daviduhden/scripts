@@ -15,14 +15,18 @@ set -euo pipefail
 # and license details.
 
 # Basic PATH
-PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/go/bin
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+PATH="${PATH}:/usr/local/go/bin"
 export PATH
 
 REPO="majestrate/XD"
 REPO_URL="https://github.com/${REPO}.git"
 BUILD_DIR="${HOME}/.local/src"
 BIN_NAME="XD"
-SYSTEMD_UNIT_URL="https://raw.githubusercontent.com/majestrate/XD/refs/heads/master/contrib/systemd/xd.service"
+SYSTEMD_UNIT_URL="https://raw.githubusercontent.com"
+SYSTEMD_UNIT_URL="${SYSTEMD_UNIT_URL}/majestrate/XD"
+SYSTEMD_UNIT_URL="${SYSTEMD_UNIT_URL}/refs/heads/master"
+SYSTEMD_UNIT_URL="${SYSTEMD_UNIT_URL}/contrib/systemd/xd.service"
 SYSTEMD_UNIT_FILE="/etc/systemd/system/xd.service"
 XD_USER="xd"
 XD_GROUP="xd"
@@ -38,7 +42,9 @@ usage() {
 Usage: update-xd-torrent.bash [--skip-service-and-user-setup]
 
 Options:
-  --skip-service-and-user-setup  Skip xd user/group creation and systemd install/enable steps.
+  --skip-service-and-user-setup  Skip xd user/group
+                                creation and systemd
+                                install/enable steps.
   -h, --help                     Show this help message and exit.
 EOF
 }
@@ -53,7 +59,9 @@ parse_args() {
 			;;
 		-h | --help)
 			flag_used=1
-			warn "CLI flag detected; using non-default options instead of standard behavior."
+			warn "CLI flag detected;" \
+				"using non-default options" \
+				"instead of standard behavior."
 			usage
 			exit 0
 			;;
@@ -64,27 +72,16 @@ parse_args() {
 		shift
 	done
 	if [ "$flag_used" -eq 1 ]; then
-		warn "CLI flag detected; using non-default options instead of standard behavior."
+		warn "CLI flag detected;" \
+			"using non-default options" \
+			"instead of standard behavior."
 	fi
 }
 
-# Colors
-if [ -t 1 ] && [ "${NO_COLOR:-0}" != "1" ]; then
-	GREEN="\033[32m"
-	YELLOW="\033[33m"
-	RED="\033[31m"
-	RESET="\033[0m"
-else
-	GREEN=""
-	YELLOW=""
-	RED=""
-	RESET=""
-fi
-
-log() { printf '%s %b[INFO]%b ✅ %s\n' "$(date '+%F %T')" "$GREEN" "$RESET" "$*"; }
-warn() { printf '%s %b[WARN]%b ⚠️ %s\n' "$(date '+%F %T')" "$YELLOW" "$RESET" "$*"; }
+log() { printf '%s [INFO] %s\n' "$(date '+%F %T')" "$*"; }
+warn() { printf '%s [WARN] %s\n' "$(date '+%F %T')" "$*"; }
 error() {
-	printf '%s %b[ERROR]%b ❌ %s\n' "$(date '+%F %T')" "$RED" "$RESET" "$*" >&2
+	printf '%s [ERROR] %s\n' "$(date '+%F %T')" "$*" >&2
 	exit 1
 }
 
@@ -93,7 +90,8 @@ require_root() {
 }
 
 require_cmd() {
-	command -v "$1" >/dev/null 2>&1 || error "Required command '$1' not found."
+	command -v "$1" >/dev/null 2>&1 ||
+		error "Required command '$1' not found."
 }
 
 net_curl() {
@@ -119,12 +117,17 @@ clone_or_update_repo() {
 	git fetch --tags --prune origin || git fetch --tags --prune
 
 	# Determine latest tag (by tag creation date)
-	latest_tag=$(git describe --tags "$(git rev-list --tags --max-count=1)" 2>/dev/null || true)
+	latest_tag=$(git describe --tags \
+		"$(git rev-list --tags --max-count=1)" \
+		2>/dev/null || true)
 
 	if [ -n "$latest_tag" ]; then
-		local_tag=$(git describe --tags --exact-match HEAD 2>/dev/null || true)
+		local_tag=$(git describe --tags \
+			--exact-match HEAD 2>/dev/null || true)
 		if [ "$local_tag" = "$latest_tag" ]; then
-			log "Local repository is already at latest tag '$latest_tag'. Skipping build."
+			log "Local repository is already at" \
+				"latest tag '$latest_tag'." \
+				"Skipping build."
 			SKIP_BUILD=1
 			return
 		fi
@@ -154,7 +157,10 @@ ensure_xd_user_group_and_home() {
 
 	if ! id -u "$XD_USER" >/dev/null 2>&1; then
 		log "Creating system user '$XD_USER'..."
-		useradd --system --gid "$XD_GROUP" --home-dir "$XD_HOME_DIR" --shell /usr/sbin/nologin "$XD_USER"
+		useradd --system \
+			--gid "$XD_GROUP" \
+			--home-dir "$XD_HOME_DIR" \
+			--shell /usr/sbin/nologin "$XD_USER"
 	fi
 
 	mkdir -p "$XD_HOME_DIR"

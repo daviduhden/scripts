@@ -15,37 +15,38 @@ set -euo pipefail
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
-GREEN="\e[32m"
-YELLOW="\e[33m"
-RED="\e[31m"
-RESET="\e[0m"
-
-log() { printf '%s %b[INFO]%b ✅ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$GREEN" "$RESET" "$*"; }
-warn() { printf '%s %b[WARN]%b ⚠️ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$YELLOW" "$RESET" "$*"; }
+log() { printf '%s [INFO] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
+warn() { printf '%s [WARN] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
 error() {
-	printf '%s %b[ERROR]%b ❌ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$RED" "$RESET" "$*" >&2
+	printf '%s [ERROR] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2
 	exit 1
 }
 
 fetch_key() {
 	if command -v curl >/dev/null 2>&1; then
-		curl -fLsS --retry 5 "https://cli.github.com/packages/githubcli-archive-keyring.gpg" -o "$TMPKEY" && return 0
+		curl -fLsS --retry 5 \
+			"https://cli.github.com/packages/githubcli-archive-keyring.gpg" \
+			-o "$TMPKEY" && return 0
 	fi
 	if command -v wget >/dev/null 2>&1; then
-		wget -nv -O "$TMPKEY" "https://cli.github.com/packages/githubcli-archive-keyring.gpg" && return 0
+		wget -nv -O "$TMPKEY" \
+			"https://cli.github.com/packages/githubcli-archive-keyring.gpg" &&
+			return 0
 	fi
 	return 1
 }
 
 require_cmd() {
 	if ! command -v "$1" >/dev/null 2>&1; then
-		error "required command '$1' is not installed or not in PATH."
+		error "required command '$1' is not" \
+			"installed or not in PATH."
 	fi
 }
 
 require_root() {
 	if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
-		error "This script must be run as root. Try: sudo $0"
+		error "This script must be run as root." \
+			"Try: sudo $0"
 	fi
 }
 
@@ -54,7 +55,8 @@ load_os_release() {
 		# shellcheck source=/dev/null
 		source /etc/os-release
 	else
-		error "/etc/os-release not found. Cannot detect distribution."
+		error "/etc/os-release not found." \
+			"Cannot detect distribution."
 	fi
 }
 
@@ -62,12 +64,22 @@ normalize_os_id() {
 	OS_ID="${ID:-}"
 	OS_LIKE="${ID_LIKE:-}"
 
-	if [[ $OS_ID != "debian" && $OS_ID != "devuan" && $OS_ID != "raspbian" && $OS_ID != "ubuntu" && $OS_LIKE == *"ubuntu"* ]]; then
+	if [[ $OS_ID != "debian" &&
+		$OS_ID != "devuan" &&
+		$OS_ID != "raspbian" &&
+		$OS_ID != "ubuntu" &&
+		$OS_LIKE == *"ubuntu"* ]]; then
 		OS_ID="ubuntu"
 	fi
 
-	if [[ $OS_ID != "debian" && $OS_ID != "devuan" && $OS_ID != "raspbian" && $OS_ID != "ubuntu" && $OS_LIKE != *"debian"* && $OS_LIKE != *"ubuntu"* ]]; then
-		error "This installer supports Debian/Devuan/Ubuntu derivatives (bookworm or newer)."
+	if [[ $OS_ID != "debian" &&
+		$OS_ID != "devuan" &&
+		$OS_ID != "raspbian" &&
+		$OS_ID != "ubuntu" &&
+		$OS_LIKE != *"debian"* &&
+		$OS_LIKE != *"ubuntu"* ]]; then
+		error "This installer supports Debian/Devuan/Ubuntu" \
+			"derivatives (bookworm or newer)."
 	fi
 }
 
@@ -79,7 +91,8 @@ detect_release_codename() {
 	elif [[ -n ${VERSION_CODENAME:-} ]]; then
 		RELEASE="$VERSION_CODENAME"
 	else
-		error "could not detect distribution codename (DEBIAN_CODENAME/UBUNTU_CODENAME/VERSION_CODENAME)."
+		error "could not detect distribution codename" \
+			"(DEBIAN_CODENAME/UBUNTU_CODENAME/VERSION_CODENAME)."
 	fi
 }
 
@@ -88,7 +101,9 @@ map_devuan_release() {
 		case "$RELEASE" in
 		daedalus) RELEASE="bookworm" ;;
 		excalibur) RELEASE="trixie" ;;
-		*) error "unsupported Devuan codename '$RELEASE'. Supported: daedalus (bookworm) or excalibur (trixie)." ;;
+		*) error "unsupported Devuan codename" \
+			"'$RELEASE'. Supported: daedalus" \
+			"(bookworm) or excalibur (trixie)." ;;
 		esac
 	fi
 }
@@ -98,13 +113,16 @@ validate_release() {
 	ubuntu)
 		case "$RELEASE" in
 		jammy | noble) ;;
-		*) error "unsupported Ubuntu release '$RELEASE'. Supported: jammy, noble." ;;
+		*) error "unsupported Ubuntu release" \
+			"'$RELEASE'. Supported: jammy, noble." ;;
 		esac
 		;;
 	*)
 		case "$RELEASE" in
 		bookworm | trixie | sid) ;;
-		*) error "unsupported release '$RELEASE'. Supported: bookworm, trixie, sid (or Devuan daedalus/excalibur)." ;;
+		*) error "unsupported release" \
+			"'$RELEASE'. Supported: bookworm," \
+			"trixie, sid (or Devuan daedalus/excalibur)." ;;
 		esac
 		;;
 	esac
@@ -128,7 +146,8 @@ detect_arch() {
 
 	case "$ARCH" in
 	amd64 | arm64 | i386 | armhf) ;;
-	*) error "Unsupported architecture '$ARCH'. Supported: amd64, arm64, i386, armhf." ;;
+	*) error "Unsupported architecture '$ARCH'." \
+		"Supported: amd64, arm64, i386, armhf." ;;
 	esac
 }
 
@@ -143,14 +162,16 @@ ensure_https_transport() {
 }
 
 install_keyring() {
-	mkdir -p /etc/apt/keyrings && chmod 0755 /etc/apt/keyrings
+	mkdir -p /etc/apt/keyrings &&
+		chmod 0755 /etc/apt/keyrings
 	KEYRING="/etc/apt/keyrings/githubcli-archive-keyring.gpg"
 	TMPKEY="$(mktemp)"
 
 	log "Fetching GitHub CLI archive key..."
 	if ! fetch_key; then
 		rm -f "$TMPKEY"
-		error "failed to download GitHub CLI archive key (curl/wget)."
+		error "failed to download GitHub CLI archive key" \
+			"(curl/wget)."
 	fi
 	install -m 0644 "$TMPKEY" "$KEYRING"
 	rm -f "$TMPKEY"

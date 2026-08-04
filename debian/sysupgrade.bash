@@ -6,7 +6,7 @@ set -euo pipefail
 # - Updates package lists
 # - Runs full-upgrade with non-interactive config file handling
 # - Backs up /etc before the upgrade
-# - Runs autoremove and autoclean
+# - Runs autoremove and clean
 # - Reloads systemd and restarts services (if needrestart is available)
 # - Collects system information to /var/log/sysupgrade (rotates weekly)
 #
@@ -23,36 +23,38 @@ export LC_ALL=C.UTF-8
 
 APT_BIN="/bin/apt"
 
-INFO_LOG_DIR="/var/log/debian"
-
 BACKUP_ROOT="/var/backups/apt-config-backups"
 
-# Non-interactive apt
-export DEBIAN_FRONTEND=noninteractive
+# Prefer preserving local configuration files.
+# Force defend-against-confold by not overwriting local config.
+APT_CONF_OPTS=(
+	-o Dpkg::Options::="--force-confdef"
+	-o Dpkg::Options::="--force-confold"
+	-o APT::Get::Assume-Yes=true
+)
 
-# Simple colors for messages
-if [ -t 1 ] && [ "${NO_COLOR:-0}" != "1" ]; then
-	GREEN="\033[32m"
-	YELLOW="\033[33m"
-	RED="\033[31m"
-	RESET="\033[0m"
-else
-	GREEN=""
-	YELLOW=""
-	RED=""
-	RESET=""
-fi
+log() {
+	local ts
+	ts="$(date '+%Y-%m-%d %H:%M:%S')"
+	printf '%s [INFO] %s\n' "$ts" "$*"
+}
+warn() {
+	local ts
+	ts="$(date '+%Y-%m-%d %H:%M:%S')"
+	printf '%s [WARN] %s\n' "$ts" "$*" >&2
+}
+error() {
+	local ts
+	ts="$(date '+%Y-%m-%d %H:%M:%S')"
+	printf '%s [ERROR] %s\n' "$ts" "$*" >&2
+}
 
-log() { printf '%s %b[INFO]%b ✅ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$GREEN" "$RESET" "$*"; }
-warn() { printf '%s %b[WARN]%b ⚠ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$YELLOW" "$RESET" "$*"; }
-error() { printf '%s %b[ERROR]%b ❌ %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$RED" "$RESET" "$*" >&2; }
+run_phase_cmd() {
+	local label="$1"
+	shift
 
-run_logged_cmd() {
-	local log_file="$1" label="$2"
-	shift 2
-
-	printf '\n=== %s ===\n\n' "$label" >>"$log_file"
-	if "$@" >>"$log_file" 2>&1; then
+	printf '\n=== %s ===\n\n' "$label"
+	if "$@"; then
 		return 0
 	fi
 
@@ -62,20 +64,27 @@ run_logged_cmd() {
 apt_suite_enabled() {
 	local target="$1"
 
-	# Prefer APT policy metadata when available; it exposes the exact suite name.
-	if apt-cache policy 2>/dev/null | grep -Eq "release .*n=${target}([, ]|$)"; then
+	# Prefer APT policy metadata when available;
+	# it exposes the exact suite name.
+	if apt-cache policy 2>/dev/null |
+		grep -Eq "release .*n=${target}([, ]|$)"; then
 		return 0
 	fi
 
-	# Fall back to configured APT source files so we still detect enabled backports
-	# before package lists are refreshed or when policy output is sparse.
-	if grep -RqsE "^[[:space:]]*Suites:.*(^|[[:space:]])${target}([[:space:]]|$)" \
-		/etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null; then
+	# Fall back to configured APT source files so we still
+	# detect enabled backports before package lists are
+	# refreshed or when policy output is sparse.
+	if grep -RqsE \
+		"^[[:space:]]*Suites:.*(^|[[:space:]])${target}([[:space:]]|$)" \
+		/etc/apt/sources.list \
+		/etc/apt/sources.list.d 2>/dev/null; then
 		return 0
 	fi
 
-	if grep -RqsE "^[[:space:]]*deb[[:space:]].*[[:space:]]${target}([[:space:]]|/|$)" \
-		/etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null; then
+	if grep -RqsE \
+		"^[[:space:]]*deb[[:space:]].*[[:space:]]${target}([[:space:]]|/|$)" \
+		/etc/apt/sources.list \
+		/etc/apt/sources.list.d 2>/dev/null; then
 		return 0
 	fi
 
@@ -110,7 +119,8 @@ run_phase() {
 }
 
 print_phase_summary() {
-	local phase status kind mandatory_failures=0 optional_failures=0 successes=0 skipped=0
+	local phase status kind
+	local mandatory_failures=0 optional_failures=0 successes=0 skipped=0
 
 	printf '\nPhase summary:\n'
 	for phase in "${PHASE_ORDER[@]}"; do
@@ -130,7 +140,8 @@ print_phase_summary() {
 		esac
 	done
 
-	log "Phase totals: success=${successes}, skipped=${skipped}, optional_failed=${optional_failures}, mandatory_failed=${mandatory_failures}"
+	log "Phase totals: success=${successes}, skipped=${skipped},"
+	log "opt_failed=${optional_failures}, man_failed=${mandatory_failures}"
 	if ((mandatory_failures > 0)); then
 		return 1
 	fi
@@ -180,27 +191,40 @@ backup_etc() {
 		return 0
 	fi
 
-	# First run: no baseline exists yet, so take a full backup and create the baseline.
-	if [[ ! -d $baseline_etc ]] || ! find "$baseline_etc" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null | grep -q .; then
+	# First run: no baseline exists yet, so take a
+	# full backup and create the baseline.
+	if [[ ! -d $baseline_etc ]] ||
+		! find "$baseline_etc" -mindepth 1 \
+			-maxdepth 1 -print -quit 2>/dev/null |
+		grep -q .; then
 		archive="${backup_dir}/etc-full.tar.gz"
-		log "No baseline found; creating initial full /etc backup at ${archive}..."
-		tar --numeric-owner --xattrs --acls -cpzf "$archive" -C / etc
+		log "No baseline found; creating initial full"
+		log "/etc backup at ${archive}..."
+		tar --numeric-owner --xattrs --acls \
+			-cpzf "$archive" -C / etc
 		chmod 0600 "$archive" 2>/dev/null || true
 
 		mkdir -p "$baseline_etc"
 		chmod 0700 "$baseline_root" 2>/dev/null || true
 		chmod 0700 "$baseline_etc" 2>/dev/null || true
 		log "Creating baseline snapshot at ${baseline_etc}..."
-		rsync -aHAX --numeric-ids --delete /etc/ "$baseline_etc/" >/dev/null
+		rsync -aHAX --numeric-ids --delete \
+			/etc/ "$baseline_etc/" >/dev/null
 		umask "$old_umask"
-		log "Backup completed (initial full + baseline created)."
+		log "Backup completed"
+		log "(initial full + baseline created)."
 		return 0
 	fi
 
-	log "Detecting modified /etc files vs baseline (${baseline_etc})..."
-	# This is effectively a 'diff' of /etc vs the baseline, expressed via rsync itemized changes.
-	# It includes new/changed files and deletions (as '*deleting').
-	if ! rsync -aHAX --numeric-ids --delete --dry-run --itemize-changes /etc/ "$baseline_etc/" >"$changes_manifest"; then
+	log "Detecting modified /etc files vs"
+	log "baseline (${baseline_etc})..."
+	# This is a 'diff' of /etc vs the baseline via
+	# rsync itemized changes. Includes new/changed
+	# files and deletions (as '*deleting').
+	if ! rsync -aHAX --numeric-ids --delete \
+		--dry-run --itemize-changes \
+		/etc/ "$baseline_etc/" \
+		>"$changes_manifest"; then
 		warn "Change detection failed; falling back to full /etc backup."
 		archive="${backup_dir}/etc-full.tar.gz"
 		log "Backing up /etc to ${archive}..."
@@ -211,17 +235,22 @@ backup_etc() {
 		return 0
 	fi
 
-	# Copy only new/modified files into a staging directory, then archive that.
-	# (We don't copy unchanged files; deletions are only recorded in the manifest.)
+	# Copy changed files into staging, then archive.
+	# Unchanged files are skipped; deletions are only
+	# recorded in the manifest.
 	mkdir -p "${backup_dir}/etc"
 	chmod 0700 "${backup_dir}/etc" 2>/dev/null || true
 
-	log "Backing up only changed /etc files to ${archive}..."
-	# --compare-dest skips files identical to the baseline.
-	rsync -aHAX --numeric-ids --compare-dest="$baseline_etc" /etc/ "${backup_dir}/etc/" >/dev/null || true
+	log "Backing up only changed /etc files to"
+	log "${archive}..."
+	# --compare-dest skips files identical to baseline.
+	rsync -aHAX --numeric-ids \
+		--compare-dest="$baseline_etc" \
+		/etc/ "${backup_dir}/etc/" >/dev/null || true
 
-	# If nothing changed, avoid producing a misleading archive.
-	if ! find "${backup_dir}/etc" -type f -print -quit 2>/dev/null | grep -q .; then
+	# Avoid producing a misleading archive when nothing changed.
+	if ! find "${backup_dir}/etc" \
+		-type f -print -quit 2>/dev/null | grep -q .; then
 		log "No modified /etc files detected; nothing to back up."
 		rm -rf -- "${backup_dir:?}/etc"
 		chmod 0600 "$changes_manifest" 2>/dev/null || true
@@ -230,7 +259,8 @@ backup_etc() {
 	fi
 
 	# Archive the staging tree; paths remain under 'etc/'.
-	tar --numeric-owner --xattrs --acls -cpzf "$archive" -C "$backup_dir" etc
+	tar --numeric-owner --xattrs --acls \
+		-cpzf "$archive" -C "$backup_dir" etc
 	chmod 0600 "$archive" 2>/dev/null || true
 	chmod 0600 "$changes_manifest" 2>/dev/null || true
 	# Remove the staging directory after archiving to save space.
@@ -248,7 +278,8 @@ cleanup_old_backups() {
 		return 0
 	fi
 
-	# Keep baseline data and remove only timestamped backup directories older than 7 days.
+	# Keep baseline data; remove timestamped backup
+	# directories older than 7 days.
 	if find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d \
 		! -name '.baseline' \
 		-regextype posix-extended -regex '.*/[0-9]{8}-[0-9]{6}' \
@@ -260,19 +291,20 @@ cleanup_old_backups() {
 }
 
 apt_update() {
-	local phase_log
-	phase_log="$(mktemp /tmp/debian-apt-update.XXXXXX)"
 	log "Updating package lists..."
-	if ! run_logged_cmd "$phase_log" "apt update" "$APT_BIN" update; then
-		warn "APT update details written to ${phase_log}."
+	if ! run_phase_cmd "apt update" "$APT_BIN" update; then
 		return 1
 	fi
-	log "APT update details written to ${phase_log}."
 }
 
 apt_full_upgrade() {
-	local codename target phase_log
-	phase_log="$(mktemp /tmp/debian-apt-full-upgrade.XXXXXX)"
+	local codename target
+	local -a apt_opts
+	apt_opts=(
+		"${APT_CONF_OPTS[@]}"
+		-o Dpkg::Options::="--force-confdef"
+		-o Dpkg::Options::="--force-confold"
+	)
 
 	codename="$(
 		. /etc/os-release 2>/dev/null || true
@@ -285,56 +317,45 @@ apt_full_upgrade() {
 	if [[ -n $codename ]]; then
 		target="${codename}-backports"
 		if apt_suite_enabled "$target"; then
-			log "Running full-upgrade prioritizing backports (${target})..."
-			if ! run_logged_cmd "$phase_log" "apt full-upgrade -t ${target}" "$APT_BIN" -y \
-				-o Dpkg::Options::="--force-confdef" \
-				-o Dpkg::Options::="--force-confnew" \
-				-o Dpkg::Options::="--force-confmiss" \
-				-o APT::Get::Assume-Yes=true \
+			log "Running full-upgrade with backports (${target})..."
+			if ! run_phase_cmd \
+				"apt full-upgrade -t ${target}" \
+				"$APT_BIN" "${apt_opts[@]}" \
 				full-upgrade -t "$target"; then
-				warn "APT full-upgrade details written to ${phase_log}."
 				return 1
 			fi
 		else
-			log "Backports (${target}) not found in APT policy; skipping backports-priority pass."
+			log "Backports (${target}) not found; skipping backports pass."
 		fi
 	else
-		warn "Could not determine Debian codename; skipping backports-priority pass."
+		warn "Could not determine Debian codename; skipping backports pass."
 	fi
 
-	log "Running second full-upgrade pass using all configured APT repositories..."
-	if ! run_logged_cmd "$phase_log" "apt full-upgrade" "$APT_BIN" -y \
-		-o Dpkg::Options::="--force-confdef" \
-		-o Dpkg::Options::="--force-confnew" \
-		-o Dpkg::Options::="--force-confmiss" \
-		-o APT::Get::Assume-Yes=true \
+	log "Running second full-upgrade pass (all repositories)..."
+	if ! run_phase_cmd \
+		"apt full-upgrade" \
+		"$APT_BIN" "${apt_opts[@]}" \
 		full-upgrade; then
-		warn "APT full-upgrade details written to ${phase_log}."
 		return 1
 	fi
-	log "APT full-upgrade details written to ${phase_log}."
 }
 
 apt_cleanup() {
-	local phase_log
-	phase_log="$(mktemp /tmp/debian-apt-cleanup.XXXXXX)"
 	log "Removing unused packages (autoremove)..."
-	if ! run_logged_cmd "$phase_log" "apt autoremove" "$APT_BIN" -y autoremove; then
-		warn "APT autoremove details written to ${phase_log}."
+	if ! run_phase_cmd "apt autoremove" "$APT_BIN" -y autoremove; then
 		return 1
 	fi
 
-	log "Cleaning package cache (autoclean)..."
-	if ! run_logged_cmd "$phase_log" "apt autoclean" "$APT_BIN" -y autoclean; then
-		warn "APT autoclean details written to ${phase_log}."
+	log "Cleaning package cache (clean)..."
+	if ! run_phase_cmd "apt clean" "$APT_BIN" -y clean; then
 		return 1
 	fi
-	log "APT cleanup details written to ${phase_log}."
 }
 
 restart_services() {
 	log "Reloading systemd manager configuration..."
-	systemctl daemon-reload || warn "systemctl daemon-reload failed (continuing)."
+	systemctl daemon-reload ||
+		warn "systemctl daemon-reload failed (continuing)."
 
 	if command -v needrestart >/dev/null 2>&1; then
 		log "Restarting services using needrestart (automatic mode)..."
@@ -350,45 +371,59 @@ restart_services() {
 }
 
 run_security_audit() {
-	local audit_dir audit_ts audit_log audit_report syscheck_log
-	audit_dir="$INFO_LOG_DIR"
-	mkdir -p "$audit_dir"
+	local audit_ts audit_log audit_report syscheck_log
+	audit_ts="$(date +%Y%m%d-%H%M%S)"
 
 	if command -v lynis >/dev/null 2>&1; then
-		audit_ts="$(date +%Y%m%d-%H%M%S)"
-		audit_log="${audit_dir}/lynis-audit-${audit_ts}.log"
-		audit_report="${audit_dir}/lynis-report-${audit_ts}.dat"
-		log "Running Lynis security audit (log: ${audit_log}, report: ${audit_report})..."
-		if lynis audit system --quiet --logfile "$audit_log" --report-file "$audit_report"; then
-			chmod 0600 "$audit_log" "$audit_report" || true
-			log "Lynis security audit completed."
+		mkdir -p /tmp/lynis-audit
+		audit_log="/tmp/lynis-audit/lynis-${audit_ts}.log"
+		audit_report="/tmp/lynis-audit/lynis-${audit_ts}.dat"
+		log "Running Lynis security audit..."
+		set -o pipefail
+		if lynis audit system --quiet \
+			--logfile "$audit_log" \
+			--report-file "$audit_report" 2>&1 |
+			tee "/tmp/lynis-audit/terminal-${audit_ts}.log"; then
+			set +o pipefail
+			chmod 0600 "$audit_log" "$audit_report" 2>/dev/null || true
+			chmod 0600 "/tmp/lynis-audit/terminal-${audit_ts}.log" \
+				2>/dev/null || true
+			log "Lynis audit saved to /tmp/lynis-audit/lynis-${audit_ts}.log"
 		else
-			warn "Lynis security audit encountered errors. See ${audit_log} for details."
+			set +o pipefail
+			warn "Lynis audit had errors; see /tmp/lynis-audit/."
 		fi
 	else
 		warn "lynis not installed; skipping security audit."
 	fi
 
 	if command -v systemcheck >/dev/null 2>&1; then
-		audit_ts="$(date +%Y%m%d-%H%M%S)"
-		syscheck_log="${audit_dir}/systemcheck-${audit_ts}.log"
+		syscheck_log="/tmp/systemcheck-${audit_ts}.log"
 		local audit_user
 		audit_user="${SUDO_USER:-$(logname 2>/dev/null || true)}"
-		log "Running systemcheck as ${audit_user:-unknown} (log: ${syscheck_log})..."
-		if run_systemcheck_audit "$audit_user" >"$syscheck_log" 2>&1; then
-			chmod 0600 "$syscheck_log" || true
-			log "systemcheck completed."
+		log "Running systemcheck as ${audit_user:-unknown}..."
+		set -o pipefail
+		if run_systemcheck_audit "$audit_user" 2>&1 |
+			tee "$syscheck_log"; then
+			set +o pipefail
+			chmod 0600 "$syscheck_log" 2>/dev/null || true
+			log "systemcheck saved to ${syscheck_log}"
 		else
-			warn "systemcheck encountered errors. See ${syscheck_log} for details."
+			set +o pipefail
+			warn "systemcheck had errors; see ${syscheck_log}."
 		fi
 	else
 		warn "systemcheck not found; skipping systemcheck run."
 	fi
 
-	if find "$audit_dir" -type f \( -name 'lynis-audit-*.log' -o -name 'lynis-report-*.dat' -o -name 'systemcheck-*.log' \) -mtime +7 -print0 2>/dev/null | xargs -0r rm -f; then
-		log "Old security audit logs older than 7 days removed (if any)."
+	if find /tmp -maxdepth 1 -type f \
+		\( -name 'lynis-audit-*.log' \
+		-o -name 'lynis-report-*.dat' \
+		-o -name 'systemcheck-*.log' \) \
+		-mtime +7 -print0 2>/dev/null | xargs -0r rm -f; then
+		log "Old audit logs older than 7 days removed (if any)."
 	else
-		warn "Failed to clean old security audit logs in ${audit_dir}."
+		warn "Failed to clean old audit logs in /tmp."
 	fi
 }
 
@@ -396,7 +431,7 @@ run_systemcheck_audit() {
 	local audit_user="$1" audit_home audit_uid
 
 	if [[ -z $audit_user || $audit_user == "root" ]]; then
-		warn "systemcheck skipped: unable to determine a non-root invoking user."
+		warn "systemcheck skipped: no non-root invoking user found."
 		return 1
 	fi
 
@@ -404,12 +439,15 @@ run_systemcheck_audit() {
 	audit_uid="$(getent passwd "$audit_user" | cut -d: -f3)"
 
 	if [[ -z $audit_home || -z $audit_uid ]]; then
-		warn "systemcheck skipped: could not resolve HOME/UID for user '$audit_user'."
+		warn "systemcheck skipped: cannot resolve HOME/UID"
+		warn "for user '$audit_user'."
 		return 1
 	fi
 
-	if [[ ! -d "/run/user/${audit_uid}" || ! -S "/run/user/${audit_uid}/bus" ]]; then
-		warn "systemcheck skipped: user '$audit_user' has no active session bus."
+	if [[ ! -d "/run/user/${audit_uid}" ]] ||
+		[[ ! -S "/run/user/${audit_uid}/bus" ]]; then
+		warn "systemcheck skipped: user '$audit_user'"
+		warn "has no active session bus."
 		return 1
 	fi
 
@@ -426,136 +464,91 @@ run_systemcheck_audit() {
 }
 
 collect_system_info_and_upload() {
-	mkdir -p "$INFO_LOG_DIR"
+	local info_ts info_log
+	info_ts="$(date +%Y%m%d-%H%M%S)"
+	info_log="/tmp/debian-info-${info_ts}.log"
 
-	local info_log
-	info_log="${INFO_LOG_DIR}/sysupgrade-info-$(date +%Y%m%d-%H%M%S).log"
-
-	log "Collecting system info to ${info_log}..."
+	log "Collecting system info..."
 
 	print_section() {
 		printf '\n---\n\n=== %s ===\n\n' "$1"
 	}
 
-	local sysinfo hardware_info upgrades recent_events last_boot_events failed_services disk_usage uptime_info mount_info inet_info inode_usage top_procs content tmpfile
+	set -o pipefail
+	{
+		print_section "System Info"
+		uname -a
+		printf '\n'
+		if [[ -f /etc/os-release ]]; then
+			cat /etc/os-release
+		fi
 
-	sysinfo=$(
-		{
-			print_section "System Info"
-			uname -a
-			printf '\n'
-			if [[ -f /etc/os-release ]]; then
-				cat /etc/os-release
-			fi
-		} 2>&1 || true
-	)
+		print_section "Uptime / Load"
+		uptime
+		printf '\n'
+		free -h 2>/dev/null || true
 
-	uptime_info=$(
-		{
-			print_section "Uptime / Load"
-			uptime
-			printf '\n'
-			free -h 2>/dev/null || true
-		} 2>&1 || true
-	)
+		print_section "CPU"
+		lscpu 2>/dev/null || true
 
-	hardware_info=$(
-		{
-			print_section "CPU"
-			lscpu 2>/dev/null || true
-			print_section "Memory (MemTotal from /proc/meminfo)"
-			grep -E '^Mem(Total|Available):' /proc/meminfo 2>/dev/null || true
-			print_section "PCI Devices"
-			lspci -nn 2>/dev/null || printf 'lspci not available.\n'
-			print_section "USB Devices"
-			lsusb 2>/dev/null || printf 'lsusb not available.\n'
-		} 2>&1 || true
-	)
+		print_section "Memory (from /proc/meminfo)"
+		grep -E '^Mem(Total|Available):' /proc/meminfo 2>/dev/null || true
 
-	upgrades=$(
-		{
-			print_section "Upgradable Packages"
-			apt list --upgradable 2>/dev/null
-		} 2>&1 || true
-	)
+		print_section "PCI Devices"
+		lspci -nn 2>/dev/null || printf 'lspci not available.\n'
 
-	last_boot_events=$(
-		{
-			print_section "Previous Boot Journal (warnings/errors)"
-			journalctl -b -1 -p warning..alert
-		} 2>&1 || true
-	)
+		print_section "USB Devices"
+		lsusb 2>/dev/null || printf 'lsusb not available.\n'
 
-	recent_events=$(
-		{
-			print_section "Recent Journal (warnings/errors, last hour)"
-			journalctl -p warning..alert --since "1 hour ago"
-		} 2>&1 || true
-	)
+		print_section "Upgradable Packages"
+		apt list --upgradable 2>/dev/null
 
-	failed_services=$(
-		{
-			print_section "Failed Systemd Services"
-			systemctl list-units --state=failed
-		} 2>&1 || true
-	)
+		print_section "Previous Boot Journal (warnings/errors)"
+		journalctl -b -1 -p warning..alert
 
-	disk_usage=$(
-		{
-			print_section "Disk Usage (df -h)"
-			df -h
-		} 2>&1 || true
-	)
+		print_section "Recent Journal (warnings/errors, last hour)"
+		journalctl -p warning..alert --since "1 hour ago"
 
-	inode_usage=$(
-		{
-			print_section "Inode Usage (df -i)"
-			df -i
-		} 2>&1 || true
-	)
+		print_section "Failed Systemd Services"
+		systemctl list-units --state=failed
 
-	mount_info=$(
-		{
-			print_section "Block Devices"
-			lsblk -f 2>/dev/null || lsblk 2>/dev/null || true
-			print_section "Mounts"
-			mount || true
-		} 2>&1 || true
-	)
+		print_section "Disk Usage (df -h)"
+		df -h
 
-	inet_info=$(
-		{
-			print_section "Network (ip -br a)"
-			ip -br a 2>/dev/null || true
-			print_section "Routes"
-			ip route 2>/dev/null || true
-		} 2>&1 || true
-	)
+		print_section "Inode Usage (df -i)"
+		df -i
 
-	top_procs=$(
-		{
-			print_section "Top Processes (by RSS)"
-			ps -eo pid,ppid,cmd,%mem,%cpu,rss --sort=-rss | head -n 20
-		} 2>&1 || true
-	)
+		print_section "Block Devices"
+		lsblk -f 2>/dev/null || lsblk 2>/dev/null || true
 
-	content="${sysinfo}${hardware_info}${uptime_info}${upgrades}${last_boot_events}${recent_events}${failed_services}${disk_usage}${inode_usage}${mount_info}${inet_info}${top_procs}"
+		print_section "Mounts"
+		mount || true
 
-	tmpfile="$(mktemp /tmp/debian-info.XXXXXX)"
-	printf "%s\n" "$content" >"$tmpfile"
+		print_section "Network (ip -br a)"
+		ip -br a 2>/dev/null || true
 
-	if mv "$tmpfile" "$info_log"; then
-		chmod 0600 "$info_log" || true
-		log "System info written to ${info_log}."
+		print_section "Routes"
+		ip route 2>/dev/null || true
+
+		print_section "Top Processes (by RSS)"
+		ps -eo pid,ppid,cmd,%mem,%cpu,rss --sort=-rss | head -n 20
+	} 2>&1 | tee "$info_log"
+	local rc=$?
+	set +o pipefail
+
+	chmod 0600 "$info_log" 2>/dev/null || true
+	if [[ $rc -eq 0 ]]; then
+		log "System info saved to ${info_log}"
 	else
-		warn "Failed to write system info to ${info_log}."
-		rm -f "$tmpfile"
+		warn "System info collection had errors; see ${info_log}."
 	fi
 
-	if find "$INFO_LOG_DIR" -type f -name 'sysupgrade-info-*.log' -mtime +7 -print0 2>/dev/null | xargs -0r rm -f; then
-		log "Old sysupgrade info logs older than 7 days removed (if any)."
+	if find /tmp -maxdepth 1 -type f \
+		-name 'debian-info-*.log' \
+		-mtime +7 -print0 2>/dev/null | xargs -0r rm -f; then
+		log "Old system info logs older than 7 days removed (if any)."
 	else
-		warn "Failed to clean old sysupgrade info logs in ${INFO_LOG_DIR}."
+		warn "Failed to clean old system info logs in /tmp."
 	fi
 }
 
@@ -576,19 +569,27 @@ run_maintenance() {
 	PHASE_KIND=()
 	PHASE_LABEL=()
 
-	run_phase "backup-etc" "mandatory" "Backup /etc" backup_etc
-	run_phase "cleanup-old-backups" "optional" "Cleanup old /etc backups" cleanup_old_backups
-	run_phase "apt-update" "mandatory" "APT update" apt_update
-	run_phase "apt-full-upgrade" "mandatory" "APT full-upgrade" apt_full_upgrade
-	run_phase "apt-cleanup" "mandatory" "APT cleanup" apt_cleanup
-	run_phase "restart-services" "optional" "Restart services" restart_services
-	run_phase "security-audit" "optional" "Security audit" run_security_audit
-	run_phase "collect-system-info" "optional" "Collect system info" collect_system_info_and_upload
+	run_phase "backup-etc" "mandatory" \
+		"Backup /etc" backup_etc
+	run_phase "cleanup-old-backups" "optional" \
+		"Cleanup old backups" cleanup_old_backups
+	run_phase "apt-update" "mandatory" \
+		"APT update" apt_update
+	run_phase "apt-full-upgrade" "mandatory" \
+		"APT full-upgrade" apt_full_upgrade
+	run_phase "apt-cleanup" "mandatory" \
+		"APT cleanup" apt_cleanup
+	run_phase "restart-services" "optional" \
+		"Restart services" restart_services
+	run_phase "security-audit" "optional" \
+		"Security audit" run_security_audit
+	run_phase "collect-system-info" "optional" \
+		"Collect system info" collect_system_info_and_upload
 
 	if print_phase_summary; then
 		log "Debian maintenance run completed."
 	else
-		error "Debian maintenance run completed with mandatory phase failures."
+		error "Debian maintenance run had mandatory phase failures."
 		return 1
 	fi
 }

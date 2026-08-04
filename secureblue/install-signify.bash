@@ -31,17 +31,25 @@ else
 	RESET=""
 fi
 
-log() { printf '%s %b[INFO]%b  %s\n' "$(date '+%F %T')" "$GREEN" "$RESET" "$*"; }
-warn() { printf '%s %b[WARN]%b  %s\n' "$(date '+%F %T')" "$YELLOW" "$RESET" "$*" >&2; }
+log() {
+	printf '%s %b[INFO]%b  %s\n' \
+		"$(date '+%F %T')" "$GREEN" "$RESET" "$*"
+}
+warn() {
+	printf '%s %b[WARN]%b  %s\n' \
+		"$(date '+%F %T')" "$YELLOW" "$RESET" "$*" >&2
+}
 error() {
-	printf '%s %b[ERROR]%b %s\n' "$(date '+%F %T')" "$RED" "$RESET" "$*" >&2
+	printf '%s %b[ERROR]%b %s\n' \
+		"$(date '+%F %T')" "$RED" "$RESET" "$*" >&2
 	exit 1
 }
 
 have_cmd() { command -v "$1" >/dev/null 2>&1; }
 
 require_non_root() {
-	[ "${EUID:-$(id -u)}" -ne 0 ] || error "Run this script as your normal SecureBlue user, not root"
+	[ "${EUID:-$(id -u)}" -ne 0 ] || error \
+		"Run this script as your normal SecureBlue user, not root"
 }
 
 detect_root_cmd() {
@@ -82,10 +90,15 @@ ensure_homebrew_path() {
 
 	if [[ -n $brew_prefix && -d $brew_prefix/Cellar ]]; then
 		local restricted
-		restricted="$(find "$brew_prefix/Cellar" -maxdepth 3 -type d ! -perm -o+rx 2>/dev/null | head -1 || true)"
+		restricted="$(find "$brew_prefix/Cellar" \
+			-maxdepth 3 -type d ! -perm -o+rx \
+			2>/dev/null | head -1 || true)"
 		if [[ -n $restricted ]]; then
 			warn "Some Homebrew cellar directories have restricted permissions."
-			warn "Run this to fix: run0 find $brew_prefix/Cellar -maxdepth 4 -type d ! -perm -o+rx -exec chmod o+rx {} \\;"
+			warn "Run this to fix: run0 find" \
+				"$brew_prefix/Cellar -maxdepth 4" \
+				"-type d ! -perm -o+rx" \
+				"-exec chmod o+rx {} \\;"
 		fi
 	fi
 }
@@ -109,7 +122,8 @@ install_build_deps() {
 }
 
 get_latest_tag() {
-	git ls-remote --tags --sort='version:refname' "$REPO" 'refs/tags/v*' 2>/dev/null |
+	git ls-remote --tags --sort='version:refname' \
+		"$REPO" 'refs/tags/v*' 2>/dev/null |
 		awk '{print $2}' |
 		sed 's#refs/tags/##; s#\^{}##' |
 		uniq |
@@ -132,7 +146,8 @@ prepare_source() {
 	[ -n "$LATEST_TAG" ] || error "Could not determine latest signify tag"
 
 	local current_tag
-	current_tag="$(git describe --tags --exact-match HEAD 2>/dev/null || true)"
+	current_tag="$(git describe --tags --exact-match \
+		HEAD 2>/dev/null || true)"
 
 	if [ "$current_tag" = "$LATEST_TAG" ]; then
 		log "Source already at latest tag '$LATEST_TAG'"
@@ -149,7 +164,8 @@ prepare_source() {
 build_and_install() {
 	log "Building signify from source"
 	BUILD_LOG="$(mktemp "${TMPDIR:-/tmp}/signify-build.XXXXXX.log")"
-	if ! env -u LD_PRELOAD make -s -C "$BUILD_DIR" CC=clang BUNDLED_LIBBSD=1 >"$BUILD_LOG" 2>&1; then
+	if ! env -u LD_PRELOAD make -s -C "$BUILD_DIR" \
+		CC=clang BUNDLED_LIBBSD=1 >"$BUILD_LOG" 2>&1; then
 		cat "$BUILD_LOG" >&2
 		error "signify build failed"
 	fi
@@ -178,7 +194,8 @@ main() {
 		build_and_install
 		verify_install
 		if [ "$SOURCE_CHANGED" -eq 1 ]; then
-			log "Done - signify updated to $LATEST_TAG and is available at $INSTALL_PATH"
+			log "Done - signify updated to $LATEST_TAG" \
+				"and is available at $INSTALL_PATH"
 		else
 			log "Done - signify installed at $INSTALL_PATH"
 		fi

@@ -13,21 +13,21 @@ set "SOURCE=%~dp0ssh-menu.pl"
 echo [INFO] Installing ssh-menu to %INSTALL_DIR%
 
 rem Verify Perl is available
-where perl >nul 2>&1
+where perl >nul
 if %errorlevel% neq 0 (
-    echo [ERROR] perl not found in PATH. Install Strawberry Perl or Git for Windows Perl.
+    echo [ERROR] perl not found. Install Strawberry Perl or MSYS2 Perl.
     exit /b 1
 )
 
 rem Verify ssh is available
-where ssh >nul 2>&1
+where ssh >nul
 if %errorlevel% neq 0 (
     echo [WARN] ssh not found in PATH. ssh-menu requires OpenSSH.
 )
 
 rem Create install directory
 if not exist "%INSTALL_DIR%" (
-    mkdir "%INSTALL_DIR%" >nul 2>&1
+    mkdir "%INSTALL_DIR%" >nul
     if %errorlevel% neq 0 (
         echo [ERROR] Failed to create %INSTALL_DIR%
         exit /b 1
@@ -42,7 +42,7 @@ if not exist "%SOURCE%" (
 )
 
 rem Copy script (strip .pl extension, use LF endings)
-copy /y "%SOURCE%" "%INSTALL_DIR%\%SCRIPT_NAME%" >nul 2>&1
+copy /y "%SOURCE%" "%INSTALL_DIR%\%SCRIPT_NAME%" >nul
 if %errorlevel% neq 0 (
     echo [ERROR] Failed to copy %SOURCE% to %INSTALL_DIR%\%SCRIPT_NAME%
     exit /b 1
@@ -57,10 +57,10 @@ echo %PATH% | findstr /i /c:"%INSTALL_DIR%" >nul 2>&1
 if %errorlevel% neq 0 (
     echo.
     echo [WARN] %INSTALL_DIR% is not in your PATH.
-    echo [INFO] Add it manually or run the following command from an elevated prompt:
+    echo [INFO] Add it manually, or run from elevated prompt:
     echo   setx PATH "%%PATH%%;%INSTALL_DIR%"
     echo.
-    echo Alternatively, run this command from a regular prompt for current session:
+    echo Or for current session only:
     echo   set PATH=%%PATH%%;%INSTALL_DIR%
 ) else (
     echo [INFO] %INSTALL_DIR% is already in PATH.

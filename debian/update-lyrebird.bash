@@ -3,7 +3,8 @@
 set -euo pipefail
 
 # Lyrebird Go build/install script
-# Builds and installs the latest Lyrebird from source on Debian-based systems.
+# Builds and installs the latest Lyrebird from source
+# on Debian-based systems.
 # - Requires Go to be installed
 # - Clones or updates the Lyrebird GitLab repository
 # - Builds the project using make
@@ -13,7 +14,8 @@ set -euo pipefail
 # and license details.
 
 # Basic PATH
-PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/go/bin
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+PATH="${PATH}:/usr/local/go/bin"
 export PATH
 
 REPO="tpo/anti-censorship/pluggable-transports/lyrebird"
@@ -21,26 +23,13 @@ REPO_URL="https://gitlab.torproject.org/${REPO}.git"
 BUILD_DIR="${HOME}/.local/src"
 BIN_NAME="lyrebird"
 
-# Control: si se determina que la copia local ya está en el último tag
+# Control: set when the local copy is already on the latest tag
 SKIP_BUILD=0
 
-# Colors
-if [ -t 1 ] && [ "${NO_COLOR:-0}" != "1" ]; then
-	GREEN="\033[32m"
-	YELLOW="\033[33m"
-	RED="\033[31m"
-	RESET="\033[0m"
-else
-	GREEN=""
-	YELLOW=""
-	RED=""
-	RESET=""
-fi
-
-log() { printf '%s %b[INFO]%b ✅ %s\n' "$(date '+%F %T')" "$GREEN" "$RESET" "$*"; }
-warn() { printf '%s %b[WARN]%b ⚠️ %s\n' "$(date '+%F %T')" "$YELLOW" "$RESET" "$*"; }
+log() { printf '%s [INFO] %s\n' "$(date '+%F %T')" "$*"; }
+warn() { printf '%s [WARN] %s\n' "$(date '+%F %T')" "$*"; }
 error() {
-	printf '%s %b[ERROR]%b ❌ %s\n' "$(date '+%F %T')" "$RED" "$RESET" "$*" >&2
+	printf '%s [ERROR] %s\n' "$(date '+%F %T')" "$*" >&2
 	exit 1
 }
 
@@ -49,7 +38,8 @@ require_root() {
 }
 
 require_cmd() {
-	command -v "$1" >/dev/null 2>&1 || error "Required command '$1' not found."
+	command -v "$1" >/dev/null 2>&1 ||
+		error "Required command '$1' not found."
 }
 
 ensure_go() {
@@ -67,17 +57,22 @@ clone_or_update_repo() {
 
 	cd "$BUILD_DIR/$BIN_NAME"
 
-	# Traer tags y refs remotas
+	# Fetch tags and remote refs
 	git fetch --tags --prune origin || git fetch --tags --prune
 
-	# Determinar el último tag (por fecha de creación de tag)
-	latest_tag=$(git describe --tags "$(git rev-list --tags --max-count=1)" 2>/dev/null || true)
+	# Determine latest tag (by tag creation date)
+	latest_tag=$(git describe --tags \
+		"$(git rev-list --tags --max-count=1)" \
+		2>/dev/null || true)
 
 	if [ -n "$latest_tag" ]; then
-		# Verificar si el HEAD local está exactamente en un tag
-		local_tag=$(git describe --tags --exact-match HEAD 2>/dev/null || true)
+		# Check if local HEAD is exactly at a tag
+		local_tag=$(git describe --tags \
+			--exact-match HEAD 2>/dev/null || true)
 		if [ "$local_tag" = "$latest_tag" ]; then
-			log "Local repository is already at latest tag '$latest_tag'. Skipping build."
+			log "Local repository is already at" \
+				"latest tag '$latest_tag'." \
+				"Skipping build."
 			SKIP_BUILD=1
 			return
 		fi
