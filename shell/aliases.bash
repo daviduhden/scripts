@@ -26,6 +26,13 @@ alias chown='chown --preserve-root'
 alias chmod='chmod --preserve-root'
 
 # --------------------------------------------------
+# AI assistants with max privileges
+# --------------------------------------------------
+alias codex='codex --yolo'
+alias copilot='copilot --allow-all-tools'
+alias opencode='opencode --auto'
+
+# --------------------------------------------------
 # Editors
 # --------------------------------------------------
 alias nano='nano -l'
