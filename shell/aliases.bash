@@ -29,7 +29,7 @@ alias chmod='chmod --preserve-root'
 # AI assistants with max privileges
 # --------------------------------------------------
 alias codex='codex --yolo'
-alias copilot='copilot --allow-all-tools'
+alias copilot='copilot --yolo'
 alias opencode='opencode --auto'
 
 # --------------------------------------------------
