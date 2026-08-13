@@ -20,26 +20,14 @@ export PATH
 typeset DRY_RUN
 DRY_RUN="${DRY_RUN:-0}"
 
-if [ -t 1 ] && [ "${NO_COLOR:-}" != "1" ]; then
-	GREEN="\033[32m"
-	YELLOW="\033[33m"
-	RED="\033[31m"
-	RESET="\033[0m"
-else
-	GREEN=""
-	YELLOW=""
-	RED=""
-	RESET=""
-fi
-
 log() {
-	print "$(date '+%Y-%m-%d %H:%M:%S') ${GREEN}[INFO]${RESET} $*"
+	print "$(date '+%Y-%m-%d %H:%M:%S') [INFO] $*"
 }
 warn() {
-	print "$(date '+%Y-%m-%d %H:%M:%S') ${YELLOW}[WARN]${RESET} $*" >&2
+	print "$(date '+%Y-%m-%d %H:%M:%S') [WARN] $*" >&2
 }
 error() {
-	print "$(date '+%Y-%m-%d %H:%M:%S') ${RED}[ERROR]${RESET} $*" >&2
+	print "$(date '+%Y-%m-%d %H:%M:%S') [ERROR] $*" >&2
 }
 
 parse_args() {

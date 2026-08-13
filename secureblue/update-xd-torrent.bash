@@ -59,30 +59,17 @@ parse_args() {
 	fi
 }
 
-# Colors
-if [ -t 1 ] && [ "${NO_COLOR:-0}" != "1" ]; then
-	GREEN="\033[32m"
-	YELLOW="\033[33m"
-	RED="\033[31m"
-	RESET="\033[0m"
-else
-	GREEN=""
-	YELLOW=""
-	RED=""
-	RESET=""
-fi
-
 log() {
-	printf '%s %b[INFO]%b  %s\n' \
-		"$(date '+%F %T')" "$GREEN" "$RESET" "$*"
+	printf '%s [INFO]  %s\n' \
+		"$(date '+%F %T')" "$*"
 }
 warn() {
-	printf '%s %b[WARN]%b  %s\n' \
-		"$(date '+%F %T')" "$YELLOW" "$RESET" "$*"
+	printf '%s [WARN]  %s\n' \
+		"$(date '+%F %T')" "$*"
 }
 error() {
-	printf '%s %b[ERROR]%b %s\n' \
-		"$(date '+%F %T')" "$RED" "$RESET" "$*" >&2
+	printf '%s [ERROR] %s\n' \
+		"$(date '+%F %T')" "$*" >&2
 	exit 1
 }
 

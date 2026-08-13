@@ -19,26 +19,12 @@ use warnings;
 use File::Path qw(make_path);
 use File::Spec;
 
-my $no_color  = 0;
-my $is_tty    = ( -t STDOUT )             ? 1 : 0;
-my $use_color = ( !$no_color && $is_tty ) ? 1 : 0;
-
 sub is_windows { return $^O eq 'MSWin32'; }
 sub is_openbsd { return $^O eq 'openbsd'; }
 
-my ( $GREEN, $YELLOW, $RED, $CYAN, $BOLD, $RESET ) = ( "", "", "", "", "", "" );
-if ($use_color) {
-    $GREEN  = "\e[32m";
-    $YELLOW = "\e[33m";
-    $RED    = "\e[31m";
-    $CYAN   = "\e[36m";
-    $BOLD   = "\e[1m";
-    $RESET  = "\e[0m";
-}
-
-sub logi { print "${GREEN}[INFO]${RESET} $_[0]\n"; }
-sub logw { print STDERR "${YELLOW}[WARN]${RESET} $_[0]\n"; }
-sub loge { print STDERR "${RED}[ERROR]${RESET} $_[0]\n"; }
+sub logi { print "[INFO] $_[0]\n"; }
+sub logw { print STDERR "[WARN] $_[0]\n"; }
+sub loge { print STDERR "[ERROR] $_[0]\n"; }
 
 sub die_tool {
     my ($msg) = @_;
@@ -458,11 +444,9 @@ sub add_alias_menu {
 
     logi('Add custom name (alias) for a host');
     for my $i ( 0 .. $#entries ) {
-        printf "  ${CYAN}%2d)${RESET} ${BOLD}%s${RESET}\n", $i + 1,
-          $entries[$i]{display};
+        printf "  %2d) %s\n", $i + 1, $entries[$i]{display};
     }
-    printf "  ${CYAN}%2d)${RESET} ${BOLD}Cancel${RESET}\n\n",
-      scalar(@entries) + 1;
+    printf "  %2d) Cancel\n\n", scalar(@entries) + 1;
 
     while (1) {
         print "Alias which entry [1-", scalar(@entries) + 1,
@@ -504,17 +488,15 @@ sub select_entry_menu {
     logi("Select a server to connect to:");
     print "\n";
     for my $i ( 0 .. $#entries ) {
-        printf "  ${CYAN}%2d)${RESET} ${BOLD}%s${RESET}\n", $i + 1,
-          $entries[$i]{display};
+        printf "  %2d) %s\n", $i + 1, $entries[$i]{display};
     }
-    printf "  ${CYAN}%2d)${RESET}"
-      . " ${BOLD}Manage known_hosts (delete)${RESET}\n",
+    printf "  %2d)"
+      . " Manage known_hosts (delete)\n",
       scalar(@entries) + 1;
-    printf "  ${CYAN}%2d)${RESET}"
-      . " ${BOLD}Add custom name (alias)${RESET}\n",
+    printf "  %2d)"
+      . " Add custom name (alias)\n",
       scalar(@entries) + 2;
-    printf "  ${CYAN}%2d)${RESET} ${BOLD}Quit${RESET}\n\n",
-      scalar(@entries) + 3;
+    printf "  %2d) Quit\n\n", scalar(@entries) + 3;
 
     my $selected_idx;
     while (1) {
@@ -571,10 +553,10 @@ sub question_ssh_user {
       || $ENV{USERNAME}
       || '';
 
-    print "${BOLD}SSH user${RESET}"
+    print "SSH user"
       . (
         length $default_user
-        ? " [${CYAN}$default_user${RESET}]"
+        ? " [$default_user]"
         : ''
       ) . ": ";
     my $ssh_user = <STDIN>;
