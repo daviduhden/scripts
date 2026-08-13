@@ -36,7 +36,8 @@ OPENBSD_SCRIPTS = \
 	openbsd/clean-logs.ksh \
 	openbsd/sudo-wrapper.ksh \
 	openbsd/sync-website.ksh \
-	openbsd/sysupgrade-current.ksh
+	openbsd/sysupgrade-current.ksh \
+	openbsd/update-crush.ksh
 
 SECUREBLUE_SCRIPTS = \
 	secureblue/down-music.bash \
