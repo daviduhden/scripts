@@ -60,17 +60,17 @@ user_uid() {
 	getent passwd "$user" | cut -d: -f3
 }
 
-# Homebrew stays out of root's PATH. All Homebrew commands use the
-# installed brew-proxy client as the configured non-root user.
+# Homebrew stays out of root's PATH. Informational commands use brew-proxy as
+# the configured user; root delegates administrative maintenance to linuxbrew.
 HOMEBREW_PREFIX="/home/linuxbrew/.linuxbrew"
 BREW_PROXY_COMMAND="/usr/bin/brew-proxy"
+HOMEBREW_ORIGINAL="${HOMEBREW_PREFIX}/proxy/brew-original"
 HOMEBREW_USER_HOME=""
 HOMEBREW_USER_UID=""
 HOMEBREW_ERROR=""
 
 homebrew_available() {
 	local dispatcher="${HOMEBREW_PREFIX}/bin/brew"
-	local original="${HOMEBREW_PREFIX}/proxy/brew-original"
 
 	HOMEBREW_ERROR=""
 	HOMEBREW_USER_HOME="$(user_home_dir "$NONROOT_USER" || true)"
@@ -84,7 +84,7 @@ homebrew_available() {
 		HOMEBREW_ERROR="brew-proxy client '${BREW_PROXY_COMMAND}' is missing or not executable."
 		return 1
 	fi
-	if [[ ! -x $dispatcher || ! -x $original ]]; then
+	if [[ ! -x $dispatcher || ! -x $HOMEBREW_ORIGINAL ]]; then
 		HOMEBREW_ERROR="brew-proxy is not fully configured under '${HOMEBREW_PREFIX}'."
 		return 1
 	fi
@@ -97,13 +97,29 @@ run_homebrew() {
 		return 1
 	fi
 
-	local runtime_dir="/run/user/${HOMEBREW_USER_UID}"
+	local brew_user="$NONROOT_USER"
+	local brew_home="$HOMEBREW_USER_HOME"
+	local brew_uid="$HOMEBREW_USER_UID"
+	local brew_command="$BREW_PROXY_COMMAND"
+	if [[ ${1:-} == "--admin" ]]; then
+		shift
+		brew_user="linuxbrew"
+		brew_home="$(user_home_dir "$brew_user" || true)"
+		brew_uid="$(user_uid "$brew_user" || true)"
+		brew_command="$HOMEBREW_ORIGINAL"
+		if [[ -z $brew_home || -z $brew_uid || $brew_uid -eq 0 ]]; then
+			error "Cannot determine a non-root linuxbrew execution context."
+			return 1
+		fi
+	fi
+
+	local runtime_dir="/run/user/${brew_uid}"
 	local bus_path="${runtime_dir}/bus"
 	local -a homebrew_env
 	homebrew_env=(
-		"HOME=${HOMEBREW_USER_HOME}"
-		"USER=${NONROOT_USER}"
-		"LOGNAME=${NONROOT_USER}"
+		"HOME=${brew_home}"
+		"USER=${brew_user}"
+		"LOGNAME=${brew_user}"
 		"PATH=${HOMEBREW_PREFIX}/bin:${HOMEBREW_PREFIX}/sbin:/usr/sbin:/usr/bin:/sbin:/bin"
 		"LANG=C.UTF-8"
 		"LC_ALL=C.UTF-8"
@@ -124,7 +140,7 @@ run_homebrew() {
 	fi
 
 	# shellcheck disable=SC2016 # Expanded by the delegated shell.
-	runuser -u "$NONROOT_USER" -- env -i \
+	runuser -u "$brew_user" -- env -i \
 		"${homebrew_env[@]}" /bin/sh -c '
 		if [ "$(/usr/bin/id -u)" -eq 0 ]; then
 			echo "Refusing to execute Homebrew with EUID 0." >&2
@@ -132,7 +148,7 @@ run_homebrew() {
 		fi
 		cd "$HOME" || exit 126
 		exec "$@"
-	' sysupgrade-homebrew "$BREW_PROXY_COMMAND" "$@" </dev/null
+	' sysupgrade-homebrew "$brew_command" "$@" </dev/null
 }
 
 run_as_user_env() {
@@ -521,20 +537,20 @@ update_homebrew() {
 		warn "Homebrew maintenance unavailable: ${HOMEBREW_ERROR}"
 		return 1
 	fi
-	log "Using brew-proxy as non-root user '${NONROOT_USER}'."
+	log "Running Homebrew maintenance directly as user 'linuxbrew'."
 
 	if ! run_phase_cmd "brew update" \
-		run_homebrew update; then
+		run_homebrew --admin update; then
 		warn "brew update failed."
 		phase_failed=1
 	fi
 	if ! run_phase_cmd "brew upgrade --yes --greedy" \
-		run_homebrew upgrade --yes --greedy; then
+		run_homebrew --admin upgrade --yes --greedy; then
 		warn "brew upgrade failed."
 		phase_failed=1
 	fi
 	if ! run_phase_cmd "brew cleanup" \
-		run_homebrew cleanup; then
+		run_homebrew --admin cleanup; then
 		warn "brew cleanup failed."
 	fi
 	if [[ $phase_failed -eq 0 ]]; then
