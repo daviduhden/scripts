@@ -28,36 +28,20 @@ else
 fi
 
 # Basic PATH (important when run from cron)
-PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-
-# Add Homebrew to PATH if present
-# (typical multi-user Linuxbrew locations)
-if [[ -d /var/home/linuxbrew/.linuxbrew/bin ]]; then
-	PATH="/var/home/linuxbrew/.linuxbrew/bin:$PATH"
-elif [[ -d /var/home/linuxbrew/bin ]]; then
-	PATH="/var/home/linuxbrew/bin:$PATH"
-fi
-
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
 # Force predictable US English output (useful for logs/parsing)
 export LANG=C.UTF-8
 export LC_ALL=C.UTF-8
 
-# Non-root user for any actions that require a user session
-# (Flatpak --user, ujust, brew). This MUST be explicitly
-# configured (no auto-detection).
+# Non-root desktop user for per-user Flatpak/ujust actions and Homebrew through
+# brew-proxy. This user MUST be explicitly configured (no auto-detection).
 #
 # Configure via either:
 #   - CLI: --user USERNAME
 #   - Env: SYSUPGRADE_USER=USERNAME
 NONROOT_USER="${SYSUPGRADE_USER:-}"
-
-run_as_user() {
-	local user="$1"
-	shift
-	runuser -u "$user" -- "$@"
-}
 
 run_phase_cmd() {
 	local label="$1"
@@ -76,35 +60,79 @@ user_uid() {
 	getent passwd "$user" | cut -d: -f3
 }
 
-homebrew_prefix_for_user() {
-	local user="$1" brew_cmd="$2"
-	local prefix=""
+# Homebrew stays out of root's PATH. All Homebrew commands use the
+# installed brew-proxy client as the configured non-root user.
+HOMEBREW_PREFIX="/home/linuxbrew/.linuxbrew"
+BREW_PROXY_COMMAND="/usr/bin/brew-proxy"
+HOMEBREW_USER_HOME=""
+HOMEBREW_USER_UID=""
+HOMEBREW_ERROR=""
 
-	# brew-proxy 0.3.x cannot reliably proxy Homebrew's global
-	# --prefix option. Its informational "config" command is proxied
-	# correctly and reports the same value.
-	if [[ ${brew_cmd##*/} == "brew-proxy" ]]; then
-		prefix="$(
-			runuser -u "$user" -- "$brew_cmd" config 2>/dev/null |
-				awk '/^HOMEBREW_PREFIX:[[:space:]]*/ {
-					sub(/^[^:]*:[[:space:]]*/, "")
-					print
-					exit
-				}'
-		)" || true
+homebrew_available() {
+	local dispatcher="${HOMEBREW_PREFIX}/bin/brew"
+	local original="${HOMEBREW_PREFIX}/proxy/brew-original"
+
+	HOMEBREW_ERROR=""
+	HOMEBREW_USER_HOME="$(user_home_dir "$NONROOT_USER" || true)"
+	HOMEBREW_USER_UID="$(user_uid "$NONROOT_USER" || true)"
+	if [[ -z $HOMEBREW_USER_HOME || -z $HOMEBREW_USER_UID ||
+		$HOMEBREW_USER_UID -eq 0 ]]; then
+		HOMEBREW_ERROR="Cannot determine a non-root execution context for '${NONROOT_USER}'."
+		return 1
+	fi
+	if [[ ! -x $BREW_PROXY_COMMAND ]]; then
+		HOMEBREW_ERROR="brew-proxy client '${BREW_PROXY_COMMAND}' is missing or not executable."
+		return 1
+	fi
+	if [[ ! -x $dispatcher || ! -x $original ]]; then
+		HOMEBREW_ERROR="brew-proxy is not fully configured under '${HOMEBREW_PREFIX}'."
+		return 1
+	fi
+	return 0
+}
+
+run_homebrew() {
+	if ! homebrew_available; then
+		error "Homebrew unavailable: ${HOMEBREW_ERROR}"
+		return 1
 	fi
 
-	# Standard Homebrew installations support --prefix directly. This
-	# also provides a fallback for older brew-proxy versions.
-	if [[ -z ${prefix:-} ]]; then
-		prefix="$(
-			runuser -u "$user" -- "$brew_cmd" --prefix \
-				2>/dev/null |
-				awk 'NF { print; exit }'
-		)" || true
+	local runtime_dir="/run/user/${HOMEBREW_USER_UID}"
+	local bus_path="${runtime_dir}/bus"
+	local -a homebrew_env
+	homebrew_env=(
+		"HOME=${HOMEBREW_USER_HOME}"
+		"USER=${NONROOT_USER}"
+		"LOGNAME=${NONROOT_USER}"
+		"PATH=${HOMEBREW_PREFIX}/bin:${HOMEBREW_PREFIX}/sbin:/usr/sbin:/usr/bin:/sbin:/bin"
+		"LANG=C.UTF-8"
+		"LC_ALL=C.UTF-8"
+		"XDG_DATA_DIRS=/home/linuxbrew/.local/share:/usr/local/share:/usr/share"
+		"HOMEBREW_CASK_OPTS=--require-sha"
+		"HOMEBREW_NO_ASK=1"
+		"HOMEBREW_NO_ENV_HINTS=1"
+		"BREW_PROXY_NONINTERACTIVE=1"
+		"GIT_TERMINAL_PROMPT=0"
+	)
+	if [[ -d $runtime_dir ]]; then
+		homebrew_env+=("XDG_RUNTIME_DIR=${runtime_dir}")
+		if [[ -S $bus_path ]]; then
+			homebrew_env+=(
+				"DBUS_SESSION_BUS_ADDRESS=unix:path=${bus_path}"
+			)
+		fi
 	fi
 
-	printf '%s\n' "$prefix"
+	# shellcheck disable=SC2016 # Expanded by the delegated shell.
+	runuser -u "$NONROOT_USER" -- env -i \
+		"${homebrew_env[@]}" /bin/sh -c '
+		if [ "$(/usr/bin/id -u)" -eq 0 ]; then
+			echo "Refusing to execute Homebrew with EUID 0." >&2
+			exit 126
+		fi
+		cd "$HOME" || exit 126
+		exec "$@"
+	' sysupgrade-homebrew "$BREW_PROXY_COMMAND" "$@" </dev/null
 }
 
 run_as_user_env() {
@@ -489,134 +517,24 @@ update_homebrew() {
 	local phase_failed=0
 	log "Updating Homebrew applications..."
 
-	# Never run "brew" as root. Determine a primary non-root user and
-	# execute brew via that user's context using "runuser"/"run_as_user".
-	local BREW_PREFIX PREFIX_UID PREFIX_GID BREW_USER
-	local BREW_CMD BREW_RUN_USER
-	local BREW_WORKDIR BREW_UPGRADE_AUTO_FLAG
-	local BREW_CASK_OPTS_MIGRATED
-	local -a BREW_ENV
-	BREW_RUN_USER="$NONROOT_USER"
-
-	local brew_detect_cmd
-	brew_detect_cmd='
-if command -v brew-proxy >/dev/null 2>&1;
-then command -v brew-proxy;
-elif command -v brew >/dev/null 2>&1;
-then command -v brew; fi
-'
-
-	if ! require_cmd --check runuser; then
-		warn "'runuser' not available; cannot safely run Homebrew update."
+	if ! homebrew_available; then
+		warn "Homebrew maintenance unavailable: ${HOMEBREW_ERROR}"
 		return 1
 	fi
+	log "Using brew-proxy as non-root user '${NONROOT_USER}'."
 
-	# Prefer brew-proxy when present for compatibility
-	# with secureblue setups.
-	BREW_CMD="$(runuser -u "$BREW_RUN_USER" -- \
-		bash -lc "$brew_detect_cmd" \
-		2>/dev/null || true)"
-	if [[ -z ${BREW_CMD:-} ]]; then
-		warn "brew-proxy/brew not available for" \
-			" configured user '$BREW_RUN_USER'."
-		return 1
-	fi
-
-	BREW_PREFIX="$(homebrew_prefix_for_user \
-		"$BREW_RUN_USER" "$BREW_CMD")"
-	if [[ -z ${BREW_PREFIX:-} || $BREW_PREFIX != /* ||
-		! -d $BREW_PREFIX ]]; then
-		warn "Could not determine a valid Homebrew" \
-			" prefix for configured user" \
-			" '$BREW_RUN_USER'."
-		return 1
-	fi
-
-	PREFIX_UID="$(stat -c '%u' "$BREW_PREFIX" 2>/dev/null || printf '')"
-	PREFIX_GID="$(stat -c '%g' "$BREW_PREFIX" 2>/dev/null || printf '')"
-
-	if [[ -z $PREFIX_UID || -z $PREFIX_GID ]]; then
-		warn "Could not read UID/GID for '$BREW_PREFIX'."
-		return 1
-	fi
-
-	BREW_USER="$(getent passwd "$PREFIX_UID" | cut -d: -f1 || true)"
-	if [[ -z ${BREW_USER:-} ]]; then
-		warn "Could not map UID=$PREFIX_UID to a username."
-		return 1
-	fi
-
-	if [[ $BREW_USER == "root" ]]; then
-		warn "Homebrew prefix at '$BREW_PREFIX'" \
-			" is owned by root; running brew as" \
-			" root is unsafe."
-		return 1
-	fi
-
-	if [[ $BREW_USER != "$BREW_RUN_USER" ]]; then
-		log "Homebrew prefix ownership differs from the configured user."
-		log "Using the Homebrew owner account for this phase."
-		BREW_RUN_USER="$BREW_USER"
-	fi
-
-	# Use the installation's brew executable as its validated owner. On
-	# secureblue this is the dedicated linuxbrew account that brew-proxy
-	# delegates to, avoiding global-option and polkit issues in unattended
-	# root maintenance.
-	BREW_CMD="${BREW_PREFIX}/bin/brew"
-	if ! runuser -u "$BREW_RUN_USER" -- test -x "$BREW_CMD"; then
-		warn "Homebrew executable '$BREW_CMD' is not" \
-			" available to prefix owner '$BREW_RUN_USER'."
-		return 1
-	fi
-	log "Using direct brew as Homebrew owner '$BREW_RUN_USER'."
-
-	# Run brew non-interactively and use the non-deprecated cask SHA flag.
-	BREW_ENV=(env -u HOMEBREW_CASK_OPTS_REQUIRE_SHA)
-	BREW_CASK_OPTS_MIGRATED="--require-sha"
-	BREW_ENV+=(
-		"HOMEBREW_CASK_OPTS=${BREW_CASK_OPTS_MIGRATED}"
-		"HOMEBREW_NO_ASK=1"
-		"HOMEBREW_NO_ENV_HINTS=1"
-		"NONINTERACTIVE=1"
-	)
-
-	BREW_WORKDIR="$(user_home_dir "$BREW_RUN_USER" || true)"
-	if [[ -z ${BREW_WORKDIR:-} || ! -d $BREW_WORKDIR ]]; then
-		BREW_WORKDIR="/"
-	fi
-	if ! cd "$BREW_WORKDIR"; then
-		warn "Could not switch to Homebrew workdir '$BREW_WORKDIR'."
-		return 1
-	fi
-
-	if runuser -u "$BREW_RUN_USER" -- \
-		"${BREW_ENV[@]}" "$BREW_CMD" upgrade --help \
-		2>/dev/null | grep -q -- '--yes'; then
-		BREW_UPGRADE_AUTO_FLAG="--yes"
-	fi
-
-	log "Running Homebrew maintenance with ${BREW_CMD}."
 	if ! run_phase_cmd "brew update" \
-		run_as_user "$BREW_RUN_USER" \
-		"${BREW_ENV[@]}" "$BREW_CMD" \
-		update; then
+		run_homebrew update; then
 		warn "brew update failed."
 		phase_failed=1
 	fi
-	if ! run_phase_cmd "brew upgrade --greedy" \
-		run_as_user "$BREW_RUN_USER" \
-		"${BREW_ENV[@]}" "$BREW_CMD" \
-		upgrade \
-		${BREW_UPGRADE_AUTO_FLAG:+"$BREW_UPGRADE_AUTO_FLAG"} \
-		--greedy; then
+	if ! run_phase_cmd "brew upgrade --yes --greedy" \
+		run_homebrew upgrade --yes --greedy; then
 		warn "brew upgrade failed."
 		phase_failed=1
 	fi
 	if ! run_phase_cmd "brew cleanup" \
-		run_as_user "$BREW_RUN_USER" \
-		"${BREW_ENV[@]}" "$BREW_CMD" \
-		cleanup; then
+		run_homebrew cleanup; then
 		warn "brew cleanup failed."
 	fi
 	if [[ $phase_failed -eq 0 ]]; then
@@ -830,12 +748,12 @@ collect_system_info() {
 	local run_user
 	if require_cmd --check runuser; then
 		run_user="runuser -u ${NONROOT_USER} --"
-		log "Running ujust/flatpak/brew info as" \
+		log "Running ujust/flatpak info as" \
 			"configured user: ${NONROOT_USER}"
 	else
 		run_user=""
 		warn "'runuser' not available; ujust/flatpak" \
-			"will run as root; brew info will be skipped."
+			"will run as root; Homebrew info will be skipped."
 	fi
 
 	local info_log
@@ -874,16 +792,11 @@ collect_system_info() {
 		fi
 
 		print_section "Homebrew Packages Installed"
-		if require_cmd --check brew; then
-			if [[ -n ${run_user:-} ]]; then
-				$run_user brew list --versions \
-					2>&1 || true
-			else
-				warn "Skipping brew list --versions;" \
-					"brew as root is unsafe."
-			fi
+		if homebrew_available; then
+			run_homebrew list --versions 2>&1 ||
+				printf 'Homebrew package query failed.\n'
 		else
-			printf 'brew not available.\n'
+			printf 'Homebrew unavailable: %s\n' "$HOMEBREW_ERROR"
 		fi
 
 		print_section "Audit Results"
@@ -936,16 +849,10 @@ collect_system_info() {
 		fi
 
 		print_section "Homebrew Services Status"
-		if require_cmd --check brew; then
-			if [[ -n ${run_user:-} ]]; then
-				$run_user brew services \
-					info --all 2>&1 || true
-			else
-				warn "Skipping brew services info;" \
-					"brew as root is unsafe."
-			fi
-		else
-			printf 'brew not available.\n'
+		if ! homebrew_available; then
+			printf 'Homebrew unavailable: %s\n' "$HOMEBREW_ERROR"
+		elif ! run_homebrew services info --all 2>&1; then
+			printf 'Homebrew services status query failed.\n'
 		fi
 
 		print_section "Disk Usage (df -h)"
