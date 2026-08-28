@@ -368,8 +368,8 @@ usage() {
 Usage: sysupgrade.bash [OPTIONS]
 
 Options:
-	--user USERNAME    Non-root user for per-user actions (required)
-	                  (or set SYSUPGRADE_USER=USERNAME)
+  --user USERNAME    Non-root user for per-user actions (required)
+                     (or set SYSUPGRADE_USER=USERNAME)
   --skip-audit       Skip running the Lynis security audit phase
   --skip-collect     Skip collecting Secureblue system information
   --help             Show this help message

@@ -146,14 +146,14 @@ main() {
 		build_and_install
 		verify_install
 		if [ "$SOURCE_CHANGED" -eq 1 ]; then
-			log "Done - signify updated to $LATEST_TAG "
+			log "Done - signify updated to $LATEST_TAG"
 			log "and is available at $INSTALL_PATH"
 		else
 			log "Done - signify installed at $INSTALL_PATH"
 		fi
 	else
 		verify_install
-		log "Done - signify already at latest source tag "
+		log "Done - signify already at latest source tag"
 		log "($LATEST_TAG)"
 	fi
 }
