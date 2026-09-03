@@ -256,7 +256,7 @@ EOF
 check_prereqs() {
 	require_root
 	require_cmd git
-	require_cmd make
+	require_cmd gmake
 	require_cmd install
 	require_cmd uname
 	require_cmd nproc

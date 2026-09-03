@@ -117,8 +117,13 @@ service_action() {
 }
 
 systemd_unit_exists() {
-	systemctl list-unit-files |
-		grep -q "^$1[[:space:]]"
+	# `systemctl list-unit-files PATTERN` matches unit names
+	# directly and exits 0 only when at least one unit matches.
+	# The previous `systemctl list-unit-files | grep -q` form
+	# returned 141 under pipefail: grep -q exits on the first
+	# match, systemctl dies of SIGPIPE, and the pipeline fails
+	# even though the unit exists.
+	systemctl list-unit-files "$1" >/dev/null 2>&1
 }
 
 ensure_systemd_unit_active() {

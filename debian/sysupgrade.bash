@@ -62,12 +62,18 @@ run_phase_cmd() {
 }
 
 apt_suite_enabled() {
-	local target="$1"
+	local target="$1" policy
 
 	# Prefer APT policy metadata when available;
 	# it exposes the exact suite name.
-	if apt-cache policy 2>/dev/null |
-		grep -Eq "release .*n=${target}([, ]|$)"; then
+	# The output is captured first: piping `apt-cache policy`
+	# straight into grep -q makes grep exit on the first match,
+	# killing apt-cache with SIGPIPE; under pipefail the
+	# pipeline then reports 141 and the suite looks disabled.
+	if policy="$(apt-cache policy 2>/dev/null)" &&
+		printf '%s\n' "$policy" |
+		grep -E "release .*n=${target}([, ]|$)" \
+			>/dev/null; then
 		return 0
 	fi
 
@@ -307,6 +313,7 @@ apt_full_upgrade() {
 	)
 
 	codename="$(
+		# shellcheck source=/dev/null
 		. /etc/os-release 2>/dev/null || true
 		printf '%s' "${VERSION_CODENAME:-}"
 	)"
@@ -501,13 +508,16 @@ collect_system_info_and_upload() {
 		lsusb 2>/dev/null || printf 'lsusb not available.\n'
 
 		print_section "Upgradable Packages"
-		apt list --upgradable 2>/dev/null
+		# These can fail (apt lock, containers without a boot
+		# journal, systems without a previous boot); guard them
+		# so the rest of the report is still collected.
+		apt list --upgradable 2>/dev/null || true
 
 		print_section "Previous Boot Journal (warnings/errors)"
-		journalctl -b -1 -p warning..alert
+		journalctl -b -1 -p warning..alert 2>&1 || true
 
 		print_section "Recent Journal (warnings/errors, last hour)"
-		journalctl -p warning..alert --since "1 hour ago"
+		journalctl -p warning..alert --since "1 hour ago" 2>&1 || true
 
 		print_section "Failed Systemd Services"
 		systemctl list-units --state=failed
@@ -531,7 +541,11 @@ collect_system_info_and_upload() {
 		ip route 2>/dev/null || true
 
 		print_section "Top Processes (by RSS)"
-		ps -eo pid,ppid,cmd,%mem,%cpu,rss --sort=-rss | head -n 20
+		# sed reads the whole stream; `| head -n 20` would exit
+		# early and make ps die of SIGPIPE, failing the pipeline
+		# under pipefail on busy systems.
+		ps -eo pid,ppid,cmd,%mem,%cpu,rss --sort=-rss |
+			sed -n '1,20p'
 	} 2>&1 | tee "$info_log"
 	local rc=$?
 	set +o pipefail

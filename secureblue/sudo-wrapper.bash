@@ -22,8 +22,12 @@ set -euo pipefail
 #   use the real sudo (if it exists).
 # - Permission handling is controlled by polkit (run0),
 #   not /etc/sudoers.
-# - sudoedit here uses run0edit, which provides
-#   safe/graphical editing as root.
+# - sudoedit prefers run0edit (github.com/HastD/run0edit, a
+#   third-party tool that is not shipped with systemd or
+#   secureblue); when run0edit is not installed, the wrapper
+#   falls back to running the editor as root via run0 (editing
+#   the file directly, without sudoedit's temporary-copy
+#   semantics).
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
@@ -84,7 +88,23 @@ handle_sudoedit() {
 	fi
 
 	export SUDOEDIT_VIA_RUN0=1
-	exec run0edit "${run0edit_args[@]}" "$@"
+
+	# run0edit is a third-party tool (github.com/HastD/run0edit)
+	# and is not shipped with systemd or secureblue. When it is
+	# installed, it provides the safe sudoedit-like semantics
+	# (temporary copy, copy back on success). When it is missing,
+	# fall back to editing the file directly as root via run0.
+	if command -v run0edit >/dev/null 2>&1; then
+		exec run0edit "${run0edit_args[@]}" "$@"
+	fi
+
+	if [[ -n $editor ]]; then
+		local -a editor_cmd
+		read -r -a editor_cmd <<<"$editor"
+		exec run0 "${editor_cmd[@]}" "$@"
+	fi
+
+	exec run0 vi "$@"
 }
 
 handle_default_sudo() {

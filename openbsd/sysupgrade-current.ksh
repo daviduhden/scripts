@@ -113,11 +113,18 @@ EOF_RCF
 }
 
 append_firstboot_tasks() {
+    # Idempotent: running sysupgrade-current twice before the
+    # next boot must not append the tasks twice to rc.firsttime.
+    grep -q '^run_logged_cmd()' "$RCF" 2>/dev/null && return 0
+
     cat <<'EOF_APPEND' >> "$RCF"
 run_logged_cmd() {
     log_file="$1"
     shift
-    if "$@" 2>&1 | tee "$log_file"; then
+    # Plain redirection instead of `| tee`: rc.firsttime runs
+    # without pipefail (OpenBSD ksh has none), and with a pipe
+    # the pipeline status would be tee's, hiding failures.
+    if "$@" >>"$log_file" 2>&1; then
         return 0
     fi
     return 1
@@ -164,11 +171,13 @@ run_lynis_audit() {
         audit_log="/tmp/lynis-audit-${audit_ts}.log"
         audit_report="/tmp/lynis-report-${audit_ts}.dat"
         lynis_log="/tmp/lynis-terminal-${audit_ts}.log"
+        # Redirection instead of `| tee` so that lynis's exit
+        # status decides the branch (no pipefail in ksh).
         if "$shell_bin" /usr/local/bin/lynis \
             audit system --quiet \
             --logfile "$audit_log" \
             --report-file "$audit_report" \
-            2>&1 | tee "$lynis_log"; then
+            >"$lynis_log" 2>&1; then
             chmod 0600 "$audit_log" \
                 "$audit_report" 2>/dev/null || true
             chmod 0600 "$lynis_log" 2>/dev/null || true

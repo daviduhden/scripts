@@ -100,8 +100,13 @@ main() {
 
 	log "----------------------------------------"
 	log "Log cleanup started"
-	cleanup_gz_logs
-	cleanup_old_files
+	failed=0
+	cleanup_gz_logs || failed=1
+	cleanup_old_files || failed=1
+	if [ "$failed" -ne 0 ]; then
+		warn "Log cleanup finished with errors."
+		exit 1
+	fi
 	log "Log cleanup finished"
 	log "----------------------------------------"
 }

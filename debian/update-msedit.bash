@@ -128,7 +128,7 @@ get_release_asset_from_json() {
 		grep -F linux |
 		grep -F "$arch" |
 		grep -E '\.tar\.gz$' |
-		head -n1
+		sed -n '1p'
 }
 
 install_msedit() {
@@ -144,7 +144,9 @@ install_msedit() {
 	log "Extracting $archive"
 	tar -xzf "$archive"
 
-	bin="$(find . -type f -name edit -perm -u+x | head -n1)"
+	# sed reads the whole stream; `| head -n1` would exit early
+	# and make find die of SIGPIPE (141 under pipefail).
+	bin="$(find . -type f -name edit -perm -u+x | sed -n '1p')"
 
 	if [[ -z $bin ]]; then
 		error "edit binary not found."

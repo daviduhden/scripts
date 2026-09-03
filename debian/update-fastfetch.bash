@@ -74,7 +74,7 @@ get_latest_release() {
 			sed 's#refs/tags/##' |
 			sed 's/\^{}//' |
 			sort -Vr |
-			head -n1)"
+			sed -n '1p')"
 		if [[ -n $tag ]]; then
 			printf '%s\n' "$tag"
 			return 0
@@ -99,6 +99,7 @@ detect_pkg_arch() {
 	ppc64le | ppc64el) printf '%s\n' "ppc64le" ;;
 	riscv64) printf '%s\n' "riscv64" ;;
 	s390x) printf '%s\n' "s390x" ;;
+	loong64 | loongarch64) printf '%s\n' "loongarch64" ;;
 	*) error "Unsupported architecture: ${arch}" ;;
 	esac
 }
@@ -166,7 +167,7 @@ run_fastfetch_update() {
 	if [[ ! -f $DEB_FILE ]]; then
 		alt_file="$(find "$TMPDIR" -maxdepth 1 \
 			-type f -name 'fastfetch-linux-*.deb' |
-			head -n1)"
+			sed -n '1p')"
 		if [[ -n $alt_file ]]; then
 			DEB_FILE="$alt_file"
 		else

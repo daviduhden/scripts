@@ -63,11 +63,15 @@ fetch_url() {
 }
 
 map_arch() {
+	# Asset names verified against the charmbracelet/crush
+	# GitHub releases: crush_<ver>_Openbsd_armv7.tar.gz,
+	# crush_<ver>_Openbsd_i386.tar.gz, ... OpenBSD/armv7
+	# reports uname -m as "armv7", so that is the name to map.
 	case "$(uname -m)" in
 	amd64) print "x86_64" ;;
 	i386) print "i386" ;;
 	arm64) print "arm64" ;;
-	arm) print "armv7" ;;
+	armv7 | arm) print "armv7" ;;
 	*) print "" ;;
 	esac
 }
@@ -95,11 +99,14 @@ configure_deepseek() {
 	crushrc_block=$(
 		cat <<'CRUSHRC_EOF'
 # --- DeepSeek provider (managed by update-crush.ksh) ---
-# OpenAI-compatible API. Set DEEPSEEK_API_KEY in your
-# environment before running crush.
+# OpenAI-compatible API. The key is read from the environment
+# at crush startup (crushrc is Bash); it is never stored here.
+# ${VAR:?...} matches the pattern recommended in the crush
+# config documentation: fail clearly at startup when the
+# variable is unset instead of starting without a key.
 provider add deepseek --type openai-compat \
   --base-url "https://api.deepseek.com/v1" \
-  --api-key "$DEEPSEEK_API_KEY"
+  --api-key "${DEEPSEEK_API_KEY:?set DEEPSEEK_API_KEY}"
 
 model add deepseek/deepseek-chat \
   --name "Deepseek V3" \
@@ -190,8 +197,10 @@ install_crush() {
 	}
 
 	log "Verifying SHA-256 checksum..."
-	checksum=$(sha256 -b "$tmpdir/$asset" |
-		sed -E 's/.*= *//')
+	# sha256(1) -q prints the plain hexadecimal digest. The -b
+	# (base64) form would never match the hexadecimal entries in
+	# the upstream checksums.txt.
+	checksum=$(sha256 -q "$tmpdir/$asset")
 	if [ "$checksum" != "$expected_checksum" ]; then
 		error "Checksum mismatch for $asset"
 		return 1

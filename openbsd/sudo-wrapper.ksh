@@ -117,7 +117,7 @@ handle_sudo() {
 
 main() {
 	typeset prog_name
-	prog_name=$(basename -- "$0")
+	prog_name=$(basename "$0")
 
 	ensure_doas "$prog_name"
 

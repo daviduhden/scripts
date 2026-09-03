@@ -50,7 +50,9 @@ resolve_clamav_account() {
 	done
 
 	[[ -n $CLAMAV_USER ]] || error \
-		"No ClamAV service user found (tried: clamav, clamscan)"
+		"No ClamAV service user found (tried: clamav, clamscan)." \
+		"If ClamAV was just layered with rpm-ostree, reboot" \
+		"first so the package creates its service user."
 
 	CLAMAV_GROUP="$(id -gn "$CLAMAV_USER")"
 	[[ -n $CLAMAV_GROUP ]] || error \

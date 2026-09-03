@@ -89,7 +89,7 @@ ensure_brew_path() {
 				restricted="$(find "$brew_prefix/Cellar" \
 					-maxdepth 3 -type d \
 					! -perm -o+rx 2>/dev/null |
-					head -1 || true)"
+					sed -n '1p' || true)"
 				if [[ -n $restricted ]]; then
 					warn "Some Homebrew cellar" \
 						"directories have" \
@@ -187,7 +187,7 @@ get_installed_cargo_version() {
 	cargo install --list 2>/dev/null |
 		awk -v crate="$crate" '$1==crate {print $2}' |
 		sed -E 's/^v//; s/:$//' |
-		head -n1
+		sed -n '1p'
 }
 
 cargo_np() {

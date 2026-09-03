@@ -46,7 +46,7 @@ get_latest_tag() {
 		awk '{print $2}' |
 		sed 's#refs/tags/##; s/\^{}//' |
 		sort -Vr |
-		head -n1)"
+		sed -n '1p')"
 	[[ -n $tag ]] && printf '%s\n' "$tag"
 }
 
@@ -95,7 +95,10 @@ fetch_source() {
 	log "Git clone failed, downloading tarball ${tarball_url}..."
 	curl -fLsS --retry 5 "$tarball_url" -o "$tarball"
 	tar -xzf "$tarball" -C "$dest"
-	src_dir="$(find "$dest" -maxdepth 1 -type d -name 'btop*' | head -n1)"
+	# sed reads the whole stream; `| head -n1` would exit early
+	# and make find die of SIGPIPE (141 under pipefail).
+	src_dir="$(find "$dest" -maxdepth 1 -type d -name 'btop*' |
+		sed -n '1p')"
 	[[ -n $src_dir ]] && printf '%s\n' "$src_dir"
 }
 

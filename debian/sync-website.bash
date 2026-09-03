@@ -30,18 +30,19 @@ error() {
 }
 
 has_repo_content() {
-	local dir="$1"
+	local dir="$1" listing
 	[ -d "$dir" ] || return 1
-	if find "$dir" -mindepth 1 \
+	# Capture the whole listing instead of piping into head/grep:
+	# with pipefail, an early-exiting consumer kills find with
+	# SIGPIPE and the pipeline reports 141 even though the tree
+	# is not empty.
+	listing="$(find "$dir" \
 		\( -path "$dir/.git" \
 		-o -path "$dir/.git/*" \
 		-o -path "$dir/.github" \
 		-o -path "$dir/.github/*" \) \
-		-prune -o -print | head -n 1 |
-		grep -q .; then
-		return 0
-	fi
-	return 1
+		-prune -o -mindepth 1 -print 2>/dev/null)"
+	[ -n "$listing" ]
 }
 
 ##################
@@ -233,10 +234,6 @@ sync_with_git() {
 		rm -rf "$tmpdir"
 		return 1
 	}
-	[ ! -d "$stagedir" ] && {
-		rm -rf "$tmpdir"
-		return 1
-	}
 
 	fetch_lfs_files "$stagedir"
 
@@ -279,8 +276,11 @@ sync_with_github_zip() {
 		rm -rf "$tmpdir"
 		return 1
 	fi
+	# sed reads the whole stream, so find never receives SIGPIPE
+	# (unlike `find ... | head -n 1`, which returns 141 under
+	# pipefail for large trees).
 	srcdir=$(find "$unpack_dir" -mindepth 1 \
-		-maxdepth 1 -type d | head -n 1)
+		-maxdepth 1 -type d | sed -n '1p')
 
 	[ -d "$srcdir" ] || {
 		rm -rf "$tmpdir"

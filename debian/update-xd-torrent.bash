@@ -175,6 +175,17 @@ stop_xd_if_running() {
 	fi
 }
 
+# If this run stopped a running xd and a later step failed
+# before the restart, bring the service back up instead of
+# leaving it down.
+restore_xd_if_needed() {
+	if [ "$WAS_ACTIVE" -eq 1 ] &&
+		! systemctl is-active --quiet xd; then
+		systemctl start xd >/dev/null 2>&1 || true
+	fi
+}
+trap restore_xd_if_needed EXIT
+
 install_systemd_service() {
 	log "Updating systemd unit: $SYSTEMD_UNIT_FILE..."
 	install -d /etc/systemd/system

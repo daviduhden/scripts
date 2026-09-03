@@ -78,6 +78,18 @@ require_cmd() {
 		error "Required command '$1' not found."
 }
 
+# If this run stopped a running xd.service and a later step
+# failed before the restart, bring it back up instead of
+# leaving it down.
+restore_xd_if_needed() {
+	if [ "$WAS_ACTIVE" -eq 1 ] &&
+		! systemctl --user is-active --quiet xd.service; then
+		systemctl --user start xd.service \
+			>/dev/null 2>&1 || true
+	fi
+}
+trap restore_xd_if_needed EXIT
+
 detect_root_cmd() {
 	if [ "${EUID:-$(id -u)}" -eq 0 ]; then
 		ROOT_CMD=""
@@ -123,7 +135,7 @@ ensure_brew_access() {
 		local restricted
 		restricted="$(find "$brew_prefix/Cellar" \
 			-maxdepth 3 -type d ! -perm -o+rx \
-			2>/dev/null | head -1 || true)"
+			2>/dev/null | sed -n '1p' || true)"
 		if [[ -n $restricted ]]; then
 			warn "Some Homebrew cellar" \
 				"directories have restricted" \

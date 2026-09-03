@@ -56,7 +56,12 @@ SECUREBLUE_SCRIPTS = \
 TESTS_FORMAT_SCRIPTS = \
 	tests-format/clang-format-all.sh \
 	tests-format/clang-tidy-all.sh \
+	tests-format/fix-permissions.sh \
 	tests-format/install-knfmt-linux.sh \
+	tests-format/test-fix-permissions.sh \
+	tests-format/test-ssh-menu.pl \
+	tests-format/test-validate-correctness.sh \
+	tests-format/validate-correctness.sh \
 	tests-format/validate-make.sh \
 	tests-format/validate-manpages.sh \
 	tests-format/validate-perl.sh \
@@ -65,7 +70,7 @@ TESTS_FORMAT_SCRIPTS = \
 PERL_SCRIPTS = \
 	perl/ssh-menu.pl
 
-.PHONY: all clean install-debian install-openbsd install-secureblue install-shell install-shell-bash install-shell-bash-unlock install-shell-bash-copy install-shell-bash-lock install-shell-openbsd install-perl install-tests-format test help
+.PHONY: all clean install-debian install-openbsd install-secureblue install-shell install-shell-bash install-shell-bash-unlock install-shell-bash-copy install-shell-bash-lock install-shell-openbsd install-perl install-tests-format test fix-permissions check-permissions help
 
 all: install-debian install-openbsd install-secureblue install-perl install-tests-format
 
@@ -128,6 +133,17 @@ test:
 	@echo "Running shell script validation..." && /bin/sh tests-format/validate-shell.sh .
 	@echo "Running perl script validation..." && /bin/sh tests-format/validate-perl.sh .
 	@echo "Running make validation..." && /bin/sh tests-format/validate-make.sh .
+	@echo "Checking file permissions (read-only)..." && /bin/sh tests-format/fix-permissions.sh --check .
+	@echo "Running correctness audit..." && /bin/sh tests-format/validate-correctness.sh --target all .
+	@echo "Running fix-permissions regression tests..." && /bin/sh tests-format/test-fix-permissions.sh
+	@echo "Running correctness regression tests..." && /bin/sh tests-format/test-validate-correctness.sh
+	@echo "Running ssh-menu regression test..." && perl tests-format/test-ssh-menu.pl
+
+fix-permissions:
+	@/bin/sh tests-format/fix-permissions.sh .
+
+check-permissions:
+	@/bin/sh tests-format/fix-permissions.sh --check .
 
 help:
-	@printf "Usage: make [target]\n\nTargets:\n  all                      Install all helper sets\n  install-debian           Install Debian helper scripts into ${BINDIR}\n  install-openbsd          Install OpenBSD helper scripts into ${BINDIR}\n  install-secureblue       Install secureblue helper scripts into ${BINDIR}\n  install-shell            Install SecureBlue Bash shell helpers\n  install-shell-bash       Install shell aliases into ${BASH_CONF_DST_DIR} (with chattr -i/+i)\n  install-shell-openbsd    Guidance for installing shell helpers on OpenBSD\n  install-perl             Install perl helper scripts into ${BINDIR}\n  install-tests-format     Install tests-format helper scripts into ${BINDIR}/tests-format\n  test                     Run script and make validation tests\n  clean                    No-op clean target\n  help                     Show this help\n"
+	@printf "Usage: make [target]\n\nTargets:\n  all                      Install all helper sets\n  install-debian           Install Debian helper scripts into ${BINDIR}\n  install-openbsd          Install OpenBSD helper scripts into ${BINDIR}\n  install-secureblue       Install secureblue helper scripts into ${BINDIR}\n  install-shell            Install SecureBlue Bash shell helpers\n  install-shell-bash       Install shell aliases into ${BASH_CONF_DST_DIR} (with chattr -i/+i)\n  install-shell-openbsd    Guidance for installing shell helpers on OpenBSD\n  install-perl             Install perl helper scripts into ${BINDIR}\n  install-tests-format     Install tests-format helper scripts into ${BINDIR}\n  test                     Run validation tests (never modifies files)\n  fix-permissions          Correct file modes from file(1) content\n  check-permissions        Report wrong file modes (read-only, rc != 0)\n  clean                    No-op clean target\n  help                     Show this help\n"

@@ -197,8 +197,12 @@ open_ufw_ports() {
 
 	log "Opening UFW ports for clearnet access..."
 	for port in $UFW_TCP_PORTS; do
+		# grep without -q reads the whole stream, so ufw never
+		# dies of SIGPIPE (which under pipefail would make the
+		# pipeline report 141 and re-run ufw allow).
 		if ufw status |
-			grep -Eq "^${port}/tcp[[:space:]]+ALLOW"; then
+			grep -E "^${port}/tcp[[:space:]]+ALLOW" \
+				>/dev/null; then
 			log "ufw already allows ${port}/tcp"
 			continue
 		fi
@@ -720,6 +724,14 @@ run_update() {
 	cleanup() {
 		rm -rf "$TMPDIR" "$GPG_HOME" \
 			2>/dev/null || true
+		# If this run stopped a running monerod and a later
+		# step failed before the restart below, bring the
+		# node back up instead of leaving it down.
+		if [[ ${WAS_ACTIVE:-0} -eq 1 ]] &&
+			! systemctl is-active --quiet monerod; then
+			systemctl start monerod \
+				>/dev/null 2>&1 || true
+		fi
 	}
 	trap cleanup EXIT
 
@@ -796,7 +808,7 @@ run_update() {
 	tar -xjf "${TMPDIR}/${TARBALL}" -C "$TMPDIR"
 
 	EXTRACTED_DIR="$(find "$TMPDIR" -maxdepth 1 \
-		-type d -name 'monero-*' | head -n1)"
+		-type d -name 'monero-*' | sed -n '1p')"
 	if [[ -z ${EXTRACTED_DIR} ]]; then
 		error "could not find extracted" \
 			"Monero directory."
@@ -976,7 +988,7 @@ EOF
 
 	if command -v monerod >/dev/null 2>&1; then
 		log "Installed Monero CLI version:" \
-			"$(monerod --version | head -n1 || true)"
+			"$(monerod --version 2>/dev/null | sed -n '1p' || true)"
 	fi
 
 	if [[ ${INSTALL_OR_UPDATE_LWS} -eq 1 ]]; then

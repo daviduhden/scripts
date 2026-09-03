@@ -81,7 +81,7 @@ ensure_brew_access() {
 		local restricted
 		restricted="$(find "$brew_prefix/Cellar" \
 			-maxdepth 3 -type d ! -perm -o+rx \
-			2>/dev/null | head -1 || true)"
+			2>/dev/null | sed -n '1p' || true)"
 		if [[ -n $restricted ]]; then
 			warn "Some Homebrew cellar directories have restricted permissions."
 			warn "Run this to fix: run0 find" \

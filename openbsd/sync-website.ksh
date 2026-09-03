@@ -35,14 +35,19 @@ error() {
 }
 
 has_repo_content() {
-	typeset dir="$1"
+	typeset dir="$1" listing
 	[ -d "$dir" ] || return 1
-	find "$dir" \
+	# Capture the whole listing instead of piping into head/grep:
+	# with pipefail (set below), an early-exiting consumer kills
+	# find with SIGPIPE and the pipeline would report 141 even
+	# though the tree is not empty.
+	listing=$(find "$dir" \
 		\( -path "$dir/.git" -o \
 		-path "$dir/.git/*" -o \
 		-path "$dir/.github" -o \
 		-path "$dir/.github/*" \) -prune \
-		-o -mindepth 1 -print | head -n 1 | grep -q .
+		-o -mindepth 1 -print 2>/dev/null)
+	[ -n "$listing" ]
 }
 
 ##################
@@ -85,7 +90,15 @@ run_as_gh_user() {
 	if command -v doas >/dev/null 2>&1; then
 		doas -u "$GH_USER" "$@"
 	else
-		su - "$GH_USER" -c "$(print -f '%q ' "$@")"
+		# OpenBSD ksh's print builtin only supports -n/-e/-E
+		# (no -f and no %q), so build the su command string
+		# with portable sed-based single-quote escaping.
+		typeset i cmdstr=""
+		for i in "$@"; do
+			cmdstr="${cmdstr} '$(print -r -- "$i" |
+				sed "s/'/'\\\\''/g")'"
+		done
+		su - "$GH_USER" -c "$cmdstr"
 	fi
 }
 
@@ -222,10 +235,6 @@ sync_with_git() {
 		rm -rf "$tmpdir"
 		return 1
 	}
-	[ ! -d "$stagedir" ] && {
-		rm -rf "$tmpdir"
-		return 1
-	}
 
 	# Fetch LFS
 	fetch_lfs_files "$stagedir"
@@ -268,8 +277,11 @@ sync_with_github_zip() {
 		rm -rf "$tmpdir"
 		return 1
 	fi
+	# sed reads the whole stream, so find never receives SIGPIPE
+	# (unlike `find ... | head -n 1`, which returns 141 under
+	# pipefail for large trees).
 	srcdir=$(find "$unpack_dir" -mindepth 1 -maxdepth 1 -type d |
-		head -n 1)
+		sed -n '1p')
 
 	[ -d "$srcdir" ] || {
 		rm -rf "$tmpdir"

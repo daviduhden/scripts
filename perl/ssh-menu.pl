@@ -335,6 +335,10 @@ sub parse_known_hosts {
             next;
         }
 
+        # Marker lines (@cert-authority ..., @revoked ...) define
+        # trust/revocations, not connectable hosts; skip them.
+        next if $line =~ /^\s*@/;
+
         my ($field) = split /\s+/, $line, 2;
         next unless defined $field && length $field;
 
@@ -562,6 +566,7 @@ sub question_ssh_user {
     my $ssh_user = <STDIN>;
     defined $ssh_user or die_tool("Input closed.");
     chomp $ssh_user;
+    $ssh_user =~ s/^\s+|\s+$//g;
 
     if ( !length $ssh_user ) {
         if ( length $default_user ) {
