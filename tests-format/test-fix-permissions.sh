@@ -93,9 +93,9 @@ chmod 755 "$T/setup.conf"
 printf '%s\n' 'just text' >"$T/README.txt"
 chmod 755 "$T/README.txt"
 
-# 5. Makefile 0755 -> 0644
+# 5. Makefile 0644 -> 0755
 printf '%s\n' 'all:' >"$T/Makefile"
-chmod 755 "$T/Makefile"
+chmod 644 "$T/Makefile"
 
 # 6. file with spaces in its name
 printf '%s\n' '#!/bin/sh' 'echo hi' >"$T/space dir/with space.sh"
@@ -138,7 +138,7 @@ assert_mode 'rwxr-xr-x' "$T/s.sh" "shell script -> 0755"
 assert_mode 'rwxr-xr-x' "$T/t.pl" "Perl script -> 0755"
 assert_mode 'rw-r--r--' "$T/setup.conf" "config -> 0644"
 assert_mode 'rw-r--r--' "$T/README.txt" "plain text -> 0644"
-assert_mode 'rw-r--r--' "$T/Makefile" "Makefile -> 0644"
+assert_mode 'rwxr-xr-x' "$T/Makefile" "Makefile -> 0755"
 assert_mode 'rwxr-xr-x' "$T/dir0700" "directory -> 0755"
 assert_mode 'rwxr-xr-x' "$T/space dir/with space.sh" "spaced name -> 0755"
 if [ -f "$T/hello" ]; then

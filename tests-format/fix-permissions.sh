@@ -11,10 +11,10 @@ set -eu
 #     directories                     -> 0755
 #     scripts (shell/perl/python/...) -> 0755
 #     native executables (ELF, ...)   -> 0755
+#     Makefiles                       -> 0755
 #     everything else (text, config,
-#       documentation, Makefiles,
-#       data, non-executable
-#       binaries)                     -> 0644
+#       documentation, data,
+#       non-executable binaries)      -> 0644
 # - The .git directory is never touched, symlinks are never
 #   followed or modified, and sockets, FIFOs, devices and other
 #   special files are ignored. setuid/setgid/sticky bits found on
@@ -91,11 +91,12 @@ classify_file() {
 	DESC="$ftype"
 	[ -n "$DESC" ] || DESC='unknown content'
 
-	# Makefiles are data for the purpose of permissions, even
-	# though file(1) may call them "makefile script".
+	# Makefiles are meant to be invoked directly (make,
+	# gmake, bmake), so they get the executable bit even
+	# though file(1) calls them "makefile script".
 	case "$lower" in
 	*makefile*)
-		CLASS='data'
+		CLASS='exec'
 		DESC='makefile'
 		return
 		;;

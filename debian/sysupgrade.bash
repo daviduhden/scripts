@@ -5,7 +5,6 @@ set -euo pipefail
 # Automated apt maintenance script
 # - Updates package lists
 # - Runs full-upgrade with non-interactive config file handling
-# - Backs up /etc before the upgrade
 # - Runs autoremove and clean
 # - Reloads systemd and restarts services (if needrestart is available)
 # - Collects system information to /var/log/sysupgrade (rotates weekly)
@@ -22,8 +21,6 @@ export LANG=C.UTF-8
 export LC_ALL=C.UTF-8
 
 APT_BIN="/bin/apt"
-
-BACKUP_ROOT="/var/backups/apt-config-backups"
 
 # Prefer preserving local configuration files.
 # Force defend-against-confold by not overwriting local config.
@@ -124,6 +121,12 @@ run_phase() {
 	fi
 }
 
+mark_phase_skipped() {
+	local phase="$1" kind="$2" label="$3" reason="$4"
+	record_phase_status "$phase" "$kind" "$label" "SKIPPED"
+	log "Skipping ${label}: ${reason}"
+}
+
 print_phase_summary() {
 	local phase status kind
 	local mandatory_failures=0 optional_failures=0 successes=0 skipped=0
@@ -168,131 +171,42 @@ require_cmd() {
 	}
 }
 
-backup_etc() {
-	local ts backup_dir archive baseline_root baseline_etc changes_manifest
-	local old_umask
+usage() {
+	cat <<'USAGE'
+Usage: sysupgrade.bash [OPTIONS]
 
-	ts="$(date +%Y%m%d-%H%M%S)"
-	backup_dir="${BACKUP_ROOT}/${ts}"
-	baseline_root="${BACKUP_ROOT}/.baseline"
-	baseline_etc="${baseline_root}/etc"
-	archive="${backup_dir}/etc-changes.tar.gz"
-	changes_manifest="${backup_dir}/etc-changes.rsync.txt"
-
-	old_umask="$(umask)"
-	umask 077
-
-	mkdir -p "$backup_dir"
-	chmod 0700 "$BACKUP_ROOT" 2>/dev/null || true
-	chmod 0700 "$backup_dir" 2>/dev/null || true
-
-	if ! command -v rsync >/dev/null 2>&1; then
-		warn "rsync not found; falling back to full /etc backup."
-		archive="${backup_dir}/etc-full.tar.gz"
-		log "Backing up /etc to ${archive}..."
-		tar --numeric-owner --xattrs --acls -cpzf "$archive" -C / etc
-		chmod 0600 "$archive" 2>/dev/null || true
-		umask "$old_umask"
-		log "Backup completed."
-		return 0
-	fi
-
-	# First run: no baseline exists yet, so take a
-	# full backup and create the baseline.
-	if [[ ! -d $baseline_etc ]] ||
-		! find "$baseline_etc" -mindepth 1 \
-			-maxdepth 1 -print -quit 2>/dev/null |
-		grep -q .; then
-		archive="${backup_dir}/etc-full.tar.gz"
-		log "No baseline found; creating initial full"
-		log "/etc backup at ${archive}..."
-		tar --numeric-owner --xattrs --acls \
-			-cpzf "$archive" -C / etc
-		chmod 0600 "$archive" 2>/dev/null || true
-
-		mkdir -p "$baseline_etc"
-		chmod 0700 "$baseline_root" 2>/dev/null || true
-		chmod 0700 "$baseline_etc" 2>/dev/null || true
-		log "Creating baseline snapshot at ${baseline_etc}..."
-		rsync -aHAX --numeric-ids --delete \
-			/etc/ "$baseline_etc/" >/dev/null
-		umask "$old_umask"
-		log "Backup completed"
-		log "(initial full + baseline created)."
-		return 0
-	fi
-
-	log "Detecting modified /etc files vs"
-	log "baseline (${baseline_etc})..."
-	# This is a 'diff' of /etc vs the baseline via
-	# rsync itemized changes. Includes new/changed
-	# files and deletions (as '*deleting').
-	if ! rsync -aHAX --numeric-ids --delete \
-		--dry-run --itemize-changes \
-		/etc/ "$baseline_etc/" \
-		>"$changes_manifest"; then
-		warn "Change detection failed; falling back to full /etc backup."
-		archive="${backup_dir}/etc-full.tar.gz"
-		log "Backing up /etc to ${archive}..."
-		tar --numeric-owner --xattrs --acls -cpzf "$archive" -C / etc
-		chmod 0600 "$archive" 2>/dev/null || true
-		umask "$old_umask"
-		log "Backup completed."
-		return 0
-	fi
-
-	# Copy changed files into staging, then archive.
-	# Unchanged files are skipped; deletions are only
-	# recorded in the manifest.
-	mkdir -p "${backup_dir}/etc"
-	chmod 0700 "${backup_dir}/etc" 2>/dev/null || true
-
-	log "Backing up only changed /etc files to"
-	log "${archive}..."
-	# --compare-dest skips files identical to baseline.
-	rsync -aHAX --numeric-ids \
-		--compare-dest="$baseline_etc" \
-		/etc/ "${backup_dir}/etc/" >/dev/null || true
-
-	# Avoid producing a misleading archive when nothing changed.
-	if ! find "${backup_dir}/etc" \
-		-type f -print -quit 2>/dev/null | grep -q .; then
-		log "No modified /etc files detected; nothing to back up."
-		rm -rf -- "${backup_dir:?}/etc"
-		chmod 0600 "$changes_manifest" 2>/dev/null || true
-		umask "$old_umask"
-		return 0
-	fi
-
-	# Archive the staging tree; paths remain under 'etc/'.
-	tar --numeric-owner --xattrs --acls \
-		-cpzf "$archive" -C "$backup_dir" etc
-	chmod 0600 "$archive" 2>/dev/null || true
-	chmod 0600 "$changes_manifest" 2>/dev/null || true
-	# Remove the staging directory after archiving to save space.
-	rm -rf -- "${backup_dir:?}/etc"
-
-	log "Updating baseline snapshot..."
-	rsync -aHAX --numeric-ids --delete /etc/ "$baseline_etc/" >/dev/null
-
-	umask "$old_umask"
-	log "Backup completed (incremental)."
+Options:
+  --skip-audit    Skip the Lynis/systemcheck security audit phase
+  --help          Show this help message
+USAGE
+	exit 0
 }
 
-cleanup_old_backups() {
-	if [[ ! -d $BACKUP_ROOT ]]; then
-		return 0
-	fi
-
-	# Keep baseline data; remove timestamped backup
-	# directories older than 7 days.
-	if find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d \
-		! -name '.baseline' \
-		-regextype posix-extended -regex '.*/[0-9]{8}-[0-9]{6}' \
-		-mtime +7 -print0 2>/dev/null | xargs -0r rm -rf --; then
-		log "Old /etc backups older than 7 days removed (if any)."
-	else
-		warn "Failed to clean old /etc backups in ${BACKUP_ROOT}."
+parse_args() {
+	local flag_used=0
+	while [[ ${1:-} != "" ]]; do
+		case "$1" in
+		--skip-audit)
+			flag_used=1
+			SKIP_AUDIT=1
+			shift
+			;;
+		--help | -h)
+			flag_used=1
+			warn "CLI flag detected; using" \
+				" non-default options instead of" \
+				" standard behavior."
+			usage
+			;;
+		*)
+			break
+			;;
+		esac
+	done
+	if [[ $flag_used -eq 1 ]]; then
+		warn "CLI flag detected; using" \
+			" non-default options instead of" \
+			" standard behavior."
 	fi
 }
 
@@ -568,7 +482,6 @@ collect_system_info_and_upload() {
 
 check_prereqs() {
 	require_cmd date
-	require_cmd tar
 	require_cmd mktemp
 	require_cmd find
 	require_cmd chmod
@@ -583,10 +496,6 @@ run_maintenance() {
 	PHASE_KIND=()
 	PHASE_LABEL=()
 
-	run_phase "backup-etc" "mandatory" \
-		"Backup /etc" backup_etc
-	run_phase "cleanup-old-backups" "optional" \
-		"Cleanup old backups" cleanup_old_backups
 	run_phase "apt-update" "mandatory" \
 		"APT update" apt_update
 	run_phase "apt-full-upgrade" "mandatory" \
@@ -595,8 +504,14 @@ run_maintenance() {
 		"APT cleanup" apt_cleanup
 	run_phase "restart-services" "optional" \
 		"Restart services" restart_services
-	run_phase "security-audit" "optional" \
-		"Security audit" run_security_audit
+	if [[ -z ${SKIP_AUDIT:-} ]]; then
+		run_phase "security-audit" "optional" \
+			"Security audit" run_security_audit
+	else
+		mark_phase_skipped "security-audit" \
+			"optional" "Security audit" \
+			"flag set"
+	fi
 	run_phase "collect-system-info" "optional" \
 		"Collect system info" collect_system_info_and_upload
 
@@ -611,6 +526,7 @@ run_maintenance() {
 main() {
 	require_root
 	check_prereqs
+	parse_args "$@"
 	run_maintenance
 }
 
