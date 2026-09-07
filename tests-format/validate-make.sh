@@ -135,7 +135,15 @@ run_validate_make() {
 			-print |
 			while IFS= read -r f; do
 				[ -n "$f" ] || continue
-				if ! "$MAKE_CMD" -n -f "$f" >/dev/null 2>&1; then
+				make_dir=$(dirname "$f")
+				make_file=$(basename "$f")
+				# bmake resolves relative paths against the
+				# invocation directory (GNU make does not chdir
+				# either), so run the dry-run from the Makefile's
+				# own directory.
+				if ! ( cd "$make_dir" &&
+				    "$MAKE_CMD" -n -f "$make_file" ) \
+				    >/dev/null 2>&1; then
 					printf '%s\n' "[WARN] $MAKE_CMD -n -f failed on: $f" 1>&2
 					printf "%s\n" "$f"
 				fi
