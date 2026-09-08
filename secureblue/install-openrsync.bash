@@ -105,9 +105,9 @@ install_build_deps() {
 	local deps=()
 	local dep
 
-	# configure invokes plain make internally; install it alongside
-	# bmake (which is what actually builds openrsync).
-	for dep in git bmake make llvm pkgconf zlib; do
+	# Configure invokes plain make internally.
+	# Install bmake (which is what actually builds openrsync).
+	for dep in git bmake llvm pkgconf zlib; do
 		if ! brew list --formula "$dep" >/dev/null 2>&1; then
 			deps+=("$dep")
 		fi
@@ -196,8 +196,16 @@ build_and_install() {
 	rm -f "$BUILD_LOG"
 	BUILD_LOG=""
 
+	# Replicate the Makefile's "install" target with plain install(1):
+	# root cannot execute Homebrew binaries (run0 exits with 203),
+	# but install is a system binary.
 	log "Installing to $PREFIX"
-	run_root bmake -s install
+	run_root sh -c '
+		install -d "$2/bin" "$2/man/man1" "$2/man/man5" &&
+		install -m 0755 "$1/openrsync" "$2/bin/openrsync" &&
+		install -m 0644 "$1/openrsync.1" "$2/man/man1/openrsync.1" &&
+		install -m 0644 "$1/rsync.5" "$1/rsyncd.5" "$2/man/man5/"
+	' sh "$BUILD_DIR" "$PREFIX"
 }
 
 verify_install() {
