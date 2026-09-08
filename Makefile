@@ -29,6 +29,7 @@ DEBIAN_SCRIPTS = \
 	debian/update-lyrebird.bash \
 	debian/update-monero.bash \
 	debian/update-msedit.bash \
+	debian/update-openrsync.bash \
 	debian/update-signify.bash \
 	debian/update-xd-torrent.bash
 
@@ -42,6 +43,7 @@ OPENBSD_SCRIPTS = \
 SECUREBLUE_SCRIPTS = \
 	secureblue/down-music.bash \
 	secureblue/install-arti-service.bash \
+	secureblue/install-openrsync.bash \
 	secureblue/install-signify.bash \
 	secureblue/postinstall.bash \
 	secureblue/setup-clamav.bash \
