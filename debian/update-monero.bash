@@ -12,7 +12,7 @@ set -euo pipefail
 # - Download official monerod systemd unit (always replace)
 # - Create a basic /etc/monerod.conf if it does not exist
 # - Enable and start/restart monerod service
-# - Optionally build/install monero-lws release branch
+# - Optionally build/install monero-lws release tag
 # - Configure monerod ZMQ and monero-lws public REST
 #   endpoints for Debian
 #
@@ -516,29 +516,36 @@ get_latest_release() {
 		<<<"$json"
 }
 
-get_latest_lws_release_branch() {
+get_latest_lws_tag() {
 	if ! has_cmd git; then
 		return 1
 	fi
 
-	git ls-remote --heads "$LWS_REPO_URL" \
-		'release-v*' 2>/dev/null |
+	git ls-remote --tags --refs "$LWS_REPO_URL" \
+		'refs/tags/v*' 2>/dev/null |
 		awk '{print $2}' |
-		sed 's#refs/heads/##' |
-		grep -E '^release-v[0-9]+' |
+		sed 's#refs/tags/##' |
+		grep -E '^v[0-9]+(\.[0-9]+)*$' |
 		sort -uV |
 		tail -n1
 }
 
-get_lws_release_ref() {
-	local branch="$1"
-	git ls-remote --heads "$LWS_REPO_URL" \
-		"refs/heads/${branch}" 2>/dev/null |
-		awk 'NR==1{print $1}'
+get_lws_tag_commit() {
+	local tag="$1" refs commit
+
+	refs="$(git ls-remote "$LWS_REPO_URL" \
+		"refs/tags/${tag}" \
+		"refs/tags/${tag}^{}" 2>/dev/null || true)"
+	commit="$(awk 'index($2, "^{}") {print $1; exit}' \
+		<<<"$refs")"
+	if [[ -z ${commit} ]]; then
+		commit="$(awk 'NR==1 {print $1}' <<<"$refs")"
+	fi
+	[[ -n ${commit} ]] && printf '%s\n' "$commit"
 }
 
 lws_is_current() {
-	local branch="$1"
+	local tag="$1"
 	local ref="$2"
 	local installed_ref
 
@@ -547,30 +554,30 @@ lws_is_current() {
 	[[ -f ${LWS_STATE_FILE} ]] || return 1
 	installed_ref="$(awk 'NR==1{print}' \
 		"${LWS_STATE_FILE}" 2>/dev/null || true)"
-	[[ ${installed_ref} == "${branch}:${ref}" ]]
+	[[ ${installed_ref} == "${tag}:${ref}" ]]
 }
 
 install_or_update_lws() {
-	local lws_branch lws_ref lws_tmp lws_build
+	local lws_tag lws_ref lws_head lws_tmp lws_build
 
 	log "Checking latest monero-lws" \
-		"release branch..."
-	lws_branch="$(get_latest_lws_release_branch || true)"
-	if [[ -z ${lws_branch} ]]; then
+		"release tag..."
+	lws_tag="$(get_latest_lws_tag || true)"
+	if [[ -z ${lws_tag} ]]; then
 		error "could not determine latest" \
-			"monero-lws release-v* branch."
+			"monero-lws release tag."
 	fi
-	lws_ref="$(get_lws_release_ref \
-		"${lws_branch}" || true)"
+	lws_ref="$(get_lws_tag_commit \
+		"${lws_tag}" || true)"
 	if [[ -z ${lws_ref} ]]; then
 		error "could not determine monero-lws" \
-			"commit for branch ${lws_branch}."
+			"commit for tag ${lws_tag}."
 	fi
-	log "Using monero-lws branch: ${lws_branch}"
-	if lws_is_current "${lws_branch}" \
+	log "Using monero-lws tag: ${lws_tag}"
+	if lws_is_current "${lws_tag}" \
 		"${lws_ref}"; then
 		log "monero-lws is already up to date" \
-			"(${lws_branch} @ ${lws_ref})." \
+			"(${lws_tag} @ ${lws_ref})." \
 			"Skipping build/install."
 		return 0
 	fi
@@ -585,12 +592,20 @@ install_or_update_lws() {
 		"${LWS_TMP:-}" \
 		2>/dev/null || true' EXIT
 
-	log "Cloning monero-lws (${lws_branch})..."
+	log "Cloning monero-lws (${lws_tag})..."
 	if ! git clone --depth 1 \
-		--branch "$lws_branch" \
+		--branch "$lws_tag" \
 		"$LWS_REPO_URL" "$lws_tmp"; then
 		error "failed to clone monero-lws" \
-			"branch ${lws_branch}"
+			"tag ${lws_tag}"
+	fi
+
+	lws_head="$(git -C "$lws_tmp" \
+		rev-parse HEAD 2>/dev/null || true)"
+	if [[ ${lws_head} != "${lws_ref}" ]]; then
+		error "monero-lws checkout mismatch" \
+			"(expected ${lws_ref}," \
+			"got ${lws_head:-unknown})"
 	fi
 
 	log "Updating monero-lws submodules..."
@@ -642,12 +657,12 @@ install_or_update_lws() {
 
 	install -d \
 		"$(dirname "${LWS_STATE_FILE}")"
-	printf '%s:%s\n' "${lws_branch}" \
+	printf '%s:%s\n' "${lws_tag}" \
 		"${lws_ref}" >"${LWS_STATE_FILE}"
 	chmod 0644 "${LWS_STATE_FILE}"
 
 	log "monero-lws install/update completed" \
-		"from ${lws_branch}"
+		"from ${lws_tag}"
 }
 
 run_update() {
