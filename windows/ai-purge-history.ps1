@@ -1,5 +1,16 @@
 #!/usr/bin/env pwsh
 
+# AI assistant history cleanup for Windows.
+# - Removes session history for Codex and GitHub Copilot.
+# - Removes OpenCode prompt history, database files and logs.
+# - Removes Crush data and project-local Swival history/state.
+# - Keeps configuration files and credentials intact.
+#
+# Set SWIVAL_PROJECT_HOME to select the project whose .swival state is purged.
+#
+# See the LICENSE file at the top of the project tree for copyright
+# and license details.
+
 $ErrorActionPreference = 'Stop'
 
 $codexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $HOME '.codex' }

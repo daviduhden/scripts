@@ -1,5 +1,10 @@
 @echo off
-rem Install ssh-menu Perl script on Windows
+rem Install the portable ssh-menu Perl script on Windows.
+rem The Perl source is kept in ..\perl and copied to %USERPROFILE%\bin.
+rem
+rem See the LICENSE file at the top of the project tree for copyright
+rem and license details.
+
 setlocal
 
 set "SCRIPT_DIR=%~dp0"

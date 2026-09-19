@@ -2,6 +2,17 @@
 
 set -euo pipefail
 
+# AI assistant history cleanup for Debian.
+# - Removes session history for Codex and GitHub Copilot.
+# - Removes OpenCode prompt history, database files and logs.
+# - Removes Crush data and project-local Swival history/state.
+# - Keeps configuration files and credentials intact.
+#
+# Set SWIVAL_PROJECT_HOME to select the project whose .swival state is purged.
+#
+# See the LICENSE file at the top of the project tree for copyright
+# and license details.
+
 CODEX_HOME=${CODEX_HOME:-"$HOME/.codex"}
 COPILOT_HOME=${COPILOT_HOME:-"$HOME/.copilot"}
 OPENCODE_STATE_HOME=${OPENCODE_STATE_HOME:-"${XDG_STATE_HOME:-$HOME/.local/state}/opencode"}
