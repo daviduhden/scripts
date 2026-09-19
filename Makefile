@@ -1,4 +1,4 @@
-# Simple installer for Debian, OpenBSD, secureblue, shell helpers, and Perl scripts
+# Simple installer for Debian, OpenBSD, SecureBlue, shell helpers, and Perl scripts
 # Uses only POSIX sh in recipes; compatible with BSD make.
 #
 # See the LICENSE file at the top of the project tree for copyright
@@ -31,14 +31,16 @@ DEBIAN_SCRIPTS = \
 	debian/update-msedit.bash \
 	debian/update-openrsync.bash \
 	debian/update-signify.bash \
-	debian/update-xd-torrent.bash
+	debian/update-xd-torrent.bash \
+	debian/ai-purge-history.bash
 
 OPENBSD_SCRIPTS = \
 	openbsd/clean-logs.ksh \
 	openbsd/sudo-wrapper.ksh \
 	openbsd/sync-website.ksh \
 	openbsd/sysupgrade-current.ksh \
-	openbsd/update-crush.ksh
+	openbsd/update-crush.ksh \
+	openbsd/ai-purge-history.ksh
 
 SECUREBLUE_SCRIPTS = \
 	secureblue/down-music.bash \
@@ -53,7 +55,12 @@ SECUREBLUE_SCRIPTS = \
 	secureblue/update-arti-oniux.bash \
 	secureblue/update-krohnkite.bash \
 	secureblue/update-lyrebird.bash \
-	secureblue/update-xd-torrent.bash
+	secureblue/update-xd-torrent.bash \
+	secureblue/ai-purge-history.bash
+
+WINDOWS_SCRIPTS = \
+	windows/ai-purge-history.ps1 \
+	windows/install-ssh-menu.bat
 
 TESTS_FORMAT_SCRIPTS = \
 	tests-format/clang-format-all.sh \

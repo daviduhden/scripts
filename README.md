@@ -10,6 +10,7 @@ Shell and Perl utilities for system administration and maintenance across multip
 ├── openbsd/       # Scripts for OpenBSD systems
 ├── perl/          # Perl scripts (portable)
 ├── secureblue/    # Scripts for SecureBlue
+├── windows/       # Windows batch and PowerShell scripts
 ├── shell/         # Shell helpers for interactive shells
 └── tests-format/  # Validation, formatting and permission tools
 ```
@@ -41,7 +42,7 @@ make install-perl
 make install-tests-format
 ```
 
-Recipes use `install(1)` and strip `.pl`/`.bash`/`.ksh`/`.sh` when placing shell scripts in `${BINDIR}`.
+Recipes use `install(1)` and strip `.pl`/`.bash`/`.ksh`/`.sh` when placing shell scripts in `${BINDIR}`. Windows scripts remain in `windows/` and are not installed by the POSIX targets.
 
 ## Validation and formatting
 

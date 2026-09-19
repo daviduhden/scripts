@@ -200,6 +200,7 @@ build_and_install() {
 	# root cannot execute Homebrew binaries (run0 exits with 203),
 	# but install is a system binary.
 	log "Installing to $PREFIX"
+	# shellcheck disable=SC2016 # Expanded by the delegated shell.
 	run_root sh -c '
 		install -d "$2/bin" "$2/man/man1" "$2/man/man5" &&
 		install -m 0755 "$1/openrsync" "$2/bin/openrsync" &&

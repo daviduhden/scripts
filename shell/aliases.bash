@@ -30,7 +30,7 @@ alias chmod='chmod --preserve-root'
 # --------------------------------------------------
 alias codex='codex --yolo'
 alias copilot='copilot --yolo'
-alias opencode='opencode --auto'
+alias opencode='JavaScriptCoreUseJIT=1 command opencode --auto'
 
 # --------------------------------------------------
 # Editors

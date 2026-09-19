@@ -11,10 +11,11 @@ exec >"$TMPLOG" 2>&1
 # - Recursively finds all shell scripts under ROOT_DIR
 #   (default: current directory) and checks formatting
 #   with shfmt, shell syntax, bash syntax, ksh syntax and
-#   runs shellcheck (if available treating warnings as
-#   errors).
+#   checkbashisms for POSIX sh scripts. It also runs the
+#   ShellCheck linter (if available, treating warnings as errors).
 # - Usage: ./validate-shell.sh [ROOT_DIR]
-# - Requires: shfmt, shellcheck, ksh (optional) in PATH
+# - Requires: shfmt, shellcheck, checkbashisms and ksh
+#   (all optional) in PATH
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
@@ -154,6 +155,34 @@ run_validate_shell() {
 		printf '%s\n' \
 			"[INFO] ksh not found;" \
 			" skipping ksh syntax checks"
+	fi
+
+	if command -v checkbashisms >/dev/null 2>&1; then
+		CHECKBASHISMS=$(command -v checkbashisms)
+		printf '%s\n' "[INFO] Running checkbashisms on POSIX sh scripts..."
+		find "$ROOT_DIR" \
+			\( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) \
+			-prune -o -type f -name '*.sh' -print |
+			while IFS= read -r f; do
+				[ -n "$f" ] || continue
+				if command -v perl >/dev/null 2>&1; then
+					if ! perl -T "$CHECKBASHISMS" "$f"; then
+						printf '%s\n' \
+							"[ERROR] checkbashisms found issues in: $f" 1>&2
+						printf "%s\n" "$f"
+					fi
+				elif ! "$CHECKBASHISMS" "$f"; then
+					printf '%s\n' \
+						"[ERROR] checkbashisms found issues in: $f" 1>&2
+					printf "%s\n" "$f"
+				fi
+			done | while IFS= read -r bad; do
+			[ -n "$bad" ] && note_fail "$bad"
+		done
+	else
+		printf '%s\n' \
+			"[INFO] checkbashisms not installed;" \
+			" skipping POSIX sh checks"
 	fi
 
 	if command -v shellcheck >/dev/null 2>&1; then

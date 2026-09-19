@@ -5,6 +5,7 @@ tidy = www/tidy
 perltidy = textproc/p5-Perl-Tidy
 shfmt = devel/shfmt
 shellcheck = devel/shellcheck
+checkbashisms = sysutils/checkbashisms
 bmake = base make
 checkmake = not ported
 mbake = not ported

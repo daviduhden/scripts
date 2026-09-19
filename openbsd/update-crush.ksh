@@ -109,8 +109,11 @@ provider add deepseek --type openai-compat \
   --api-key "${DEEPSEEK_API_KEY:?set DEEPSEEK_API_KEY}"
 
 # deepseek-chat/deepseek-reasoner were retired in July 2026.
-# The V4 models support 1M context and thinking mode.
-# Prices are the peak-hour rates; off-peak rates are 50% lower.
+# DeepSeek-V4.1-Flash is served as "deepseek-flash"; the legacy
+# deepseek-v4-flash ID is retired and routed to V4.1-Flash.
+# The V4 models support 1M context and thinking mode, and "max"
+# is the highest reasoning effort. Prices are the peak-hour
+# rates; off-peak rates are 50% lower.
 model add deepseek/deepseek-v4-pro \
   --name "DeepSeek V4 Pro" \
   --context-window 1000000 \
@@ -121,15 +124,26 @@ model add deepseek/deepseek-v4-pro \
   --price-cache-create 1.32 \
   --price-cache-hit 0.044
 
-model add deepseek/deepseek-v4-flash \
-  --name "DeepSeek V4 Flash" \
+model add deepseek/deepseek-flash \
+  --name "DeepSeek V4.1 Flash" \
   --context-window 1000000 \
   --default-max-tokens 384000 \
   --can-reason true \
-  --price-input 0.44 \
-  --price-output 1.32 \
-  --price-cache-create 0.44 \
-  --price-cache-hit 0.014
+  --supports-images true \
+  --reasoning-effort max \
+  --price-input 0.3 \
+  --price-output 1.2 \
+  --price-cache-create 0.3 \
+  --price-cache-hit 0.006
+
+# Use DeepSeek V4.1 Flash as the default model with maximum
+# reasoning. Custom models carry no reasoning levels, so crush
+# would ignore the effort and, for DeepSeek, disable thinking
+# mode; pin the effort through provider options and enable
+# thinking mode explicitly.
+model large deepseek/deepseek-flash \
+  --think \
+  --provider-options '{"reasoning_effort":"max"}'
 # --- End DeepSeek section ---
 CRUSHRC_EOF
 	)

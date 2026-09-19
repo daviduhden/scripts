@@ -1,0 +1,22 @@
+#!/bin/ksh
+
+set -eu
+
+CODEX_HOME=${CODEX_HOME:-"$HOME/.codex"}
+COPILOT_HOME=${COPILOT_HOME:-"$HOME/.copilot"}
+CRUSH_DATA_HOME=${CRUSH_GLOBAL_DATA:-"${XDG_DATA_HOME:-$HOME/.local/share}/crush"}
+SWIVAL_PROJECT_HOME=${SWIVAL_PROJECT_HOME:-"$PWD"}
+
+rm -rf -- "$CODEX_HOME/sessions" "$CODEX_HOME/archived_sessions"
+rm -rf -- "$COPILOT_HOME/session-state" "$COPILOT_HOME/logs"
+rm -rf -- "$CRUSH_DATA_HOME"
+rm -rf -- \
+	"$SWIVAL_PROJECT_HOME/.swival/HISTORY.md" \
+	"$SWIVAL_PROJECT_HOME/.swival/HISTORY.md.lock" \
+	"$SWIVAL_PROJECT_HOME/.swival/continue.md" \
+	"$SWIVAL_PROJECT_HOME/.swival/repl_history" \
+	"$SWIVAL_PROJECT_HOME/.swival/memory" \
+	"$SWIVAL_PROJECT_HOME/.swival/cache.db" \
+	"$SWIVAL_PROJECT_HOME/.swival/audit"
+
+printf '%s\n' "AI assistant history purged for OpenBSD"
