@@ -42,7 +42,8 @@ $paths = @(
 foreach ($path in $paths) {
     if (Test-Path -LiteralPath $path) {
         Remove-Item -LiteralPath $path -Recurse -Force
+        Write-Host "[INFO] Removed: $path"
     }
 }
 
-Write-Output 'AI assistant history purged for Windows'
+Write-Host '[INFO] AI assistant history purged for Windows'

@@ -12,5 +12,9 @@ set "SOURCE=%SCRIPT_DIR%..\perl\ssh-menu.pl"
 set "DEST=%USERPROFILE%\bin\ssh-menu.pl"
 
 if not exist "%USERPROFILE%\bin" mkdir "%USERPROFILE%\bin"
-copy /Y "%SOURCE%" "%DEST%"
-echo Installed ssh-menu.pl to "%DEST%"
+copy /Y "%SOURCE%" "%DEST%" >nul
+if errorlevel 1 (
+    echo [ERROR] Could not copy ssh-menu.pl to "%DEST%" 1>&2
+    exit /b 1
+)
+echo [INFO] Installed ssh-menu.pl to "%DEST%"

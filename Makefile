@@ -59,6 +59,7 @@ SECUREBLUE_SCRIPTS = \
 	secureblue/ai-purge-history.bash
 
 WINDOWS_SCRIPTS = \
+	windows/update-aiclis.ps1 \
 	windows/ai-purge-history.ps1 \
 	windows/install-ssh-menu.bat
 
