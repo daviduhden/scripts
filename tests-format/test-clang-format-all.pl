@@ -149,6 +149,22 @@ subtest 'other build metadata' => sub {
     }
 };
 
+subtest 'BSD Makefile.inc in ancestor directories' => sub {
+    my $ctx = fixture();
+    write_file( "$ctx->{project}/Makefile.inc", "CFLAGS_COMMON = -std=c23 -Wall\n" );
+    my $child = "$ctx->{project}/fvwm";
+    mkdir $child or die "mkdir $child: $!";
+    write_file( "$child/Makefile", ".include \"../Makefile.inc\"\n" );
+    write_file( "$child/decorations.c", "void f(int n) { switch (n) { case 0: [[fallthrough]]; default: break; } }\n" );
+    my $calls = run_script( $ctx, 1, $child );
+    like( $calls, qr/clang-format -i/, 'inherited C23 selects clang-format' );
+    unlike( $calls, qr/knfmt -i/, 'C23 attributes are not passed to knfmt' );
+    remove_file( $ctx->{calls} );
+    write_file( "$child/Makefile", "CFLAGS = -std=c99\n" );
+    like( run_script( $ctx, 1, $child ), qr/knfmt -i/,
+        'local standard overrides ancestor Makefile.inc' );
+};
+
 subtest 'nearest standard and override' => sub {
     my $ctx = fixture();
     write_file( "$ctx->{project}/Makefile", "CFLAGS=-std=c23\n" );

@@ -40,7 +40,7 @@ detect_standard() {
 	standard_dir=${1%/*}
 	while :; do
 		standard=$(
-			for metadata in Makefile makefile GNUmakefile BSDmakefile \
+			for metadata in Makefile.inc Makefile makefile GNUmakefile BSDmakefile \
 				CMakeLists.txt meson.build compile_commands.json; do
 				[ -f "$standard_dir/$metadata" ] || continue
 				sed 's/#.*//' "$standard_dir/$metadata"
