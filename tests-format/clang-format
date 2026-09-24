@@ -13,12 +13,14 @@
 # DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS
 # ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS FILE.
 
+# Central style for clang-format-all, originally based on Openbar's style.
+# Maintained only in scripts. Targets clang-format 23 (C and C++).
+# KNF approximation, not byte-for-byte equivalence with knfmt.
 BasedOnStyle: LLVM
-Language: Cpp
 
 # Limits and indentation
 ColumnLimit: 80
-UseTab: ForIndentation         # Tabs for indentation; spaces for alignment.
+UseTab: Always                # KNF uses tabs wherever an entire tab fits.
 TabWidth: 8                    # 8-column hard tab.
 IndentWidth: 8                 # One block level = 1 tab.
 ContinuationIndentWidth: 4     # Second-level indent = 4 spaces.
@@ -31,27 +33,42 @@ IndentCaseLabels: false        # 'case' not indented relative to 'switch'.
 
 # Spacing/parentheses/operators
 SpaceBeforeParens: ControlStatements   # Space after if/for/while; none for function calls.
-SpacesInParentheses: false
+SpacesInParens: Never
 SpacesInSquareBrackets: false
 SpaceAfterCStyleCast: false
 SpaceAfterLogicalNot: false
 SpaceBeforeAssignmentOperators: true
 BreakBeforeBinaryOperators: None       # Operators at end of the previous line.
+BreakBeforeTernaryOperators: false
+AlignOperands: DontAlign
+BitFieldColonSpacing: None
 
 # Pointers and references
 PointerAlignment: Right        # 'char *p'
 DerivePointerAlignment: false
+AlignConsecutiveDeclarations:
+  Enabled: true
+  AlignFunctionDeclarations: true
+  AlignFunctionPointers: true
 
 # Comments and macros
-ReflowComments: true
+ReflowComments: Always
 AlignTrailingComments: true
 SpacesBeforeTrailingComments: 1
 AlignEscapedNewlines: Right    # Right-justify backslashes in multi-line macros.
 
 # Includes: order by categories (blank lines between groups)
-SortIncludes: true
+SortIncludes:
+  Enabled: true
+  IgnoreCase: false
 IncludeBlocks: Regroup
+# Do not promote the source file's matching local header ahead of sys headers.
+IncludeIsMainRegex: '$^'
 IncludeCategories:
+  # Foundational sys headers precede other kernel headers.
+  - Regex: '^<sys/(types|param)\.h>$'
+    Priority: 1
+    SortPriority: -1
   # 1) Kernel headers: <sys/...>
   - Regex: '^<sys/.*>$'
     Priority: 1
@@ -66,9 +83,8 @@ IncludeCategories:
     Priority: 4
 
 # Function signatures and wrapping
-BreakAfterReturnType: None                     # Don't break in declarations/prototypes.
-AlwaysBreakAfterDefinitionReturnType: TopLevel # Break for top-level definitions (style(9)).
-AlignAfterOpenBracket: DontAlign               # Use 4-space continuation, don't align to '('.
+BreakAfterReturnType: TopLevelDefinitions
+AlignAfterOpenBracket: false  # LLVM 22+: boolean; four-space continuation.
 
 # Short constructs on one line
 AllowShortIfStatementsOnASingleLine: false

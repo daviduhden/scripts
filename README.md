@@ -46,6 +46,28 @@ Recipes use `install(1)` and strip `.pl`/`.bash`/`.ksh`/`.sh` when placing shell
 
 ## Validation and formatting
 
+`clang-format-all [ROOT_DIR]` (default `.`) prefers `clang-format` for
+C11, C17 and C23, including GNU variants and the C18/C2x aliases. Otherwise
+it prefers `knfmt`; if the preferred tool is absent, it uses the available
+one and warns when modern C must fall back to `knfmt`.
+Literal standards are detected in ancestor Makefiles, CMakeLists.txt,
+meson.build and compile_commands.json, stopping at the repository boundary.
+This does not evaluate build logic or resolve per-target compilation commands;
+use `C_FORMAT_STANDARD=c23 clang-format-all path` to override detection.
+The nearest directory with an explicit standard wins.
+
+Every `clang-format` invocation uses the bundled Openbar configuration
+(`tests-format/clang-format`, installed as `${BINDIR}/clang-format-all.yaml`),
+ignoring project-local style files. This is the single source of the shared
+style, maintained in this repository. The configuration targets
+LLVM 23 and approximates OpenBSD style(9): tabs of eight columns, four-column
+continuations, an 80-column limit, KNF braces and system/network/local include
+groups. It is not byte-for-byte equivalent to `knfmt` (for example, declaration
+alignment and comment wrapping can differ). `knfmt` keeps its own style handling;
+the LLVM 23 configuration is not a portable knfmt configuration schema.
+Run `perl tests-format/test-clang-format-all.pl` for isolated selection,
+fallback, failure propagation and installed-style regression checks.
+
 `make test` runs, in order:
 
 - shell validation/formatting (`tests-format/validate-shell.sh`, incluye sintaxis sh/bash/ksh)
