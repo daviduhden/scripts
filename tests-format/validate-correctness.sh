@@ -263,7 +263,7 @@ function check(line, raw) {
             emit("ERROR", NR, "$'...' quoting is not available in OpenBSD ksh (pdksh)", "OpenBSD ksh(1)", "Use printf with octal escapes instead")
     }
     if (fam == "generic") {
-        if (line ~ /\[\[/)
+        if (line ~ /(^|[[:space:];|&()])\[\[([[:space:]]|$)/)
             emit("WARNING", NR, "[[ ]] is not POSIX sh", "POSIX sh(1)", "Use [ ] with care or declare the script as bash/ksh")
         if (raw ~ /\$'[^']*\\/)
             emit("WARNING", NR, "$'...' is not POSIX sh", "POSIX sh(1)", "Use printf with octal escapes")
@@ -284,7 +284,8 @@ function check(line, raw) {
             emit("WARNING", NR, "chmod/chown -R with unquoted target", "chmod(1), chown(1)", "Quote the path and bound the recursion")
         has_destructive = 1
     }
-    if (line ~ /(^|[[:space:];|&()])find[[:space:]]+\/([[:space:]]|$)/)
+    if (line ~ /(^|[[:space:];|&()])find[[:space:]]+\/([[:space:]]|$)/ &&
+        line !~ /find[[:space:]]+\/[[:space:]]+([^;|&]*[[:space:]])?-xdev([[:space:];|&)]|$)/)
         emit("WARNING", NR, "find rooted at / walks the whole root filesystem", "find(1)", "Bound the search (e.g. /var/log) or use -xdev")
     if (line ~ /(^|[[:space:];|&()])xargs([[:space:]]|$)/ && line !~ /(-0|--null)/)
         emit("WARNING", NR, "xargs without -0 breaks on filenames with spaces", "xargs(1)", "Use find -print0 | xargs -0 (both supported by OpenBSD find/xargs)")

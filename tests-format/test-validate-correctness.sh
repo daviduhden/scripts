@@ -160,6 +160,31 @@ set -eu
 ps -eo pid,cmd | head -n 3
 EOF
 
+# ---- Root searches and POSIX character classes ----
+mkdir -p "$T/tests-format"
+cat >"$T/tests-format/bounded.sh" <<'EOF'
+#!/bin/sh
+set -eu
+find / -xdev -type f -print
+find / -type f -xdev -print
+awk '
+    /[[:space:]]/ { print }
+    /[[:alnum:]]/ { print }
+'
+EOF
+cat >"$T/tests-format/unbounded.sh" <<'EOF'
+#!/bin/sh
+set -eu
+find / -type f -print
+EOF
+cat >"$T/tests-format/double-bracket.sh" <<'EOF'
+#!/bin/sh
+set -eu
+if [[ -f /etc/profile ]]; then
+    echo yes
+fi
+EOF
+
 # ---- Host-family fixture with a nonexistent command ----
 HOST_FAMILY=
 case "$(uname -s)" in
@@ -203,6 +228,19 @@ if [ -n "$HOST_FAMILY" ]; then
 		"nonexistent command detected on host family"
 fi
 assert_rc 1 "$rc" "--target all with ERRORs exits 1"
+
+if printf '%s' "$out" | grep -q 'WARNING tests-format/bounded.sh'; then
+	fail_test "bounded find or AWK character classes falsely flagged"
+else
+	pass
+fi
+for fixture in unbounded double-bracket; do
+	if printf '%s' "$out" | grep -q "WARNING tests-format/$fixture.sh"; then
+		pass
+	else
+		fail_test "$fixture not flagged"
+	fi
+done
 
 # pipefail SIGPIPE rules: warnings on pipefail scripts, silence
 # on the same pipeline without pipefail
