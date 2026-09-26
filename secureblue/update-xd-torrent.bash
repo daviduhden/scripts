@@ -215,8 +215,10 @@ build_and_install_XD() {
 	# change $(PREFIX)/bin -> $(PREFIX)/local/bin
 	if [ -f Makefile ]; then
 		log "Patching Makefile install path..."
+		# Match (PREFIX)/bin without the leading '$' so the
+		# single-quoted sed expression passes shellcheck (SC2016).
 		sed -i \
-			"s|\$(PREFIX)/bin|\$(PREFIX)/local/bin|g" \
+			's|(PREFIX)/bin|(PREFIX)/local/bin|g' \
 			Makefile || true
 	fi
 	log "Installing XD using 'make install'..."

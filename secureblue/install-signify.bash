@@ -91,7 +91,7 @@ ensure_homebrew_path() {
 			warn "Run this to fix: run0 find" \
 				"$brew_prefix/Cellar -maxdepth 4" \
 				"-type d ! -perm -o+rx" \
-				"-exec chmod o+rx {} \\;"
+				'-exec chmod o+rx {} \;'
 		fi
 	fi
 }

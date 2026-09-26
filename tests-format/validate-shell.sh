@@ -66,7 +66,7 @@ run_validate_shell() {
 			-print |
 			while IFS= read -r f; do
 				[ -n "$f" ] || continue
-				shfmt -l "$f"
+				shfmt -l -s "$f"
 			done 2>/dev/null >"$UNFMT_SH" || true
 
 		if [ -s "$UNFMT_SH" ]; then

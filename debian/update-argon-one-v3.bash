@@ -94,7 +94,7 @@ trap 'error "Execution interrupted."; exit 1' INT
 cleanup_tmp_files() {
 	local file
 	for file in "${TMP_FILES[@]}"; do
-		[[ -n "$file" && -f "$file" ]] && rm -f -- "$file"
+		[[ -n $file && -f $file ]] && rm -f -- "$file"
 	done
 }
 
