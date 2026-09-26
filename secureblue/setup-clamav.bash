@@ -173,30 +173,45 @@ run_freshclam() {
 # CLAMD CONFIGURATION #
 #######################
 
+# Set a single-valued directive, replacing any previous (commented
+# or active) occurrences. This keeps repeated runs idempotent and
+# collapses the duplicates that earlier versions left behind when
+# the shipped configuration contained several commented copies of
+# the same option.
+set_config_directive() {
+	local file="$1" directive="$2" value="$3"
+
+	sed -i -e "/^#\\?${directive}[[:space:]]/d" "$file"
+	printf '%s %s\n' "$directive" "$value" >>"$file"
+}
+
 configure_clamd() {
 	log "Configuring clamd (scan instance)"
 
-	sed -i \
-		-e 's/^Example/#Example/' \
-		-e 's|^#LocalSocket .*|LocalSocket /run/clamd.scan/clamd.sock|' \
-		-e 's|^#LocalSocketMode .*|LocalSocketMode 0660|' \
-		-e "s|^#User .*|User $CLAMAV_USER|" \
-		-e 's|^#LogFile .*|LogFile /var/log/clamav/clamd.log|' \
-		-e 's|^#ScanOnAccess .*|ScanOnAccess yes|' \
-		-e 's|^#OnAccessIncludePath .*|OnAccessIncludePath /var/home|' \
-		-e 's|^#OnAccessExcludeRootUID .*|OnAccessExcludeRootUID yes|' \
-		/etc/clamd.d/scan.conf
+	sed -i -e 's/^Example/#Example/' /etc/clamd.d/scan.conf
 
+	set_config_directive /etc/clamd.d/scan.conf \
+		LocalSocket /run/clamd.scan/clamd.sock
+	set_config_directive /etc/clamd.d/scan.conf \
+		LocalSocketMode 0660
+	set_config_directive /etc/clamd.d/scan.conf \
+		User "$CLAMAV_USER"
+	set_config_directive /etc/clamd.d/scan.conf \
+		LogFile /var/log/clamav/clamd.log
+	set_config_directive /etc/clamd.d/scan.conf \
+		ScanOnAccess yes
+	set_config_directive /etc/clamd.d/scan.conf \
+		OnAccessIncludePath /var/home
+	set_config_directive /etc/clamd.d/scan.conf \
+		OnAccessExcludeRootUID yes
 	# clamd otherwise rotates only when explicitly configured.
-	# Remove any previous/commented copies first so repeated
-	# setup runs stay idempotent.
-	sed -i \
-		-e '/^#\?LogFileMaxSize[[:space:]]/d' \
-		-e '/^#\?LogRotate[[:space:]]/d' \
-		-e '/^LogFile[[:space:]]/a LogFileMaxSize 50M\nLogRotate yes' \
-		/etc/clamd.d/scan.conf
+	set_config_directive /etc/clamd.d/scan.conf \
+		LogFileMaxSize 50M
+	set_config_directive /etc/clamd.d/scan.conf \
+		LogRotate yes
 
-	systemctl enable --now clamd@scan.service
+	systemctl enable clamd@scan.service
+	systemctl restart clamd@scan.service
 }
 
 ####################
@@ -270,7 +285,7 @@ StartLimitBurst=5
 [Service]
 ExecStart=/usr/sbin/clamonacc \
   --fdpass \
-	--config-file=/etc/clamd.d/scan.conf \
+  --config-file=/etc/clamd.d/scan.conf \
   --log=/var/log/clamav/clamonacc.log \
   --exclude-dir=/proc \
   --exclude-dir=/sys \
@@ -294,7 +309,8 @@ EOF
 	fi
 
 	systemctl daemon-reload
-	systemctl enable --now "$CLAMONACC_SERVICE"
+	systemctl enable "$CLAMONACC_SERVICE"
+	systemctl restart "$CLAMONACC_SERVICE"
 }
 
 #####################
@@ -308,15 +324,14 @@ configure_periodic_scan() {
 #!/bin/bash
 set -euo pipefail
 
+# clamdscan does not support --exclude-dir, and --fdpass fails under
+# SELinux ("no reply from clamd"). Streaming the file contents lets the
+# root-run scan read files the clamd service account cannot, without
+# passing file descriptors.
 exec /usr/bin/clamdscan \
   --multiscan \
-  --fdpass \
+  --stream \
   --infected \
-  --exclude-dir='^/proc/' \
-  --exclude-dir='^/sys/' \
-  --exclude-dir='^/run/' \
-  --exclude-dir='^/tmp/' \
-  --exclude-dir='^/var/lib/containers/' \
   --log=/var/log/clamav/periodic.log \
   --move=/var/spool/quarantine \
   /var/home
