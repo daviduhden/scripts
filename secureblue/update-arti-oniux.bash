@@ -8,6 +8,9 @@ set -euo pipefail
 # - Clones the arti and oniux repositories from the Tor Project GitLab
 # - Determines the latest release tags for each project
 # - Installs or updates the crates via cargo with appropriate features
+# - Ensures Homebrew's openssl and patchelf are available
+# - Patches the produced binaries with an rpath to Homebrew OpenSSL
+#   (openssl@4 when installed), which cargo does not set
 # - Installs the resulting binaries into /usr/local/bin (requires root)
 #
 # See the LICENSE file at the top of the project tree for copyright
@@ -182,6 +185,86 @@ ensure_git() {
 	fi
 }
 
+# Homebrew's OpenSSL is keg-only and not part of the default
+# library search path. cargo does not record an rpath in the
+# binaries it builds, so arti/oniux otherwise fail at runtime with
+# "libssl.so.4: cannot open shared object file". Ensure the
+# build-time dependencies are present.
+ensure_brew_deps() {
+	local brew_cmd
+
+	ensure_brew_path || true
+	brew_cmd="$(command -v brew-proxy 2>/dev/null ||
+		command -v brew 2>/dev/null || true)"
+
+	if [[ -z $brew_cmd ]]; then
+		warn "Homebrew not found; cannot install" \
+			"openssl/patchelf. The binaries may fail" \
+			"to find Homebrew OpenSSL at runtime."
+		return 0
+	fi
+
+	local formula
+	for formula in openssl patchelf; do
+		if "$brew_cmd" list --formula "$formula" >/dev/null 2>&1; then
+			log "$formula is already installed with Homebrew."
+		else
+			log "Installing $formula with Homebrew..."
+			"$brew_cmd" install "$formula" || warn \
+				"Failed to install $formula with" \
+				"Homebrew."
+		fi
+	done
+}
+
+brew_openssl_libdir() {
+	local brew_cmd formula prefix
+
+	brew_cmd="$(command -v brew-proxy 2>/dev/null ||
+		command -v brew 2>/dev/null || true)"
+	[[ -n $brew_cmd ]] || return 1
+
+	# Prefer openssl@4, which provides the libssl.so.4 and
+	# libcrypto.so.4 that current arti builds link against.
+	for formula in openssl@4 openssl; do
+		if "$brew_cmd" list --formula "$formula" >/dev/null 2>&1; then
+			prefix="$("$brew_cmd" --prefix "$formula" \
+				2>/dev/null || true)"
+			if [[ -n $prefix && -d $prefix/lib ]]; then
+				printf '%s\n' "$prefix/lib"
+				return 0
+			fi
+		fi
+	done
+
+	return 1
+}
+
+link_brew_openssl() {
+	local binary="$1" libdir
+
+	[[ -f $binary ]] || return 0
+
+	if ! command -v patchelf >/dev/null 2>&1; then
+		warn "patchelf not found; skipping rpath for" \
+			"$binary."
+		return 0
+	fi
+
+	if ! libdir="$(brew_openssl_libdir)"; then
+		warn "Homebrew OpenSSL not found; skipping" \
+			"rpath for $binary."
+		return 0
+	fi
+
+	log "Linking $binary against Homebrew OpenSSL" \
+		"($libdir)..."
+	if ! patchelf --set-rpath "$libdir" "$binary"; then
+		error "Failed to set rpath on $binary."
+		return 1
+	fi
+}
+
 get_installed_cargo_version() {
 	local crate="$1"
 	cargo install --list 2>/dev/null |
@@ -243,6 +326,7 @@ install_or_update_arti() {
 
 	if [[ $updated -eq 1 ]]; then
 		if [[ -x "$CARGO_BIN_DIR/arti" ]]; then
+			link_brew_openssl "$CARGO_BIN_DIR/arti"
 			log "Installing arti binary into" \
 				"/usr/local/bin" \
 				"(may require root)..."
@@ -295,6 +379,7 @@ install_or_update_oniux() {
 
 	if [[ $updated -eq 1 ]]; then
 		if [[ -x "$CARGO_BIN_DIR/oniux" ]]; then
+			link_brew_openssl "$CARGO_BIN_DIR/oniux"
 			log "Installing oniux binary into" \
 				"/usr/local/bin" \
 				"(may require root)..."
@@ -318,6 +403,7 @@ check_prereqs() {
 	require_cmd mktemp
 	ensure_rust
 	ensure_git
+	ensure_brew_deps
 }
 
 run_update() {
