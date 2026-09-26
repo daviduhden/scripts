@@ -68,6 +68,17 @@ the LLVM 23 configuration is not a portable knfmt configuration schema.
 Run `perl tests-format/test-clang-format-all.pl` for isolated selection,
 fallback, failure propagation and installed-style regression checks.
 
+`fourmolu-all [ROOT_DIR]` (default `.`) formats Haskell sources (`.hs`,
+`.hsig` and `.hs-boot`) in place with `fourmolu`. Like `clang-format-all`, it
+always forces a bundled style (`tests-format/fourmolu-all.yaml`, installed as
+`${BINDIR}/fourmolu-all.yaml`) and ignores project-local
+`fourmolu.yaml`/`.fourmolu.yaml` files, so the shared style cannot drift per
+repository. The bundled style pins the Fourmolu 0.20 defaults explicitly;
+edit that one file to evolve the shared style. If `fourmolu` is not present in
+`PATH`, the script reports it and skips Haskell formatting.
+Run `perl tests-format/test-fourmolu-all.pl` for isolated discovery,
+bundled-style, skip and failure-propagation regression checks.
+
 `make test` runs, in order:
 
 - shell validation/formatting (`tests-format/validate-shell.sh`, incluye sintaxis sh/bash/ksh)
@@ -77,6 +88,7 @@ fallback, failure propagation and installed-style regression checks.
 - correctness validation (`tests-format/validate-correctness.sh --target all`)
 - regression tests for both new tools (`test-fix-permissions.sh`, `test-validate-correctness.sh`)
 - ssh-menu parser regression test (`test-ssh-menu.pl`)
+- fourmolu-all discovery/format regression test (`test-fourmolu-all.pl`)
 
 `make test` is a validation operation: it **never** modifies file permissions or file contents on its own (the format validators may rewrite formatting when the optional formatters are installed). Permission corrections are only applied by `make fix-permissions`.
 
