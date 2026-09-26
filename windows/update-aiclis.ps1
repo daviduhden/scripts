@@ -1,14 +1,16 @@
 #!/usr/bin/env pwsh
 
-# Codex CLI and OpenCode CLI/TUI installer and updater for Windows.
-# - Installs and updates both tools for the current user (no winget, no admin).
+# Codex CLI, OpenCode CLI/TUI and Bun installer and updater for Windows.
+# - Installs and updates Codex and OpenCode for the current user (no admin).
+# - Bun: installs or updates the Oven-sh.Bun package through winget.
 # - OpenCode: standalone binary downloaded from opencode.ai.
 # - Codex: GitHub release zip with the three binaries plus codex-code-mode-host.
 # - Keeps versioned copies and prepends the local folders to the user PATH.
+# - Repairs PATH and adds PowerShell wrappers: codex --yolo, opencode --auto.
 # - Leaves winget installations untouched unless -RemoveWinget is given.
 #
 # Parameters:
-# -Target All|Codex|OpenCode    Tool selection (default: All).
+# -Target All|Codex|OpenCode|Bun Tool selection (default: All).
 # -OpenCodeVersion <version>    Specific OpenCode version (default: latest).
 # -CodexVersion <version>       Specific Codex version (default: latest).
 # -Force                        Reinstall even if already up to date.
@@ -20,7 +22,7 @@
 
 [CmdletBinding()]
 param(
-    [ValidateSet('All', 'Codex', 'OpenCode')]
+    [ValidateSet('All', 'Codex', 'OpenCode', 'Bun')]
     [string]$Target = 'All',
 
     [string]$OpenCodeVersion,
@@ -154,6 +156,75 @@ function Add-PathEntry {
     $env:Path = (@($script:ManagedDirs) + $procEntries) -join ';'
 }
 
+function Find-BunExe {
+    $command = Get-Command bun.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($null -ne $command) { return $command.Source }
+
+    # winget may have updated the persistent PATH without updating this process.
+    $directories = @(
+        Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Links'
+        Join-Path $env:USERPROFILE '.bun\bin'
+    )
+    if ($env:BUN_INSTALL) { $directories += Join-Path $env:BUN_INSTALL 'bin' }
+    foreach ($scope in @('User', 'Machine')) {
+        $directories += [Environment]::GetEnvironmentVariable('Path', $scope) -split ';'
+    }
+    foreach ($directory in $directories) {
+        if ([string]::IsNullOrWhiteSpace($directory)) { continue }
+        $directory = [Environment]::ExpandEnvironmentVariables($directory.Trim().Trim('"'))
+        $candidate = Join-Path $directory 'bun.exe'
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
+    }
+
+    $packages = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages'
+    if (Test-Path -LiteralPath $packages) {
+        $packageDirs = Get-ChildItem -LiteralPath $packages -Directory -Filter 'Oven-sh.Bun_*'
+        $binary = $packageDirs | Get-ChildItem -Recurse -File -Filter 'bun.exe' |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        if ($null -ne $binary) { return $binary.FullName }
+    }
+    return $null
+}
+
+function Set-CliWrapper {
+    param([string]$Name, [string]$DefaultArgument)
+
+    # PowerShell aliases cannot include arguments; use a function instead.
+    $start = "# BEGIN update-aiclis $Name"
+    $end = "# END update-aiclis $Name"
+    $body = "& $Name.exe $DefaultArgument @args"
+    $block = "$start`r`nfunction global:$Name { $body }`r`n$end"
+    $profilePath = $PROFILE.CurrentUserAllHosts
+    $content = if (Test-Path -LiteralPath $profilePath) { [IO.File]::ReadAllText($profilePath) } else { '' }
+    $pattern = '(?ms)^' + [regex]::Escape($start) + '\r?\n.*?^' + [regex]::Escape($end) + '(?=\r?$)'
+    if ([regex]::IsMatch($content, $pattern)) {
+        $updated = [regex]::Replace($content, $pattern, [System.Text.RegularExpressions.MatchEvaluator]{ param($match) $block })
+    } else {
+        $updated = $content + "`r`n$block`r`n"
+    }
+    if ($updated -cne $content) {
+        New-Item -ItemType Directory -Path (Split-Path -Parent $profilePath) -Force | Out-Null
+        [IO.File]::WriteAllText($profilePath, $updated, [Text.UTF8Encoding]::new($true))
+        Write-Info "PowerShell profile updated: $Name $DefaultArgument ($profilePath)"
+    }
+    Set-Item -Path "Function:global:$Name" -Value ([scriptblock]::Create($body))
+}
+
+function Repair-CliEnvironment {
+    param([string]$Name, [string]$ExePath, [string]$DefaultArgument)
+
+    if ([string]::IsNullOrWhiteSpace($ExePath) -or -not (Test-Path -LiteralPath $ExePath -PathType Leaf)) {
+        Write-Warn "${Name}: binary not found; PATH was not changed."
+        return
+    }
+    $command = Get-Command "$Name.exe" -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($null -eq $command) { Write-Info "${Name}: binary missing from the current PATH." }
+    if ($Check) { return }
+
+    Add-PathEntry -Directory (Split-Path -Parent $ExePath)
+    if ($DefaultArgument) { Set-CliWrapper -Name $Name -DefaultArgument $DefaultArgument }
+}
+
 function Invoke-Download {
     param([string]$Uri, [string]$OutFile)
     $attempts = 3
@@ -257,7 +328,6 @@ function Install-OpenCode {
     $installed = Get-ExeVersion -ExePath $script:OpenCodeExe
     if ((Test-VersionEqual $installed $version) -and -not $Force) {
         Write-Info "OpenCode: already up to date ($installed). Nothing to do."
-        Add-PathEntry -Directory $script:OpenCodeBin
         return
     }
 
@@ -301,7 +371,6 @@ function Install-OpenCode {
     }
 
     Write-Info "OpenCode: $verified installed to $script:OpenCodeBin"
-    Add-PathEntry -Directory $script:OpenCodeBin
     Remove-OldOpenCodeVersions -CurrentVersion $version
 }
 
@@ -412,7 +481,6 @@ function Install-Codex {
     if ((Test-VersionEqual $installed $version) -and (Test-CodexManagedLayout) -and
         (Test-Path -LiteralPath $versionExe) -and (Test-Path -LiteralPath $codeModeHostExe) -and -not $Force) {
         Write-Info "Codex: already up to date ($installed). Nothing to do."
-        Add-PathEntry -Directory $script:CodexBin
         return
     }
 
@@ -516,12 +584,51 @@ function Install-Codex {
     }
 
     Write-Info "Codex: $verified installed to $script:CodexBin"
-    Add-PathEntry -Directory $script:CodexBin
     Remove-OldCodexVersions -CurrentVersion $version
 }
 
 # ---------------------------------------------------------------------------
-# winget (optional)
+# Bun (winget)
+# ---------------------------------------------------------------------------
+function Install-Bun {
+    $winget = Get-Command winget -ErrorAction SilentlyContinue
+    if ($null -eq $winget) {
+        throw 'winget is required to install, update or check Bun. Install App Installer and try again.'
+    }
+
+    # Handle native exit codes explicitly, including when the caller enables this preference.
+    $PSNativeCommandUseErrorActionPreference = $false
+    $packageArgs = @('--id', 'Oven-sh.Bun', '--exact', '--source', 'winget', '--disable-interactivity')
+    if ($Check) {
+        Write-Info 'Bun: installed version (winget)'
+        & $winget.Source list @packageArgs
+        if ($LASTEXITCODE -eq -1978335212) { # APPINSTALLER_CLI_ERROR_NO_APPLICATIONS_FOUND
+            Write-Info 'Bun: not installed through winget.'
+        } elseif ($LASTEXITCODE -ne 0) {
+            throw "winget list failed (exit code $LASTEXITCODE)."
+        }
+        Write-Info 'Bun: available version (winget)'
+        & $winget.Source show @packageArgs
+        if ($LASTEXITCODE -ne 0) { throw "winget show failed (exit code $LASTEXITCODE)." }
+        return
+    }
+
+    # winget install automatically upgrades an existing installation.
+    $installArgs = $packageArgs + @('--silent', '--accept-source-agreements', '--accept-package-agreements')
+    if ($Force) { $installArgs += '--force' }
+    Write-Info 'Bun: installing or updating through winget'
+    & $winget.Source install @installArgs
+    if ($LASTEXITCODE -eq -1978335189) { # APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE
+        Write-Info 'Bun: already up to date. Nothing to do.'
+    } elseif ($LASTEXITCODE -ne 0) {
+        throw "winget install failed (exit code $LASTEXITCODE)."
+    } else {
+        Write-Info 'Bun: installed or updated successfully.'
+    }
+}
+
+# ---------------------------------------------------------------------------
+# winget (optional CLI cleanup)
 # ---------------------------------------------------------------------------
 function Remove-WingetPackages {
     $winget = Get-Command winget -ErrorAction SilentlyContinue
@@ -555,6 +662,12 @@ if ($Check) {
 
 $doOpenCode = $Target -in @('All', 'OpenCode')
 $doCodex = $Target -in @('All', 'Codex')
+$doBun = $Target -in @('All', 'Bun')
+
+if ($doBun) {
+    try { Install-Bun }
+    catch { Write-Fail "Bun: $($_.Exception.Message)" }
+}
 
 if ($doOpenCode) {
     try { Install-OpenCode -Version $OpenCodeVersion }
@@ -568,6 +681,19 @@ if ($doCodex) {
 
 if ($RemoveWinget -and -not $Check) {
     Remove-WingetPackages
+}
+
+# Repair existing installations even when an update failed (for example, offline).
+foreach ($cli in @(
+    @{ Enabled = $doBun; Name = 'bun'; ExePath = $null; DefaultArgument = '' }
+    @{ Enabled = $doOpenCode; Name = 'opencode'; ExePath = $script:OpenCodeExe; DefaultArgument = '--auto' }
+    @{ Enabled = $doCodex; Name = 'codex'; ExePath = $script:CodexExe; DefaultArgument = '--yolo' }
+)) {
+    if (-not $cli.Enabled) { continue }
+    try {
+        if ($cli.Name -eq 'bun') { $cli.ExePath = Find-BunExe }
+        Repair-CliEnvironment -Name $cli.Name -ExePath $cli.ExePath -DefaultArgument $cli.DefaultArgument
+    } catch { Write-Fail "$($cli.Name): environment setup failed: $($_.Exception.Message)" }
 }
 
 if ($doOpenCode) {
