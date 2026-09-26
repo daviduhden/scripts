@@ -81,7 +81,7 @@ TESTS_FORMAT_SCRIPTS = \
 PERL_SCRIPTS = \
 	perl/ssh-menu.pl
 
-.PHONY: all clean install-debian install-openbsd install-secureblue install-shell install-shell-bash install-shell-bash-unlock install-shell-bash-copy install-shell-bash-lock install-shell-openbsd install-perl install-tests-format test fix-permissions check-permissions help
+.PHONY: all clean install-debian install-openbsd install-secureblue install-shell install-shell-bash install-shell-bash-unlock install-shell-bash-copy install-shell-bash-lock install-shell-openbsd install-perl install-tests-format test test-validate test-regression fix-permissions check-permissions help
 
 all: install-debian install-openbsd install-secureblue install-perl install-tests-format
 
@@ -136,19 +136,23 @@ install-perl:
 	@echo "${INFO} Perl helpers installed"
 
 install-tests-format:
-	@echo "${INFO} Installing Tests/Format scripts"
-	@install -d "${BINDIR}"
+	@echo "${INFO} Installing Tests/Format scripts" && install -d "${BINDIR}"
 	@install -m 0644 tests-format/clang-format "${BINDIR}/clang-format-all.yaml"
 	@install -m 0644 tests-format/fourmolu-all.yaml "${BINDIR}/fourmolu-all.yaml"
 	@for f in ${TESTS_FORMAT_SCRIPTS}; do base=$${f##*/}; name=$${base%.sh}; printf '%s Installing %s -> %s\n' "${INFO}" "$$f" "${BINDIR}/$$name"; install -m 0755 "$$f" "${BINDIR}/$$name"; done
 	@echo "${INFO} Tests/Format helpers installed"
 
-test:
+test: test-validate test-regression
+	@echo "All tests passed."
+
+test-validate:
 	@echo "Running shell script validation..." && /bin/sh tests-format/validate-shell.sh .
 	@echo "Running perl script validation..." && /bin/sh tests-format/validate-perl.sh .
 	@echo "Running make validation..." && /bin/sh tests-format/validate-make.sh .
 	@echo "Checking file permissions (read-only)..." && /bin/sh tests-format/fix-permissions.sh --check .
 	@echo "Running correctness audit..." && /bin/sh tests-format/validate-correctness.sh --target all .
+
+test-regression:
 	@echo "Running fix-permissions regression tests..." && /bin/sh tests-format/test-fix-permissions.sh
 	@echo "Running correctness regression tests..." && /bin/sh tests-format/test-validate-correctness.sh
 	@echo "Running ssh-menu regression test..." && perl tests-format/test-ssh-menu.pl
