@@ -279,12 +279,14 @@ if not "%NAME:~-3%"==".pl" (
     set "MANIFEST_BAD=1"
     exit /b 0
 )
-echo "%NAME%" | find "/" >nul
-if not errorlevel 1 set "MANIFEST_BAD=1"
-echo "%NAME%" | find "\" >nul
-if not errorlevel 1 set "MANIFEST_BAD=1"
-echo "%NAME%" | find " " >nul
-if not errorlevel 1 set "MANIFEST_BAD=1"
+rem Reject names with path separators or spaces. String substitution avoids
+rem the pipe/echo pitfall where a space before "|" is printed and then found.
+set "CHK=%NAME:/=%"
+if not "%CHK%"=="%NAME%" set "MANIFEST_BAD=1"
+set "CHK=%NAME:\=%"
+if not "%CHK%"=="%NAME%" set "MANIFEST_BAD=1"
+set "CHK=%NAME: =%"
+if not "%CHK%"=="%NAME%" set "MANIFEST_BAD=1"
 set "PROGRAMS=%PROGRAMS% %NAME%"
 exit /b 0
 

@@ -139,6 +139,8 @@ forbid "$INSTALLER" 'HKEY_LOCAL_MACHINE' \
 	"do not write to the system registry hive"
 forbid "$INSTALLER" '--force' \
 	"do not force winget reinstalls"
+forbid "$INSTALLER" 'find " "' \
+	"do not use a pipe/echo space search; the separator space is matched"
 
 # ------------------------------------------------------------------ launcher
 require "$LAUNCHER" '%~dp0' \
