@@ -92,10 +92,11 @@ classify_file() {
 	[ -n "$DESC" ] || DESC='unknown content'
 
 	# Makefiles are meant to be invoked directly (make,
-	# gmake, bmake), so they get the executable bit even
-	# though file(1) calls them "makefile script".
+	# gmake, bmake), so they get the executable bit. file(1)
+	# describes them as "makefile script" (GNU) or as
+	# "make commands text" (OpenBSD), so match both.
 	case "$lower" in
-	*makefile*)
+	*makefile* | *make\ commands*)
 		CLASS='exec'
 		DESC='makefile'
 		return

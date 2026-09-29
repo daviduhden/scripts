@@ -517,6 +517,9 @@ subtest '.gitattributes and .editorconfig are never modified' => sub {
 
 subtest 'read-only files are skipped, never made writable' => sub {
     if ($WINDOWS) { plan skip_all => 'POSIX permission bits are used here' }
+    if ( $> == 0 ) {
+        plan skip_all => 'root bypasses read-only permission bits';
+    }
     my $tmp  = newtmp();
     my $path = File::Spec->catfile( $tmp, 'ro.txt' );
     write_raw( $path, "a\r\nb\r\n" );

@@ -61,7 +61,7 @@ sub fixture {
     };
     mkdir $ctx->{bin}     or die "mkdir $ctx->{bin}: $!";
     mkdir $ctx->{project} or die "mkdir $ctx->{project}: $!";
-    for my $tool (qw(find sed grep dirname)) {
+    for my $tool (qw(find sed grep dirname printf)) {
         my ($path) = grep { -f $_ && -x _ }
           map { File::Spec->rel2abs( File::Spec->catfile( $_, $tool ) ) }
           split /:/, ( $ENV{PATH} // '' );

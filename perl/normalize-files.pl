@@ -30,6 +30,12 @@ use Cwd                qw(abs_path);
 use Fcntl              qw(O_WRONLY O_CREAT O_EXCL);
 use Errno              qw(EEXIST);
 
+# UTF-16LE/BE codecs live in Encode::Unicode. Some Perl builds (notably the
+# one shipped with OpenBSD) do not autoload them, so request the module
+# explicitly. If it is unavailable, UTF-16 files are reported as unsupported
+# instead of aborting.
+our $HAVE_ENCODE_UNICODE = eval { require Encode::Unicode; 1 } ? 1 : 0;
+
 our $CFG;
 our @LOG;
 
@@ -1016,8 +1022,12 @@ sub detect_encoding {
     if ( substr( $bytes, 0, 3 ) eq "\xEF\xBB\xBF" ) {
         return ( 'utf-8-bom', 1 );
     }
-    if ( substr( $bytes, 0, 2 ) eq "\xFF\xFE" ) { return ( 'utf-16le', 1 ) }
-    if ( substr( $bytes, 0, 2 ) eq "\xFE\xFF" ) { return ( 'utf-16be', 1 ) }
+    if ( substr( $bytes, 0, 2 ) eq "\xFF\xFE" ) {
+        return ( $HAVE_ENCODE_UNICODE ? 'utf-16le' : 'unicode-unsupported', 1 );
+    }
+    if ( substr( $bytes, 0, 2 ) eq "\xFE\xFF" ) {
+        return ( $HAVE_ENCODE_UNICODE ? 'utf-16be' : 'unicode-unsupported', 1 );
+    }
     my $valid_utf8 =
       eval { decode( 'UTF-8', $bytes, FB_CROAK | LEAVE_SRC ); 1 };
     return ( 'utf-8', 1 ) if $valid_utf8;
@@ -1503,6 +1513,17 @@ sub process_content {
                 'AMBIGUOUS',
                 disp( $n->{rel} ),
                 "UTF-32 is not converted automatically (unsupported)"
+            );
+            next;
+        }
+
+        if ( $enc eq 'unicode-unsupported' ) {
+            $R->{warnings}++;
+            $R->{interventions}++;
+            emit_block(
+                'AMBIGUOUS',
+                disp( $n->{rel} ),
+                "UTF-16 codecs are unavailable in this Perl build"
             );
             next;
         }

@@ -110,6 +110,18 @@ t="$(mktemp -d \
 	/tmp)"
 EOF
 
+# ---- OpenBSD fixture: case labels with '|' alternatives must
+#      not be mistaken for external commands ----
+cat >"$T/openbsd/case-label.ksh" <<'EOF'
+#!/bin/ksh
+set -eu
+case "$(uname -m)" in
+armv7 | arm) echo armv7 ;;
+amd64 | x86_64) echo amd64 ;;
+*) echo other ;;
+esac
+EOF
+
 # ---- Debian fixture: same option is fine on Linux (INFO) ----
 cat >"$T/debian/gnu-ok.bash" <<'EOF'
 #!/bin/bash
@@ -219,6 +231,8 @@ assert_no_error 'openbsd/mktemp-ok.ksh' "$out" \
 	"multi-line mktemp WITH template not flagged"
 assert_error 'openbsd/mktemp-bad.ksh' "$out" \
 	"multi-line mktemp WITHOUT template flagged"
+assert_no_error 'openbsd/case-label.ksh' "$out" \
+	"case label alternatives are not treated as commands"
 assert_no_error 'debian/gnu-ok.bash' "$out" \
 	"GNU find -printf not an ERROR in Debian fixture"
 assert_error 'debian/wrong-shebang.bash' "$out" \

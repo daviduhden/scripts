@@ -430,6 +430,14 @@ skip_hd == 1 {
     nq = gsub(/'/, "'", line)
     if (nq % 2 == 1) in_sq = 1
 
+    # Case labels ("pat | pat) command") contain '|' alternatives
+    # that would otherwise be split as pipeline separators, so drop
+    # the pattern list up to the first ')'. Function definitions
+    # ("name() {") are unaffected: the character before the ')' is
+    # '(', which is not part of a case pattern.
+    if (line ~ /^[[:space:]]*[][A-Za-z0-9_.*?|[:space:]-]+\)/)
+        sub(/^[^)]*\)/, "", line)
+
     # Continuation of a command line ending with a backslash:
     # the next line's first statement segment contains arguments,
     # not a command. Runs after masking so that separators inside

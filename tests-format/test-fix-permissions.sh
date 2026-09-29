@@ -142,7 +142,17 @@ assert_mode 'rwxr-xr-x' "$T/Makefile" "Makefile -> 0755"
 assert_mode 'rwxr-xr-x' "$T/dir0700" "directory -> 0755"
 assert_mode 'rwxr-xr-x' "$T/space dir/with space.sh" "spaced name -> 0755"
 if [ -f "$T/hello" ]; then
-	assert_mode 'rwxr-xr-x' "$T/hello" "ELF executable -> 0755"
+	# OpenBSD compiles default-PIE binaries that file(1) reports as
+	# "shared object". The fixer deliberately keeps those at 0644
+	# unless they already carry an execute bit, so that shared
+	# libraries are never made executable. Adapt the expectation to
+	# the platform classification.
+	if file -b "$T/hello" 2>/dev/null | grep -qi 'shared object'; then
+		assert_mode 'rw-r--r--' "$T/hello" \
+			"PIE shared object without exec bit stays 0644"
+	else
+		assert_mode 'rwxr-xr-x' "$T/hello" "ELF executable -> 0755"
+	fi
 fi
 
 # symlinks still symlinks; targets are classified by their own
