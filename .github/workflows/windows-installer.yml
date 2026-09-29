@@ -1,0 +1,54 @@
+name: Windows installer
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  static-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Static safety checks for install-windows.bat
+        run: sh tests-format/validate-windows-installer.sh .
+
+  windows-installer:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show available Perl (best effort)
+        shell: cmd
+        continue-on-error: true
+        run: perl -v
+
+      - name: Help
+        shell: cmd
+        run: install-windows.bat --help
+
+      - name: Dry run
+        shell: cmd
+        run: install-windows.bat --dry-run --install-dir "%TEMP%\nf-ci"
+
+      - name: Install into a temporary directory (no PATH changes)
+        shell: cmd
+        run: install-windows.bat --install-dir "%TEMP%\nf-ci" --no-path
+
+      - name: Verify the installed launcher
+        shell: cmd
+        run: |
+          "%TEMP%\nf-ci\bin\normalize-files.cmd" --version
+          "%TEMP%\nf-ci\bin\normalize-files.cmd" --help
+
+      - name: Re-run as an update (idempotent)
+        shell: cmd
+        run: install-windows.bat --install-dir "%TEMP%\nf-ci" --no-path
+
+      - name: Install into a path containing spaces
+        shell: cmd
+        run: install-windows.bat --install-dir "%TEMP%\nf ci" --no-path
+
+      - name: Verify the space-path launcher
+        shell: cmd
+        run: '"%TEMP%\nf ci\bin\normalize-files.cmd" --version'

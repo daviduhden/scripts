@@ -18,6 +18,7 @@ use strict;
 use warnings;
 use File::Path qw(make_path);
 use File::Spec;
+use File::Temp qw(tempfile);
 
 sub is_windows { return $^O eq 'MSWin32'; }
 sub is_openbsd { return $^O eq 'openbsd'; }
@@ -486,6 +487,118 @@ sub add_alias_menu {
     }
 }
 
+sub remove_known_host_entry {
+    my ( $host, $port ) = @_;
+    return 0   unless defined $host && length $host;
+    $port = '' unless defined $port;
+
+    # Keep every line that is not the requested plain host entry. Comments,
+    # marker lines (@cert-authority, @revoked) and hashed entries are left
+    # untouched.
+    my @kept;
+    my $removed = 0;
+    my $fh;
+    if ( !open $fh, '<', $known_hosts ) {
+        logw("Could not read $known_hosts: $!");
+        return 0;
+    }
+    while ( my $line = <$fh> ) {
+        my $probe = $line;
+        $probe =~ s/\r?\n\z//;
+        my $matches = 0;
+        if ( $probe !~ /^\s*(?:#|\||@)/ && $probe =~ /\S/ ) {
+            my ($field) = split /\s+/, $probe, 2;
+            if ( defined $field && length $field ) {
+                for my $cand ( split /,/, $field ) {
+                    my ( $h, $p ) = ( $cand, '' );
+                    if ( $h =~ /^\[(.+)\]:(\d+)$/ ) { $h = $1; $p = $2; }
+                    if ( $h eq $host && $p eq $port ) {
+                        $matches = 1;
+                        last;
+                    }
+                }
+            }
+        }
+        if ($matches) { $removed++; next; }
+        push @kept, $line;
+    }
+    close $fh;
+
+    return 0 unless $removed;
+
+    # Replace the file atomically, preserving its permission bits.
+    my $dir = parent_dir($known_hosts);
+    $dir = '.' unless defined $dir && length $dir;
+
+    my ( $tfh, $tmp ) =
+      tempfile( 'known_hosts.XXXXXX', DIR => $dir, UNLINK => 0 );
+    if ( !$tfh ) {
+        logw("Could not create a temporary file in $dir: $!");
+        return 0;
+    }
+    print {$tfh} @kept;
+    close $tfh;
+
+    if ( my @st = stat($known_hosts) ) {
+        chmod( $st[2] & 07777, $tmp );
+    }
+    if ( !rename $tmp, $known_hosts ) {
+        logw("Could not replace $known_hosts: $!");
+        unlink $tmp;
+        return 0;
+    }
+    return $removed;
+}
+
+sub manage_known_hosts_menu {
+    if ( !@entries ) {
+        logw('No entries available to delete.');
+        return;
+    }
+
+    logi('Delete a host from known_hosts');
+    for my $i ( 0 .. $#entries ) {
+        printf "  %2d) %s\n", $i + 1, $entries[$i]{display};
+    }
+    printf "  %2d) Cancel\n\n", scalar(@entries) + 1;
+
+    while (1) {
+        print "Delete which entry [1-",
+          scalar(@entries) + 1, "] (q to cancel): ";
+        my $input = <STDIN>;
+        defined $input or die_tool('Input closed.');
+        chomp $input;
+
+        return if $input =~ /^[qQ]$/;
+        next   if $input !~ /^\d+$/;
+        my $num = int($input);
+        return if $num == scalar(@entries) + 1;
+        next   if $num < 1 || $num > scalar(@entries);
+
+        my $idx  = $num - 1;
+        my $host = $entries[$idx]{host};
+        my $port = $entries[$idx]{port};
+
+        print "Delete $host"
+          . ( $port ? " (port $port)" : '' )
+          . " from $known_hosts? [y/N]: ";
+        my $confirm = <STDIN>;
+        defined $confirm or die_tool('Input closed.');
+        chomp $confirm;
+        return if $confirm !~ /^[yY]/;
+
+        my $removed = remove_known_host_entry( $host, $port );
+        if ($removed) {
+            logi("Removed $removed line(s) for $host from $known_hosts.");
+        }
+        else {
+            logw("No matching line found for $host in $known_hosts.");
+        }
+        logi('Re-run ssh-menu to refresh the list.');
+        return;
+    }
+}
+
 sub select_entry_menu {
 
     # Returns the selected entry index after handling menu actions.
@@ -645,4 +758,161 @@ sub main {
     exec @cmd or die_tool("Failed to exec ssh: $!");
 }
 
-main();
+main() unless caller;
+
+__END__
+
+=head1 NAME
+
+ssh-menu.pl - interactive SSH launcher built from F<~/.ssh/known_hosts>
+
+=head1 SYNOPSIS
+
+  perl ssh-menu.pl
+
+  SSH_MENU_KNOWN_HOSTS=~/.ssh/known_hosts.menu perl ssh-menu.pl
+
+=head1 DESCRIPTION
+
+B<ssh-menu.pl> reads an OpenSSH F<known_hosts> file, lists the hosts it
+contains and lets you pick one to connect to with C<ssh>. It is fully
+interactive and takes no command-line options.
+
+Plain host lines are used; marker lines (C<@cert-authority>, C<@revoked>) and
+hashed entries (C<|1|...>) are ignored because they do not name a connectable
+host. Duplicate host/port pairs are collapsed.
+
+For every host it can remember a custom alias and the last SSH user, and it
+tracks how often each host is used so that recurrent hosts move to the top of
+the menu. Aliases, frequencies and last users are stored under F<~/.cache/ssh-menu/>.
+
+When L<ksshaskpass> is found in C<PATH>, C<SSH_ASKPASS> and
+C<SSH_ASKPASS_REQUIRE> are exported so C<ssh> can use a graphical passphrase
+prompt.
+
+=head1 ENVIRONMENT
+
+=over 4
+
+=item B<SSH_MENU_KNOWN_HOSTS>
+
+Path to the F<known_hosts> file to read. Default: F<~/.ssh/known_hosts>.
+
+=item B<SSH_MENU_FREQ_FILE>
+
+Frequency database. Default: F<~/.cache/ssh-menu/frequencies>.
+
+=item B<SSH_MENU_ALIAS_FILE>
+
+Alias database. Default: F<~/.cache/ssh-menu/aliases>.
+
+=item B<SSH_MENU_LAST_USER_FILE>
+
+Last-used SSH user per host. Default: F<~/.cache/ssh-menu/last-user>.
+
+=item B<SSH_MENU_USER>
+
+Default SSH user offered when neither a remembered user nor C<USER> is set.
+
+=item B<SSH_ASKPASS>, B<SSH_ASKPASS_REQUIRE>
+
+Set automatically for C<ssh> when L<ksshaskpass> is available.
+
+=item B<HOME>
+
+Used to locate the default files; on Windows, C<USERPROFILE> is used instead.
+
+=back
+
+=head1 FILES
+
+=over 4
+
+=item F<~/.ssh/known_hosts>
+
+Source of the host list.
+
+=item F<~/.cache/ssh-menu/frequencies>
+
+C<host:port count> lines (C<default> is used when there is no port).
+
+=item F<~/.cache/ssh-menu/aliases>
+
+C<host:port alias> lines.
+
+=item F<~/.cache/ssh-menu/last-user>
+
+C<host:port user> lines.
+
+=back
+
+=head1 MENU
+
+The menu lists numbered hosts followed by three action entries:
+
+  N+1) Manage known_hosts (delete)
+  N+2) Add custom name (alias)
+  N+3) Quit
+
+Entering a number selects that server. Entering C<q> quits at any prompt.
+Deleting an entry asks for confirmation (C<y>) and rewrites the
+F<known_hosts> file atomically, preserving its permissions and keeping
+comments, markers and hashed lines.
+
+=head1 SSH
+
+Once a host is chosen, the program asks for the SSH user (pre-filled with the
+remembered user, then C<SSH_MENU_USER>, then C<USER>/C<USERNAME>) and replaces
+itself with:
+
+  ssh [-p PORT] USER@HOST
+
+The connection therefore uses the user's normal SSH configuration, keys and
+known_hosts verification.
+
+=head1 OPENBSD SANDBOX
+
+On OpenBSD the program unveils the directories in C<PATH> (read/execute) and
+the directories holding its state files (read/write/create), then locks the
+veil and pledges C<stdio rpath wpath cpath fattr exec proc inet dns unix>.
+Sandbox setup is best-effort: a failure is reported as a warning and the
+program continues.
+
+=head1 EXIT STATUS
+
+  0  quit cleanly from the menu
+  1  missing ssh, missing known_hosts, closed input, or another fatal error
+
+When C<ssh> is launched, the process is replaced, so the exit status is the
+one reported by C<ssh> itself.
+
+=head1 DEPENDENCIES
+
+Core modules only: L<File::Path>, L<File::Spec>, L<File::Temp>. The external
+C<ssh> client is required. L<ksshaskpass> is optional.
+
+=head1 EXAMPLES
+
+  # Use the default ~/.ssh/known_hosts
+  perl ssh-menu.pl
+
+  # Use a dedicated, non-hashed host file
+  SSH_MENU_KNOWN_HOSTS=~/.ssh/known_hosts.menu perl ssh-menu.pl
+
+=head1 LIMITATIONS
+
+=over 4
+
+=item * Hashed F<known_hosts> entries cannot be decoded and are skipped (with a
+warning); only plain host lines can be listed and deleted.
+
+=item * Aliases, frequencies and last users are keyed by C<host:port>; editing
+C<known_hosts> by other means leaves stale keys that are pruned on the next
+run.
+
+=item * There is no X11/SSH-agent management: it simply runs C<ssh> with the
+selected host and user.
+
+=back
+
+=cut

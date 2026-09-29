@@ -44,6 +44,77 @@ make install-tests-format
 
 Recipes use `install(1)` and strip `.pl`/`.bash`/`.ksh`/`.sh` when placing shell scripts in `${BINDIR}`. Windows scripts remain in `windows/` and are not installed by the POSIX targets.
 
+## Windows installation
+
+On Windows 10 and Windows 11, `install-windows.bat` is a single per-user entry
+point for every public Perl program listed in `perl/programs.txt` (currently
+`normalize-files` and `ssh-menu`). It never requires administrator rights for
+its own steps, never touches the system PATH, and never downloads arbitrary
+binaries.
+
+```
+git clone <repository>
+cd <repository>
+install-windows.bat
+```
+
+If you prefer not to assume Git, download and extract the repository, then run
+`install-windows.bat` from the extracted directory. It may be started from any
+working directory; the installer resolves its files relative to its own path.
+
+```
+install-windows.bat --dry-run
+install-windows.bat --help
+```
+
+After installation:
+
+```
+normalize-files --help
+```
+
+What it does:
+
+- Uses an existing Strawberry Perl when one is already available (version
+  5.10.1 or newer with the required core modules). Otherwise it installs
+  Strawberry Perl through `winget` (`StrawberryPerl.StrawberryPerl`) with
+  `--exact --accept-package-agreements --accept-source-agreements --silent`.
+  `winget` must be present (App Installer); it is only used for external
+  dependencies, never by the installed scripts.
+- Installs by default under
+  `%LOCALAPPDATA%\Programs\<repository-name>\` with `perl\`, `bin\`, a
+  `perl-path.txt` recording the interpreter, a `VERSION` file and an
+  `installed-files.txt` manifest.
+- Creates one launcher per program (`normalize-files.cmd`, `ssh-menu.cmd`) that
+  runs the matching `.pl` file with all arguments and preserves the Perl exit
+  status.
+- Adds only `...\bin` to the **user** PATH (`HKCU\Environment\Path`), in an
+  idempotent way; re-running the installer updates the scripts and launchers
+  without duplicating PATH entries or removing unknown files.
+
+Options:
+
+| Option | Meaning |
+| --- | --- |
+| `--dry-run` | Show the plan (Perl, install root, scripts, launchers, PATH) and exit without changing anything. |
+| `--no-path` | Do not modify the user PATH. |
+| `--install-dir PATH` | Install to `PATH` instead of the per-user default. It is still a per-user install unless you explicitly choose otherwise. |
+| `--help` | Show usage. |
+
+The installer ends by validating itself: `perl -c` for every installed script,
+`normalize-files --version`, `--help`, exit-status propagation (a bad option
+must return 3) and a dry run over a temporary directory. It does not exercise
+destructive operations on real files.
+
+Already-open terminals and applications keep their old environment. Start a new
+terminal (or sign out and back in) so they see the updated PATH; the launchers
+also work through their full path. Perl is provided by Strawberry Perl and is
+not removed automatically: other applications may depend on it.
+
+`ssh-menu` needs an SSH client at runtime. Windows 10/11 usually provide
+OpenSSH through *Settings → Apps → Optional features → OpenSSH Client*; the
+installer reports it but does not install it.
+
 ## Validation and formatting
 
 `clang-format-all [ROOT_DIR]` (default `.`) prefers `clang-format` for

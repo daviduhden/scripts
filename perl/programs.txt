@@ -1,0 +1,8 @@
+# Public Perl programs installed by `make install-perl` and by
+# install-windows.bat. One file name per line, relative to this directory.
+# Blank lines and lines starting with '#' are ignored.
+#
+# See the LICENSE file at the top of the project tree for copyright
+# and license details.
+normalize-files.pl
+ssh-menu.pl

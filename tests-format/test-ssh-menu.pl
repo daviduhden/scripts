@@ -78,6 +78,31 @@ if ( $out =~ /host3\.example\.com/ ) {
     fail_test("\@revoked marker line parsed as a host");
 }
 
+# Deleting a host through the "Manage known_hosts (delete)" menu entry must
+# work and must not disturb comments, marker lines or hashed entries.
+# Input: manage (3), entry 1, confirm (y), quit (q).
+my $del_out = `printf '3\\n1\\ny\\nq\\n' | perl "$script" 2>&1`;
+my ($kh_after) = do {
+    open my $fh, '<', $known_hosts or fail_test("cannot read $known_hosts");
+    local $/;
+    <$fh>;
+};
+if ( $del_out !~ /Removed 1 line/ ) {
+    fail_test("known_hosts deletion did not report removing one line");
+}
+if ( $kh_after =~ /^host1\.example\.com\b/m ) {
+    fail_test("deleted host1 still present in known_hosts");
+}
+if ( $kh_after !~ /^host2\.example\.com\b/m ) {
+    fail_test("host2 was removed unexpectedly");
+}
+if ( $kh_after !~ /\@cert-authority/ || $kh_after !~ /\@revoked/ ) {
+    fail_test("marker lines were removed unexpectedly");
+}
+if ( $kh_after !~ /^\|1\|hash-of-something\|key/m ) {
+    fail_test("hashed entry was removed unexpectedly");
+}
+
 if ($fail) {
     print STDERR "[INFO] test-ssh-menu.pl: FAILED\n";
     exit 1;

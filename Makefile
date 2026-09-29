@@ -76,10 +76,12 @@ TESTS_FORMAT_SCRIPTS = \
 	tests-format/validate-make.sh \
 	tests-format/validate-manpages.sh \
 	tests-format/validate-perl.sh \
-	tests-format/validate-shell.sh
+	tests-format/validate-shell.sh \
+	tests-format/validate-windows-installer.sh
 
-PERL_SCRIPTS = \
-	perl/ssh-menu.pl
+# The public Perl programs are listed once, in perl/programs.txt, so that both
+# this POSIX install target and install-windows.bat stay in sync.
+PERL_PROGRAMS_MANIFEST = perl/programs.txt
 
 .PHONY: all clean install-debian install-openbsd install-secureblue install-shell install-shell-bash install-shell-bash-unlock install-shell-bash-copy install-shell-bash-lock install-shell-openbsd install-perl install-tests-format test test-validate test-regression fix-permissions check-permissions help
 
@@ -132,7 +134,7 @@ install-shell-openbsd:
 install-perl:
 	@echo "${INFO} Installing perl helpers"
 	@install -d ${BINDIR}
-	@for f in ${PERL_SCRIPTS}; do base=$${f##*/}; name=$${base%.pl}; printf '%s Installing %s -> %s\n' "${INFO}" "$$f" "${BINDIR}/$$name"; install -m 0755 "$$f" "${BINDIR}/$$name"; done
+	@for name in $$(grep -Ev '^[[:space:]]*(#|$$)' ${PERL_PROGRAMS_MANIFEST}); do src="perl/$$name"; base=$${src##*/}; out=$${base%.pl}; printf '%s Installing %s -> %s\n' "${INFO}" "$$src" "${BINDIR}/$$out"; install -m 0755 "$$src" "${BINDIR}/$$out"; install -m 0644 VERSION "${BINDIR}/$$out.version"; done
 	@echo "${INFO} Perl helpers installed"
 
 install-tests-format:
@@ -157,6 +159,7 @@ test-regression:
 	@echo "Running correctness regression tests..." && /bin/sh tests-format/test-validate-correctness.sh
 	@echo "Running ssh-menu regression test..." && perl tests-format/test-ssh-menu.pl
 	@echo "Running fourmolu-all regression test..." && perl tests-format/test-fourmolu-all.pl
+	@echo "Running normalize-files regression test..." && perl tests-format/test-normalize-files.pl && echo "Running Windows installer static checks..." && /bin/sh tests-format/validate-windows-installer.sh .
 
 fix-permissions:
 	@/bin/sh tests-format/fix-permissions.sh .

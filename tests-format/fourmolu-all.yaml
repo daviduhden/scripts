@@ -9,9 +9,6 @@
 # The values below are the Fourmolu 0.20 defaults pinned explicitly: the
 # shared style then does not drift when Fourmolu changes its defaults.
 # Edit this file to evolve the shared style.
-#
-# See the LICENSE file at the top of the project tree for copyright
-# and license details.
 
 # Number of spaces per indentation step
 indentation: 4
