@@ -1,6 +1,7 @@
 clang-format = devel/clang-tools-extra
 clang-tidy = devel/clang-tools-extra
 knfmt = devel/knfmt
+fourmolu = not ported
 tidy = www/tidy
 perltidy = textproc/p5-Perl-Tidy
 shfmt = devel/shfmt

@@ -248,7 +248,10 @@ function check(line, raw) {
         emit("WARNING", NR, "OpenBSD-specific path in a Linux script", "OpenBSD filesystem layout (hier(7))", "These paths do not exist on Debian/Fedora")
 
     # ---- bashisms in ksh/POSIX contexts ----
-    if (fam == "openbsd") {
+    # Only shell scripts are checked: documentation and config files
+    # often mention words like "local" in prose and would be false
+    # positives.
+    if (fam == "openbsd" && lang != "data") {
         if (line ~ /(^|[^[:alnum:]_])local([[:space:]]|$)/)
             emit("ERROR", NR, "bash 'local' is not available in OpenBSD ksh (pdksh)", "OpenBSD ksh(1)", "Use typeset inside functions")
         if (line ~ /(^|[[:space:];|&()])(declare|readarray|mapfile|shopt)([[:space:]]|$)/)

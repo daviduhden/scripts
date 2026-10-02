@@ -58,11 +58,6 @@ SECUREBLUE_SCRIPTS = \
 	secureblue/update-xd-torrent.bash \
 	secureblue/ai-purge-history.bash
 
-WINDOWS_SCRIPTS = \
-	windows/update-aiclis.ps1 \
-	windows/ai-purge-history.ps1 \
-	windows/install-ssh-menu.bat
-
 TESTS_FORMAT_SCRIPTS = \
 	tests-format/clang-format-all.sh \
 	tests-format/clang-tidy-all.sh \
@@ -76,11 +71,9 @@ TESTS_FORMAT_SCRIPTS = \
 	tests-format/validate-make.sh \
 	tests-format/validate-manpages.sh \
 	tests-format/validate-perl.sh \
-	tests-format/validate-shell.sh \
-	tests-format/validate-windows-installer.sh
+	tests-format/validate-shell.sh
 
-# The public Perl programs are listed once, in perl/programs.txt, so that both
-# this POSIX install target and install-windows.bat stay in sync.
+# Public Perl programs are listed in perl/programs.txt.
 PERL_PROGRAMS_MANIFEST = perl/programs.txt
 
 .PHONY: all clean install-debian install-openbsd install-secureblue install-shell install-shell-bash install-shell-bash-unlock install-shell-bash-copy install-shell-bash-lock install-shell-openbsd install-perl install-tests-format test test-validate test-regression fix-permissions check-permissions help
@@ -107,7 +100,7 @@ install-secureblue:
 	@echo "${INFO} Installing SecureBlue helpers"
 	@install -d ${BINDIR}
 	@for f in ${SECUREBLUE_SCRIPTS}; do base=$${f##*/}; name=$${base%.bash}; printf '%s Installing %s -> %s\n' "${INFO}" "$$f" "${BINDIR}/$$name"; install -m 0755 "$$f" "${BINDIR}/$$name"; done
-	@if [ -d secureblue/systemd ]; then printf '%s Installing %s -> %s\n' "${INFO}" "secureblue/systemd" "${BINDIR}/systemd"; rm -rf "${BINDIR}/systemd"; cp -R secureblue/systemd "${BINDIR}/systemd"; chmod -R a+rX "${BINDIR}/systemd"; fi
+	@if [ -d secureblue/systemd ]; then printf '%s Installing %s -> %s\n' "${INFO}" "secureblue/systemd/*.service" "${BINDIR}/systemd"; rm -rf "${BINDIR}/systemd"; install -d -m 0755 "${BINDIR}/systemd" || exit 1; for f in secureblue/systemd/*.service; do [ -f "$$f" ] || continue; install -m 0644 "$$f" "${BINDIR}/systemd/$${f##*/}" || exit 1; done; fi
 	@wrapper="${BINDIR}/sudo-wrapper"; if [ -x "$$wrapper" ]; then ln -sf "$$wrapper" "${BINDIR}/sudo"; for link in sudo visudo sudoedit; do printf '%s Symlinking %s -> %s\n' "${INFO}" "${BINDIR}/$$link" "$$wrapper"; ln -sf "$$wrapper" "${BINDIR}/$$link"; done; fi; echo "${INFO} SecureBlue helpers installed"
 
 install-shell: install-shell-bash
@@ -159,7 +152,7 @@ test-regression:
 	@echo "Running correctness regression tests..." && /bin/sh tests-format/test-validate-correctness.sh
 	@echo "Running ssh-menu regression test..." && perl tests-format/test-ssh-menu.pl
 	@echo "Running fourmolu-all regression test..." && perl tests-format/test-fourmolu-all.pl
-	@echo "Running normalize-files regression test..." && perl tests-format/test-normalize-files.pl && echo "Running Windows installer static checks..." && /bin/sh tests-format/validate-windows-installer.sh .
+	@echo "Running normalize-files regression test..." && perl tests-format/test-normalize-files.pl
 
 fix-permissions:
 	@/bin/sh tests-format/fix-permissions.sh .
