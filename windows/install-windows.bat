@@ -1,7 +1,7 @@
 @echo off
 rem =====================================================================
 rem install-windows.bat - unified per-user installer for this project's
-rem public Perl programs on Windows 10 and Windows 11.
+rem public Perl and PowerShell programs on Windows 10 and Windows 11.
 rem
 rem   * Installs Strawberry Perl through winget only when no suitable Perl
 rem     (5.10.1 or newer, with the required core modules) is already
@@ -23,7 +23,7 @@ rem =====================================================================
 
 setlocal EnableExtensions DisableDelayedExpansion
 
-set "REPO=%~dp0"
+for %%I in ("%~dp0..") do set "REPO=%%~fI\"
 set "PROJECT="
 set "VERSION=unknown"
 set "OPT_DRY=0"
@@ -32,6 +32,7 @@ set "OPT_INSTALL_DIR="
 set "OPT_HELP=0"
 set "PERL_EXE="
 set "PROGRAMS="
+set "PS_PROGRAMS="
 set "MANIFEST_BAD="
 set "INSTALL_FAIL="
 set "VERIFY_FAIL="
@@ -109,6 +110,20 @@ if not defined PROGRAMS (
 )
 
 rem --------------------------------------------------------------------
+rem Discover PowerShell programs alongside this installer and the formatter.
+rem --------------------------------------------------------------------
+if not exist "%REPO%windows\powershell-launcher.cmd" (
+    echo [ERROR] missing PowerShell launcher template.
+    exit /b 2
+)
+for %%N in ("%REPO%windows\*.ps1") do if exist "%%~fN" call :collect_ps_program "%%~nxN"
+if not exist "%REPO%windows\test-format\psfmt.ps1" (
+    echo [ERROR] missing formatter: windows\test-format\psfmt.ps1
+    exit /b 2
+)
+call :collect_ps_program "psfmt.ps1"
+
+rem --------------------------------------------------------------------
 rem Find an already usable Perl before considering winget
 rem --------------------------------------------------------------------
 call :find_perl
@@ -125,8 +140,9 @@ echo Install root:
 echo   %INSTALL_DIR%
 echo Scripts:
 for %%N in (%PROGRAMS%) do echo   %%N -^> %INSTALL_DIR%\perl\%%N
+for %%N in (%PS_PROGRAMS%) do echo   %%N -^> %INSTALL_DIR%\windows\%%N
 echo Launchers:
-for %%N in (%PROGRAMS%) do echo   %%~nN.cmd -^> %INSTALL_DIR%\bin\%%~nN.cmd
+for %%N in (%PROGRAMS% %PS_PROGRAMS%) do echo   %%~nN.cmd -^> %INSTALL_DIR%\bin\%%~nN.cmd
 echo PATH:
 if "%OPT_PATH%"=="1" echo   add if missing: %INSTALL_DIR%\bin
 if "%OPT_PATH%"=="0" echo   not modified: --no-path
@@ -153,6 +169,7 @@ rem Create the install tree and copy our files
 rem --------------------------------------------------------------------
 mkdir "%INSTALL_DIR%" >nul 2>&1
 mkdir "%INSTALL_DIR%\perl" >nul 2>&1
+mkdir "%INSTALL_DIR%\windows" >nul 2>&1
 mkdir "%INSTALL_DIR%\bin" >nul 2>&1
 if not exist "%INSTALL_DIR%\bin" (
     echo [ERROR] cannot create %INSTALL_DIR%\bin
@@ -170,7 +187,8 @@ if exist "%INSTALL_DIR%\installed-files.txt" copy /y "%INSTALL_DIR%\installed-fi
 > "%INSTALL_DIR%\perl-path.txt" echo %PERL_EXE%
 if exist "%REPO%VERSION" copy /y "%REPO%VERSION" "%INSTALL_DIR%\VERSION" >nul 2>&1
 
-for %%N in (%PROGRAMS%) do call :install_one "%%N"
+for %%N in (%PROGRAMS%) do call :install_one "%%N" "perl" "launcher.cmd"
+for %%N in (%PS_PROGRAMS%) do call :install_one "%%N" "windows" "powershell-launcher.cmd"
 if defined INSTALL_FAIL (
     echo [ERROR] one or more files could not be installed.
     exit /b 2
@@ -201,7 +219,7 @@ rem Summary
 rem --------------------------------------------------------------------
 echo.
 echo [INFO] %PROJECT% %VERSION% installed to %INSTALL_DIR%
-echo [INFO] Programs installed: %PROGRAMS%
+echo [INFO] Programs installed: %PROGRAMS% %PS_PROGRAMS%
 if "%OPT_PATH%"=="1" echo [INFO] User PATH now includes: %INSTALL_DIR%\bin
 if "%OPT_PATH%"=="0" echo [INFO] PATH not modified. Add %INSTALL_DIR%\bin manually if wanted.
 echo.
@@ -290,6 +308,10 @@ if not "%CHK%"=="%NAME%" set "MANIFEST_BAD=1"
 set "PROGRAMS=%PROGRAMS% %NAME%"
 exit /b 0
 
+:collect_ps_program
+set "PS_PROGRAMS=%PS_PROGRAMS% %~1"
+exit /b 0
+
 :try_perl
 set "CAND=%~1"
 if not exist "%CAND%" exit /b 0
@@ -343,26 +365,30 @@ exit /b 0
 
 :install_one
 set "NAME=%~1"
-set "LNAME=%NAME:.pl=%"
+set "LNAME=%~n1"
+set "SCRIPT_FOLDER=%~2"
+set "TEMPLATE=%~3"
+set "SOURCE_FOLDER=%SCRIPT_FOLDER%"
+if /i "%SCRIPT_FOLDER%\%NAME%"=="windows\psfmt.ps1" set "SOURCE_FOLDER=windows\test-format"
 if defined SEEN_%LNAME% (
     echo [ERROR] duplicate launcher name: %LNAME%
     set "INSTALL_FAIL=1"
     exit /b 0
 )
 set "SEEN_%LNAME%=1"
-copy /y "%REPO%perl\%NAME%" "%INSTALL_DIR%\perl\%NAME%" >nul
+copy /y "%REPO%%SOURCE_FOLDER%\%NAME%" "%INSTALL_DIR%\%SCRIPT_FOLDER%\%NAME%" >nul
 if errorlevel 1 (
     echo [ERROR] cannot copy %NAME%
     set "INSTALL_FAIL=1"
     exit /b 0
 )
-copy /y "%REPO%windows\launcher.cmd" "%INSTALL_DIR%\bin\%LNAME%.cmd" >nul
+copy /y "%REPO%windows\%TEMPLATE%" "%INSTALL_DIR%\bin\%LNAME%.cmd" >nul
 if errorlevel 1 (
     echo [ERROR] cannot create launcher %LNAME%.cmd
     set "INSTALL_FAIL=1"
     exit /b 0
 )
->> "%INSTALL_DIR%\installed-files.txt" echo perl\%NAME%
+>> "%INSTALL_DIR%\installed-files.txt" echo %SCRIPT_FOLDER%\%NAME%
 >> "%INSTALL_DIR%\installed-files.txt" echo bin\%LNAME%.cmd
 exit /b 0
 
@@ -377,17 +403,26 @@ if "%ENTRY%"=="" exit /b 0
 if /i "%ENTRY%"=="perl-path.txt" exit /b 0
 if /i "%ENTRY%"=="installed-files.txt" exit /b 0
 if /i "%ENTRY%"=="VERSION" exit /b 0
-if /i not "%ENTRY:~0,4%"=="bin\" if /i not "%ENTRY:~0,5%"=="perl\" exit /b 0
+if /i not "%ENTRY:~0,4%"=="bin\" if /i not "%ENTRY:~0,5%"=="perl\" if /i not "%ENTRY:~0,8%"=="windows\" exit /b 0
+rem Only direct children of our script and launcher directories are managed.
+for /f "tokens=1,* delims=\" %%A in ("%ENTRY%") do set "LEAF=%%B"
+if not "%LEAF:\=%"=="%LEAF%" exit /b 0
+if not "%LEAF:/=%"=="%LEAF%" exit /b 0
+if "%LEAF%"==".." exit /b 0
 set "KEEP=0"
 for %%N in (%PROGRAMS%) do (
     if /i "%ENTRY%"=="perl\%%N" set "KEEP=1"
+    if /i "%ENTRY%"=="bin\%%~nN.cmd" set "KEEP=1"
+)
+for %%N in (%PS_PROGRAMS%) do (
+    if /i "%ENTRY%"=="windows\%%N" set "KEEP=1"
     if /i "%ENTRY%"=="bin\%%~nN.cmd" set "KEEP=1"
 )
 if "%KEEP%"=="1" exit /b 0
 set "TARGET=%INSTALL_DIR%\%ENTRY%"
 if not exist "%TARGET%" exit /b 0
 if /i "%ENTRY:~0,4%"=="bin\" (
-    findstr /c:"perl-path.txt" "%TARGET%" >nul 2>&1
+    findstr /c:"perl-path.txt" /c:"rem scripts-powershell-launcher" "%TARGET%" >nul 2>&1
     if errorlevel 1 exit /b 0
 )
 del /f /q "%TARGET%" >nul 2>&1
@@ -411,6 +446,18 @@ exit /b 0
 :verify_all
 call :verify_launcher "normalize-files"
 for %%N in (%PROGRAMS%) do call :verify_script "%%N"
+for %%N in (%PS_PROGRAMS%) do call :verify_ps_script "%%N"
+exit /b 0
+
+:verify_ps_script
+set "PS_SCRIPT=%INSTALL_DIR%\windows\%~1"
+powershell -NoProfile -Command "$tokens=$null; $errors=$null; $null=[System.Management.Automation.Language.Parser]::ParseFile($env:PS_SCRIPT,[ref]$tokens,[ref]$errors); if($errors.Count){$errors | Out-String | Write-Host; exit 1}" >nul 2>&1
+if errorlevel 1 (
+    echo [ERROR] PowerShell syntax check failed for %~1
+    set "VERIFY_FAIL=1"
+) else (
+    echo   OK   %~1 parses
+)
 exit /b 0
 
 :verify_script
@@ -428,7 +475,7 @@ exit /b 0
 set "LNAME=%~1"
 set "LAUNCHER=%INSTALL_DIR%\bin\%LNAME%.cmd"
 set "VOUT=%TEMP%\nf_verify_%RANDOM%%RANDOM%.txt"
-"%LAUNCHER%" --version >"%VOUT%" 2>&1
+call "%LAUNCHER%" --version >"%VOUT%" 2>&1
 set "VRC=%ERRORLEVEL%"
 if "%VRC%"=="0" (
     echo   OK   %LNAME% --version
@@ -436,7 +483,7 @@ if "%VRC%"=="0" (
     echo [ERROR] %LNAME% --version failed, exit code %VRC%
     set "VERIFY_FAIL=1"
 )
-"%LAUNCHER%" --help >"%VOUT%" 2>&1
+call "%LAUNCHER%" --help >"%VOUT%" 2>&1
 set "VRC=%ERRORLEVEL%"
 if "%VRC%"=="0" (
     echo   OK   %LNAME% --help
@@ -444,7 +491,7 @@ if "%VRC%"=="0" (
     echo [ERROR] %LNAME% --help failed, exit code %VRC%
     set "VERIFY_FAIL=1"
 )
-"%LAUNCHER%" --this-option-does-not-exist >"%VOUT%" 2>&1
+call "%LAUNCHER%" --this-option-does-not-exist >"%VOUT%" 2>&1
 set "VRC=%ERRORLEVEL%"
 if "%VRC%"=="3" (
     echo   OK   %LNAME% propagates the Perl exit status
@@ -455,7 +502,7 @@ if "%VRC%"=="3" (
 set "VTMP=%TEMP%\nf_vdir_%RANDOM%%RANDOM%"
 mkdir "%VTMP%" >nul 2>&1
 > "%VTMP%\Name With Spaces.txt" echo sample
-"%LAUNCHER%" --dry-run "%VTMP%" >"%VOUT%" 2>&1
+call "%LAUNCHER%" --dry-run "%VTMP%" >"%VOUT%" 2>&1
 set "VRC=%ERRORLEVEL%"
 if "%VRC%"=="1" (
     echo   OK   %LNAME% dry-run on a temporary directory
