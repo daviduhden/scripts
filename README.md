@@ -15,6 +15,16 @@ Shell and Perl utilities for system administration and maintenance across multip
 └── tests-format/  # Validation, formatting and permission tools
 ```
 
+Each directory documents its scripts, requirements, and usage:
+
+- [Debian](debian/README.md)
+- [OpenBSD](openbsd/README.md)
+- [Perl](perl/README.md)
+- [SecureBlue](secureblue/README.md) and [systemd user services](secureblue/systemd/README.md)
+- [Windows](windows/README.md), [PowerShell formatter](windows/test-format/README.md), and [formatter tests](windows/test-format/tests/README.md)
+- [Interactive Bash helpers](shell/README.md)
+- [Validation and formatting tools](tests-format/README.md)
+
 ## Installation
 
 Targets are system-specific; there is no generic "install all". Adjust `PREFIX`/`BINDIR` if you need a different path (defaults to `/usr/local/bin`).
@@ -46,25 +56,26 @@ Recipes use `install(1)` and strip `.pl`/`.bash`/`.ksh`/`.sh` when placing shell
 
 ## Windows installation
 
-On Windows 10 and Windows 11, `install-windows.bat` is a single per-user entry
+On Windows 10 and Windows 11, `windows\install-windows.bat` is a single per-user entry
 point for every public Perl program listed in `perl/programs.txt` (currently
-`normalize-files` and `ssh-menu`). It never requires administrator rights for
+`normalize-files` and `ssh-menu`) and every PowerShell script in `windows/`
+and the formatter `windows/test-format/psfmt.ps1` (installed as `psfmt`). It never requires administrator rights for
 its own steps, never touches the system PATH, and never downloads arbitrary
 binaries.
 
 ```
 git clone <repository>
 cd <repository>
-install-windows.bat
+windows\install-windows.bat
 ```
 
 If you prefer not to assume Git, download and extract the repository, then run
-`install-windows.bat` from the extracted directory. It may be started from any
+`windows\install-windows.bat` from the extracted directory. It may be started from any
 working directory; the installer resolves its files relative to its own path.
 
 ```
-install-windows.bat --dry-run
-install-windows.bat --help
+windows\install-windows.bat --dry-run
+windows\install-windows.bat --help
 ```
 
 After installation:
@@ -80,17 +91,30 @@ What it does:
   Strawberry Perl through `winget` (`StrawberryPerl.StrawberryPerl`) with
   `--exact --accept-package-agreements --accept-source-agreements --silent`.
   `winget` must be present (App Installer); it is only used for external
-  dependencies, never by the installed scripts.
+  the Perl dependency. The installed `update-aiclis` command also uses winget.
 - Installs by default under
-  `%LOCALAPPDATA%\Programs\<repository-name>\` with `perl\`, `bin\`, a
+  `%LOCALAPPDATA%\Programs\<repository-name>\` with `perl\`, `windows\`, `bin\`, a
   `perl-path.txt` recording the interpreter, a `VERSION` file and an
   `installed-files.txt` manifest.
 - Creates one launcher per program (`normalize-files.cmd`, `ssh-menu.cmd`) that
   runs the matching `.pl` file with all arguments and preserves the Perl exit
   status.
+- Creates launchers for the PowerShell scripts, forwarding arguments and exit
+  status with PowerShell 7 (`pwsh`) when available, or Windows PowerShell
+  otherwise. Installation checks their syntax without executing them and
+  leaves the PowerShell execution policy unchanged.
 - Adds only `...\bin` to the **user** PATH (`HKCU\Environment\Path`), in an
   idempotent way; re-running the installer updates the scripts and launchers
   without duplicating PATH entries or removing unknown files.
+
+Validate the Windows installer and launchers from a Windows terminal:
+
+```bat
+tests-format\validate-windows-installer.bat
+```
+
+The validator accepts an optional repository directory and requires no POSIX
+shell tools or Make.
 
 Options:
 
@@ -152,7 +176,7 @@ bundled-style, skip and failure-propagation regression checks.
 
 `make test` runs, in order:
 
-- shell validation/formatting (`tests-format/validate-shell.sh`, incluye sintaxis sh/bash/ksh)
+- shell validation/formatting (`tests-format/validate-shell.sh`, including sh/bash/ksh syntax)
 - perl validation/formatting (`tests-format/validate-perl.sh`)
 - make validation/formatting (`tests-format/validate-make.sh`)
 - permission validation (`tests-format/fix-permissions.sh --check`, read-only)
