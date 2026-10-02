@@ -724,6 +724,25 @@ sub update_frequency {
     if ($@) { logw("Could not persist frequency file: $@"); }
 }
 
+sub exec_ssh_command {
+    my @cmd     = @_;
+    my $program = $cmd[0];
+
+    # Win32 Perl serializes argv into a command line without quoting argv[0].
+    # An SSH path under Program Files would otherwise become extra arguments.
+    # Keep the executable path separate from its Windows-only quoted argv[0].
+    if ( is_windows() ) {
+        $cmd[0] = qq{"$program"};
+
+        # Win32 exec does not wait for the child; keep the terminal attached
+        # and propagate SSH's exit status instead of returning immediately.
+        my $status = system {$program} @cmd;
+        die_tool("Failed to launch ssh: $!") if $status == -1;
+        exit( $status >> 8 );
+    }
+    exec {$program} @cmd or die_tool("Failed to exec ssh: $!");
+}
+
 sub main {
 
     require_cmd('ssh');
@@ -755,7 +774,7 @@ sub main {
       build_ssh_command( $ssh_path, $ssh_user, $selected_host, $selected_port );
 
     update_frequency($selected_key);
-    exec @cmd or die_tool("Failed to exec ssh: $!");
+    exec_ssh_command(@cmd);
 }
 
 main() unless caller;
@@ -862,8 +881,7 @@ comments, markers and hashed lines.
 =head1 SSH
 
 Once a host is chosen, the program asks for the SSH user (pre-filled with the
-remembered user, then C<SSH_MENU_USER>, then C<USER>/C<USERNAME>) and replaces
-itself with:
+remembered user, then C<SSH_MENU_USER>, then C<USER>/C<USERNAME>) and launches:
 
   ssh [-p PORT] USER@HOST
 
@@ -883,8 +901,8 @@ program continues.
   0  quit cleanly from the menu
   1  missing ssh, missing known_hosts, closed input, or another fatal error
 
-When C<ssh> is launched, the process is replaced, so the exit status is the
-one reported by C<ssh> itself.
+When C<ssh> is launched, the process is replaced on Unix. On Windows the
+launcher waits for C<ssh> to finish and forwards its exit status.
 
 =head1 DEPENDENCIES
 
