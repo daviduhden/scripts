@@ -73,6 +73,16 @@ error() {
 	exit 1
 }
 
+# Use the standard allocator for the build command and its children.
+# LD_PRELOAD alone cannot override /etc/ld.so.preload.
+run_build() {
+	if command -v with-standard-malloc >/dev/null 2>&1; then
+		with-standard-malloc "$@"
+	else
+		env -u LD_PRELOAD "$@"
+	fi
+}
+
 require_cmd() {
 	command -v "$1" >/dev/null 2>&1 ||
 		error "Required command '$1' not found."
@@ -210,7 +220,7 @@ clone_or_update_repo() {
 
 build_and_install_XD() {
 	log "Building XD..."
-	env -u LD_PRELOAD make
+	run_build make
 	# Adjust Makefile installation prefix:
 	# change $(PREFIX)/bin -> $(PREFIX)/local/bin
 	if [ -f Makefile ]; then
@@ -222,7 +232,13 @@ build_and_install_XD() {
 			Makefile || true
 	fi
 	log "Installing XD using 'make install'..."
-	run_root make install PREFIX=/usr
+	# The install target may also compile prerequisites. Apply the
+	# allocator wrapper after elevation so run0 cannot clear it.
+	if command -v with-standard-malloc >/dev/null 2>&1; then
+		run_root with-standard-malloc make install PREFIX=/usr
+	else
+		run_root env -u LD_PRELOAD make install PREFIX=/usr
+	fi
 	log "XD installed successfully."
 }
 

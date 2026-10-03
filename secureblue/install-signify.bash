@@ -34,6 +34,16 @@ error() {
 	exit 1
 }
 
+# Use the standard allocator for the build command and its children.
+# LD_PRELOAD alone cannot override /etc/ld.so.preload.
+run_build() {
+	if command -v with-standard-malloc >/dev/null 2>&1; then
+		with-standard-malloc "$@"
+	else
+		env -u LD_PRELOAD "$@"
+	fi
+}
+
 have_cmd() { command -v "$1" >/dev/null 2>&1; }
 
 require_non_root() {
@@ -157,7 +167,7 @@ prepare_source() {
 build_and_install() {
 	log "Building signify from source"
 	BUILD_LOG="$(mktemp "${TMPDIR:-/tmp}/signify-build.XXXXXX.log")"
-	if ! env -u LD_PRELOAD make -s -C "$BUILD_DIR" \
+	if ! run_build make -s -C "$BUILD_DIR" \
 		CC=clang BUNDLED_LIBBSD=1 >"$BUILD_LOG" 2>&1; then
 		cat "$BUILD_LOG" >&2
 		error "signify build failed"

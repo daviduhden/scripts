@@ -8,6 +8,8 @@ set -euo pipefail
 # - Clones the arti and oniux repositories from the Tor Project GitLab
 # - Determines the latest release tags for each project
 # - Installs or updates the crates via cargo with appropriate features
+# - Uses Secureblue's with-standard-malloc for Cargo and its children
+#   to avoid Rust compiler incompatibilities with hardened_malloc
 # - Ensures OpenSSL and patchelf are available: Homebrew's
 #   openssl/patchelf when Homebrew is present, otherwise the system
 #   OpenSSL and patchelf layered with rpm-ostree
@@ -327,14 +329,21 @@ link_openssl() {
 
 get_installed_cargo_version() {
 	local crate="$1"
-	cargo install --list 2>/dev/null |
+	cargo_np install --list 2>/dev/null |
 		awk -v crate="$crate" '$1==crate {print $2}' |
 		sed -E 's/^v//; s/:$//' |
 		sed -n '1p'
 }
 
 cargo_np() {
-	env -u LD_PRELOAD cargo "$@"
+	# Unsetting LD_PRELOAD alone does not disable the allocator loaded
+	# through /etc/ld.so.preload. Secureblue's wrapper hides that file
+	# for Cargo and all children, including rustc and build scripts.
+	if command -v with-standard-malloc >/dev/null 2>&1; then
+		with-standard-malloc cargo "$@"
+	else
+		env -u LD_PRELOAD cargo "$@"
+	fi
 }
 
 latest_git_tag() {

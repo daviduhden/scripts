@@ -29,6 +29,16 @@ error() {
 		"$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2
 }
 
+# Use the standard allocator for the build command and its children.
+# LD_PRELOAD alone cannot override /etc/ld.so.preload.
+run_build() {
+	if command -v with-standard-malloc >/dev/null 2>&1; then
+		with-standard-malloc "$@"
+	else
+		env -u LD_PRELOAD "$@"
+	fi
+}
+
 require_cmd() {
 	command -v "$1" >/dev/null 2>&1 || {
 		error "Required command '$1' not found."
@@ -104,7 +114,7 @@ build_krohnkite() {
 	ensure_brew_path
 
 	cd "$SRC_DIR"
-	if ! env -u LD_PRELOAD task package; then
+	if ! run_build task package; then
 		error "Krohnkite build failed."
 		exit 1
 	fi

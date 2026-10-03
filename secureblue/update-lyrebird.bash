@@ -31,6 +31,16 @@ error() {
 	exit 1
 }
 
+# Use the standard allocator for the build command and its children.
+# LD_PRELOAD alone cannot override /etc/ld.so.preload.
+run_build() {
+	if command -v with-standard-malloc >/dev/null 2>&1; then
+		with-standard-malloc "$@"
+	else
+		env -u LD_PRELOAD "$@"
+	fi
+}
+
 require_cmd() {
 	command -v "$1" >/dev/null 2>&1 ||
 		error "Required command '$1' not found."
@@ -155,7 +165,7 @@ clone_or_update_repo() {
 
 build_lyrebird() {
 	log "Building lyrebird..."
-	env -u LD_PRELOAD make build
+	run_build make build
 
 	[ -x "./$BIN_NAME" ] || error \
 		"Build failed: binary $BIN_NAME not found."

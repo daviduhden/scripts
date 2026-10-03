@@ -39,6 +39,16 @@ error() {
 	exit 1
 }
 
+# Use the standard allocator for the build command and its children.
+# LD_PRELOAD alone cannot override /etc/ld.so.preload.
+run_build() {
+	if command -v with-standard-malloc >/dev/null 2>&1; then
+		with-standard-malloc "$@"
+	else
+		env -u LD_PRELOAD "$@"
+	fi
+}
+
 have_cmd() { command -v "$1" >/dev/null 2>&1; }
 
 require_non_root() {
@@ -182,14 +192,14 @@ build_and_install() {
 	cd "$BUILD_DIR"
 
 	log "Configuring openrsync"
-	if ! env -u LD_PRELOAD ./configure PREFIX="$PREFIX" \
+	if ! run_build ./configure PREFIX="$PREFIX" \
 		CC=clang "${CONFIG_EXTRA[@]}" >"$BUILD_LOG" 2>&1; then
 		cat "$BUILD_LOG" >&2
 		error "openrsync configure failed"
 	fi
 
 	log "Building openrsync from source"
-	if ! env -u LD_PRELOAD bmake -s >>"$BUILD_LOG" 2>&1; then
+	if ! run_build bmake -s >>"$BUILD_LOG" 2>&1; then
 		cat "$BUILD_LOG" >&2
 		error "openrsync build failed"
 	fi
