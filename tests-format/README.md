@@ -9,7 +9,7 @@ Command Prompt without a POSIX shell or Make.
 | Script | Purpose and interface |
 | --- | --- |
 | [clang-format-all.sh](clang-format-all.sh) | Formats C/C++ recursively under `[ROOT_DIR]`, preferring clang-format for modern C standards and knfmt otherwise. `C_FORMAT_STANDARD` overrides detection. Forces the bundled clang-format style when using clang-format. |
-| [clang-tidy-all.sh](clang-tidy-all.sh) | Runs clang-tidy on C/C++ under `[ROOT_DIR]` with C23/C++23 defaults. `CLANG_TIDY_BUILD_DIR` supplies a compilation database directory. |
+| [clang-tidy-all.sh](clang-tidy-all.sh) | Runs clang-tidy on C/C++ under `[ROOT_DIR]` with C23/C++23 defaults and the bundled security-focused configuration. `CLANG_TIDY_BUILD_DIR` supplies a compilation database directory. |
 | [fourmolu-all.sh](fourmolu-all.sh) | Formats Haskell `.hs`, `.hsig`, and `.hs-boot` files under `[ROOT_DIR]` using the bundled Fourmolu configuration. |
 | [fix-permissions.sh](fix-permissions.sh) | Classifies file contents and normalizes modes. `--check` is read-only; `--dry-run` previews and `--verbose` explains decisions. |
 | [install-knfmt-linux.sh](install-knfmt-linux.sh) | Builds and installs knfmt on Linux with optional `[PREFIX]` (default `/usr/local`). |
@@ -46,6 +46,7 @@ removing `.sh` from shell command names.
 Supporting files:
 
 - [clang-format](clang-format): shared LLVM style, installed as `clang-format-all.yaml`.
+- [clang-tidy](clang-tidy): security-focused clang-tidy configuration based on knfmt's, installed as `clang-tidy-all.yaml`.
 - [fourmolu-all.yaml](fourmolu-all.yaml): shared Haskell formatting settings.
 - [openbsd-tools.txt](openbsd-tools.txt): command allowlist for OpenBSD auditing.
 

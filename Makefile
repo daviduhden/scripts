@@ -133,6 +133,7 @@ install-perl:
 install-tests-format:
 	@echo "${INFO} Installing Tests/Format scripts" && install -d "${BINDIR}"
 	@install -m 0644 tests-format/clang-format "${BINDIR}/clang-format-all.yaml"
+	@install -m 0644 tests-format/clang-tidy "${BINDIR}/clang-tidy-all.yaml"
 	@install -m 0644 tests-format/fourmolu-all.yaml "${BINDIR}/fourmolu-all.yaml"
 	@for f in ${TESTS_FORMAT_SCRIPTS}; do base=$${f##*/}; name=$${base%.sh}; printf '%s Installing %s -> %s\n' "${INFO}" "$$f" "${BINDIR}/$$name"; install -m 0755 "$$f" "${BINDIR}/$$name"; done
 	@echo "${INFO} Tests/Format helpers installed"

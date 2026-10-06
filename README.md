@@ -163,6 +163,17 @@ the LLVM 23 configuration is not a portable knfmt configuration schema.
 Run `perl tests-format/test-clang-format-all.pl` for isolated selection,
 fallback, failure propagation and installed-style regression checks.
 
+`clang-tidy-all [ROOT_DIR]` runs `clang-tidy` over C and C++ sources with
+C23/C++23 defaults (`CLANG_TIDY_BUILD_DIR` supplies a compilation database).
+Every invocation uses the bundled security-focused configuration
+(`tests-format/clang-tidy`, installed as `${BINDIR}/clang-tidy-all.yaml`),
+ignoring project-local `.clang-tidy` files. It is based on the `knfmt`
+project's `.clang-tidy` and extended for maximum safety: all CERT rule sets,
+the C++ Core Guidelines, concurrency and `clang-analyzer` families are enabled,
+the safety-related `knfmt` suppressions are dropped, and findings are treated
+as errors. The script examines every source file and exits non-zero when any
+finding is reported.
+
 `fourmolu-all [ROOT_DIR]` (default `.`) formats Haskell sources (`.hs`,
 `.hsig` and `.hs-boot`) in place with `fourmolu`. Like `clang-format-all`, it
 always forces a bundled style (`tests-format/fourmolu-all.yaml`, installed as
