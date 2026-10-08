@@ -15,6 +15,7 @@ set -euo pipefail
 REPO_URL="https://codeberg.org/anametologin/Krohnkite.git"
 BUILD_DIR_NAME="builds"
 SRC_DIR="$HOME/.local/src/Krohnkite"
+REPO_UNCHANGED=0
 
 log() {
 	printf '%s [INFO]  %s\n' \
@@ -96,8 +97,9 @@ prepare_repo() {
 		remote_rev="$(git -C "$SRC_DIR" rev-parse origin/HEAD)"
 
 		if [[ $local_rev == "$remote_rev" ]]; then
-			log "Repository already up to date. Nothing to do."
-			exit 0
+			log "Repository already up to date."
+			REPO_UNCHANGED=1
+			return 0
 		fi
 
 		log "Repository updated upstream; syncing..."
@@ -156,6 +158,15 @@ check_prereqs() {
 
 run_update() {
 	prepare_repo
+
+	# Nothing to build if the source is current, but still install when the
+	# KWin script is missing (for example after a failed earlier install).
+	if [[ $REPO_UNCHANGED -eq 1 ]] &&
+		kpackagetool6 -t KWin/Script -s krohnkite >/dev/null 2>&1; then
+		log "Krohnkite is already up to date. Nothing to do."
+		return 0
+	fi
+
 	build_krohnkite
 	install_krohnkite
 

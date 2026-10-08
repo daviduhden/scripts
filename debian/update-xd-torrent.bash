@@ -7,7 +7,7 @@ set -euo pipefail
 # - Requires Go to be installed
 # - Clones or updates the XD GitHub repository
 # - Builds the project using make
-# - Installs the resulting binary into /usr/local/bin
+# - Installs the resulting binary into /usr/bin
 # - Ensures "xd" system user/group and working directory exist
 # - Installs/upgrades official xd.service systemd unit
 #
@@ -143,7 +143,8 @@ build_and_install_XD() {
 	log "Building XD..."
 	env -u LD_PRELOAD make
 	log "Installing XD..."
-	make install
+	# Install to /usr/bin so the downloaded xd.service ExecStart matches.
+	make install PREFIX=/usr
 	log "XD installed successfully."
 }
 
@@ -219,10 +220,11 @@ check_prereqs() {
 	require_root
 	require_cmd git
 	require_cmd curl
-	require_cmd systemctl
 	require_cmd install
 	require_cmd getent
+	require_cmd make
 	if [ "$SKIP_SERVICE_AND_USER_SETUP" -eq 0 ]; then
+		require_cmd systemctl
 		require_cmd useradd
 		require_cmd groupadd
 	fi

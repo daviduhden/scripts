@@ -75,7 +75,10 @@ PERL_PROGRAMS_MANIFEST = perl/programs.txt
 
 .PHONY: all clean install-debian install-openbsd install-secureblue install-shell install-shell-bash install-shell-bash-unlock install-shell-bash-copy install-shell-openbsd install-perl install-tests-format test test-validate test-regression fix-permissions check-permissions help
 
-all: install-debian install-openbsd install-secureblue install-perl install-tests-format
+# OS-specific sets install the same command names, so they cannot share a
+# single BINDIR. 'all' installs only the OS-independent helpers; choose
+# install-debian, install-openbsd or install-secureblue for the target host.
+all: install-perl install-tests-format
 
 clean:
 	@echo "${INFO} Nothing to clean"
@@ -103,7 +106,7 @@ install-secureblue:
 install-shell: install-shell-bash
 	@echo "${INFO} Shell helpers installed"
 
-install-shell-bash: install-shell-bash-unlock install-shell-bash-copy
+install-shell-bash: install-shell-bash-copy
 	@echo "${INFO} Installing shell aliases for SecureBlue user '${SECUREBLUE_USER}'"
 	@echo "${INFO} SecureBlue shell aliases installed"
 
@@ -112,7 +115,7 @@ install-shell-bash-unlock:
 	@if [ -e "${BASH_CONF_DST_DIR}" ]; then printf '%s Removing immutable attribute from %s\n' "${INFO}" "${BASH_CONF_DST_DIR}"; chattr -i "${BASH_CONF_DST_DIR}" 2>/dev/null || true; fi
 	@mkdir -p "${BASH_CONF_DST_DIR}"
 
-install-shell-bash-copy:
+install-shell-bash-copy: install-shell-bash-unlock
 	@for f in ${BASH_CONF_FILES}; do printf '%s Installing %s -> %s\n' "${INFO}" "$$f" "${BASH_CONF_DST_DIR}/$${f##*/}"; install -m 0644 "$$f" "${BASH_CONF_DST_DIR}/$${f##*/}"; done
 
 	@printf '%s Restoring immutable attribute on %s\n' "${INFO}" "${BASH_CONF_DST_DIR}"; chattr +i "${BASH_CONF_DST_DIR}"
@@ -129,9 +132,7 @@ install-perl:
 
 install-tests-format:
 	@echo "${INFO} Installing Tests/Format scripts" && install -d "${BINDIR}"
-	@install -m 0644 tests-format/clang-format "${BINDIR}/clang-format-all.yaml"
-	@install -m 0644 tests-format/clang-tidy "${BINDIR}/clang-tidy-all.yaml"
-	@install -m 0644 tests-format/fourmolu-all.yaml "${BINDIR}/fourmolu-all.yaml"
+	@for cfg in "tests-format/clang-format:clang-format-all.yaml" "tests-format/clang-tidy:clang-tidy-all.yaml" "tests-format/fourmolu-all.yaml:fourmolu-all.yaml"; do src=$${cfg%%:*}; dst=$${cfg##*:}; install -m 0644 "$$src" "${BINDIR}/$$dst"; done
 	@for f in ${TESTS_FORMAT_SCRIPTS}; do base=$${f##*/}; name=$${base%.sh}; printf '%s Installing %s -> %s\n' "${INFO}" "$$f" "${BINDIR}/$$name"; install -m 0755 "$$f" "${BINDIR}/$$name"; done
 	@echo "${INFO} Tests/Format helpers installed"
 
@@ -158,4 +159,4 @@ check-permissions:
 	@/bin/sh tests-format/fix-permissions.sh --check .
 
 help:
-	@printf "Usage: make [target]\n\nTargets:\n  all                      Install all helper sets\n  install-debian           Install Debian helper scripts into ${BINDIR}\n  install-openbsd          Install OpenBSD helper scripts into ${BINDIR}\n  install-secureblue       Install secureblue helper scripts into ${BINDIR}\n  install-shell            Install SecureBlue Bash shell helpers\n  install-shell-bash       Install shell aliases into ${BASH_CONF_DST_DIR} (with chattr -i/+i)\n  install-shell-openbsd    Guidance for installing shell helpers on OpenBSD\n  install-perl             Install perl helper scripts into ${BINDIR}\n  install-tests-format     Install tests-format helper scripts into ${BINDIR}\n  test                     Run validation tests (never modifies files)\n  fix-permissions          Correct file modes from file(1) content\n  check-permissions        Report wrong file modes (read-only, rc != 0)\n  clean                    No-op clean target\n  help                     Show this help\n"
+	@printf "Usage: make [target]\n\nTargets:\n  all                      Install the OS-independent helpers (Perl and tests/format)\n  install-debian           Install Debian helper scripts into ${BINDIR}\n  install-openbsd          Install OpenBSD helper scripts into ${BINDIR}\n  install-secureblue       Install secureblue helper scripts into ${BINDIR}\n  install-shell            Install SecureBlue Bash shell helpers\n  install-shell-bash       Install shell aliases into ${BASH_CONF_DST_DIR} (with chattr -i/+i)\n  install-shell-openbsd    Guidance for installing shell helpers on OpenBSD\n  install-perl             Install perl helper scripts into ${BINDIR}\n  install-tests-format     Install tests-format helper scripts into ${BINDIR}\n  test                     Run validation tests (formatters may rewrite formatting)\n  test-validate            Run only the validators (may format with installed tools)\n  test-regression          Run only the regression tests\n  fix-permissions          Correct file modes from file(1) content\n  check-permissions        Report wrong file modes (read-only, rc != 0)\n  clean                    No-op clean target\n  help                     Show this help\n"

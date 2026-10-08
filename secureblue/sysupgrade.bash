@@ -306,6 +306,12 @@ ensure_root() {
 
 	if require_cmd --check run0; then
 		log "Re-executing this script via run0 to gain root privileges..."
+		# run0 runs from a fresh service manager environment; forward the
+		# documented SYSUPGRADE_USER configuration explicitly.
+		if [[ -n ${SYSUPGRADE_USER:-} ]]; then
+			exec run0 --setenv=SYSUPGRADE_USER="$SYSUPGRADE_USER" \
+				-- "$SCRIPT_PATH" "$@"
+		fi
 		exec run0 -- "$SCRIPT_PATH" "$@"
 	else
 		error "This script must be run as root and" \
@@ -739,6 +745,7 @@ run_security_audit() {
 		local lynis_rc=0
 		lynis audit system --quiet \
 			2>&1 | tee "$audit_log" || lynis_rc=$?
+		chmod 0600 "$audit_log" 2>/dev/null || true
 		if [[ $lynis_rc -eq 0 ]]; then
 			log "Lynis security audit completed."
 		else
@@ -876,6 +883,7 @@ collect_system_info() {
 			printf 'df not available.\n'
 		fi
 	} 2>&1 | tee "$info_log"
+	chmod 0600 "$info_log" 2>/dev/null || true
 
 	log "Secureblue information saved to ${info_log}"
 }
@@ -903,9 +911,10 @@ run_optional_phases() {
 }
 
 bootstrap() {
-	ensure_root "$@"
+	# Parse arguments first so --help works without root/run0.
 	parse_args "$@"
-	require_cmd awk getent stat journalctl systemctl
+	ensure_root "$@"
+	require_cmd awk getent journalctl systemctl
 	validate_nonroot_user
 }
 

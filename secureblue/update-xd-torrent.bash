@@ -221,23 +221,14 @@ clone_or_update_repo() {
 build_and_install_XD() {
 	log "Building XD..."
 	run_build make
-	# Adjust Makefile installation prefix:
-	# change $(PREFIX)/bin -> $(PREFIX)/local/bin
-	if [ -f Makefile ]; then
-		log "Patching Makefile install path..."
-		# Match (PREFIX)/bin without the leading '$' so the
-		# single-quoted sed expression passes shellcheck (SC2016).
-		sed -i \
-			's|(PREFIX)/bin|(PREFIX)/local/bin|g' \
-			Makefile || true
-	fi
 	log "Installing XD using 'make install'..."
-	# The install target may also compile prerequisites. Apply the
-	# allocator wrapper after elevation so run0 cannot clear it.
+	# Install to /usr/local/bin by setting PREFIX (the upstream Makefile
+	# uses $(PREFIX)/bin); do not mutate the tracked Makefile, which would
+	# block a later `git checkout tags/<new>`.
 	if command -v with-standard-malloc >/dev/null 2>&1; then
-		run_root with-standard-malloc make install PREFIX=/usr
+		run_root with-standard-malloc make install PREFIX=/usr/local
 	else
-		run_root env -u LD_PRELOAD make install PREFIX=/usr
+		run_root env -u LD_PRELOAD make install PREFIX=/usr/local
 	fi
 	log "XD installed successfully."
 }
@@ -257,6 +248,10 @@ install_user_service() {
 
 	log "Installing xd.service to user unit directory..."
 	install -m 0640 "$SERVICE_SRC" "$unit_dst"
+	# Match the data directory resolved above (honors XDG_DATA_HOME).
+	sed -i \
+		-e "s#%h/.local/share/XD#${data_dir}#g" \
+		"$unit_dst"
 
 	log "Stopping xd.service if it is running..."
 	if systemctl --user is-active --quiet xd.service; then
@@ -309,7 +304,7 @@ check_prereqs() {
 }
 
 build_if_needed() {
-	if [ "$SKIP_BUILD" -eq 1 ]; then
+	if [ "$SKIP_BUILD" -eq 1 ] && [ -x /usr/local/bin/XD ]; then
 		log "No build required. Continuing with user service setup."
 	else
 		build_and_install_XD

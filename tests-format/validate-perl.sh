@@ -32,11 +32,15 @@ require_cmd() {
 run_validate_perl() {
 
 	ROOT_DIR=${1:-.}
+	[ "$#" -le 1 ] || usage
 	[ "${ROOT_DIR#-}" = "$ROOT_DIR" ] || usage
 	[ -d "$ROOT_DIR" ] || {
 		printf '%s\n' "[ERROR] ROOT_DIR is not a directory: $ROOT_DIR" >&2
 		exit 2
 	}
+	# Normalize so the "$ROOT_DIR/.git" prune patterns below match find's
+	# output even for "./" or trailing-slash roots.
+	ROOT_DIR=$(CDPATH='' cd "$ROOT_DIR" && pwd -P)
 
 	OS_NAME=$(uname -s 2>/dev/null || printf '%s' unknown)
 	if [ "$OS_NAME" = "OpenBSD" ]; then

@@ -65,6 +65,14 @@ install_arti_unit_and_config() {
 
 	log "Installing arti.service to user unit directory..."
 	install -m 0640 "$SERVICE_SRC" "$SYSTEMD_USER_DIR/arti.service"
+	# Substitute the resolved XDG paths so the unit matches the directories
+	# created below (which honor XDG_*_HOME overrides).
+	sed -i \
+		-e "s#%h/.config/arti#${CONFIG_DIR}#g" \
+		-e "s#%h/.local/share/arti#${DATA_DIR}#g" \
+		-e "s#%h/.local/state/arti#${STATE_DIR}#g" \
+		-e "s#%h/.cache/arti#${CACHE_DIR}#g" \
+		"$SYSTEMD_USER_DIR/arti.service"
 
 	log "Creating arti directories (config/data/state/cache)..."
 	install -d -m 0750 "$CONFIG_DIR" "$DATA_DIR" "$STATE_DIR" "$CACHE_DIR"
@@ -106,6 +114,9 @@ maybe_install_bridge_service() {
 			log "Detected socat; installing" \
 				"arti-socks-proxy.service from ${BRIDGE_SRC}"
 			install -m 0644 "$BRIDGE_SRC" "$BRIDGE_UNIT"
+			sed -i \
+				-e "s#%h/.local/state/arti#${STATE_DIR}#g" \
+				"$BRIDGE_UNIT"
 		else
 			warn "Bridge unit template not found at" \
 				"${BRIDGE_SRC}; skipping bridge install"

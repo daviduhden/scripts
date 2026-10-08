@@ -27,9 +27,11 @@ Each directory documents its scripts, requirements, and usage:
 
 ## Installation
 
-Targets are system-specific. `make all` installs the POSIX helper sets (Debian,
-OpenBSD, SecureBlue, Perl and tests/format) but not the interactive shell
-helpers. Adjust `PREFIX`/`BINDIR` if you need a different path (defaults to
+Targets are system-specific. Install the set for your host with
+`install-debian`, `install-openbsd` or `install-secureblue`; `make all`
+installs only the OS-independent helpers (Perl and tests/format), because the
+OS-specific sets share installed command names and cannot coexist in one
+`BINDIR`. Adjust `PREFIX`/`BINDIR` if you need a different path (defaults to
 `/usr/local/bin`).
 
 ```
@@ -62,9 +64,10 @@ Recipes use `install(1)` and strip `.pl`/`.bash`/`.ksh`/`.sh` when placing shell
 On Windows 10 and Windows 11, `windows\install-windows.bat` is a single per-user entry
 point for every public Perl program listed in `perl/programs.txt` (currently
 `normalize-files` and `ssh-menu`) and every PowerShell script in `windows/`
-and the formatter `windows/test-format/psfmt.ps1` (installed as `psfmt`). It never requires administrator rights for
-its own steps, never touches the system PATH, and never downloads arbitrary
-binaries.
+and the formatter `windows/test-format/psfmt.ps1` (installed as `psfmt`). Its
+own steps never require administrator rights, it never touches the system PATH
+and never downloads arbitrary binaries; installing Strawberry Perl through
+winget uses the vendor MSI and may prompt for elevation.
 
 ```
 git clone <repository>
@@ -213,7 +216,7 @@ A shebang (`#!`) is used as an additional signal for files that `file(1)` classi
 - `make fix-permissions` (or `tests-format/fix-permissions.sh`): applies the policy above to the whole tree. `-n`/`--dry-run` shows what would change; `-v`/`--verbose` shows every decision; after fixing, the mode changes visible to git are shown with `git diff --summary`.
 - `make check-permissions` (or `fix-permissions.sh --check`): read-only; exits 1 when any file has incorrect permissions.
 
-Excluded from processing: `.git/` and all git-internal metadata, symlinks (never followed, never chmod'ed), sockets, FIFOs, devices and other special files. setuid/setgid/sticky bits on files are preserved. On filesystems that do not store the executable bit (or with `core.fileMode=false`), git cannot detect the mode changes; the script warns about this.
+Excluded from processing: `.git/` and all git-internal metadata, symlinks (never followed, never chmod'ed), sockets, FIFOs, devices and other special files. setuid/setgid/sticky bits on files are preserved. On filesystems that do not store the executable bit, git cannot detect mode changes (the script cannot detect this itself); inside a Git work tree, `fix-permissions.sh` warns when `core.fileMode` is `false`.
 
 ## Correctness auditing
 

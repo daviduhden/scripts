@@ -57,6 +57,7 @@ $script:CodexExe        = Join-Path $script:CodexBin 'codex.exe'
 $script:OpenCodeMetaUrl = 'https://opencode.ai/update/api/latest/cli/npm'
 $script:CodexLatestApi  = 'https://api.github.com/repos/openai/codex/releases/latest'
 $script:PathChanged     = $false
+$script:HadError        = $false
 $script:ManagedDirs     = @()
 
 # ---------------------------------------------------------------------------
@@ -679,17 +680,17 @@ $doBun = $Target -in @('All', 'Bun')
 
 if ($doBun) {
     try { Install-Bun }
-    catch { Write-Fail "Bun: $($_.Exception.Message)" }
+    catch { Write-Fail "Bun: $($_.Exception.Message)"; $script:HadError = $true }
 }
 
 if ($doOpenCode) {
     try { Install-OpenCode -Version $OpenCodeVersion }
-    catch { Write-Fail "OpenCode: $($_.Exception.Message)" }
+    catch { Write-Fail "OpenCode: $($_.Exception.Message)"; $script:HadError = $true }
 }
 
 if ($doCodex) {
     try { Install-Codex -Version $CodexVersion }
-    catch { Write-Fail "Codex: $($_.Exception.Message)" }
+    catch { Write-Fail "Codex: $($_.Exception.Message)"; $script:HadError = $true }
 }
 
 if ($RemoveWinget -and -not $Check) {
@@ -708,7 +709,7 @@ foreach ($cli in @(
     try {
         if ($cli.Name -eq 'bun') { $cli.ExePath = Find-BunExe }
         Repair-CliEnvironment -Name $cli.Name -ExePath $cli.ExePath -DefaultArgument $cli.DefaultArgument
-    } catch { Write-Fail "$($cli.Name): environment setup failed: $($_.Exception.Message)" }
+    } catch { Write-Fail "$($cli.Name): environment setup failed: $($_.Exception.Message)"; $script:HadError = $true }
 }
 
 if ($doOpenCode) {
@@ -722,3 +723,5 @@ if ($doCodex) {
 if ($script:PathChanged) {
     Write-Warn 'The user PATH changed. Open a new PowerShell window to use it.'
 }
+
+if ($script:HadError) { exit 1 }

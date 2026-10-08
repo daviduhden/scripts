@@ -157,7 +157,7 @@ ensure_rust() {
 		exit 1
 	fi
 	local rustup_script
-	rustup_script="$(mktemp rustup-init.XXXXXX.sh)"
+	rustup_script="$(mktemp "${TMPDIR:-/tmp}/rustup-init.XXXXXX.sh")"
 	TMP_FILES+=("$rustup_script")
 	log "Downloading rustup installer..."
 	curl --proto '=https' --tlsv1.2 -sSf \
@@ -375,7 +375,8 @@ install_or_update_arti() {
 		updated=1
 	else
 		latest_ver="${latest_tag#arti-v}"
-		if [[ $installed == "$latest_ver" ]]; then
+		if [[ $installed == "$latest_ver" ]] &&
+			[[ -x /usr/local/bin/arti ]]; then
 			log "arti is already at the latest" \
 				"version ($installed," \
 				"tag $latest_tag). Skipping" \
@@ -429,7 +430,8 @@ install_or_update_oniux() {
 		updated=1
 	else
 		latest_ver="${latest_tag#v}"
-		if [[ $installed == "$latest_ver" ]]; then
+		if [[ $installed == "$latest_ver" ]] &&
+			[[ -x /usr/local/bin/oniux ]]; then
 			log "oniux is already at the latest" \
 				"version ($installed," \
 				"tag $latest_tag). Skipping" \

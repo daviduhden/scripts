@@ -61,7 +61,7 @@ install_build_deps() {
 	local missing=()
 	local pkg
 
-	for pkg in git clang libbsd-dev; do
+	for pkg in git clang make libbsd-dev; do
 		if ! dpkg -s "$pkg" >/dev/null 2>&1; then
 			missing+=("$pkg")
 		fi

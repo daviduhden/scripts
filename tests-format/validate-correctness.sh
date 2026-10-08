@@ -200,9 +200,9 @@ function check(line, raw) {
         emit(gsev(), NR, "head -c is GNU-only", "GNU head(1); OpenBSD head(1)", "Use dd bs=N count=1 or head -n")
     if (line ~ /(^|[[:space:];|&()])tail[[:space:]]+--bytes([[:space:]]|$)/)
         emit(gsev(), NR, "tail --bytes is GNU-only", "GNU tail(1)", "Use portable short options")
-    if (line ~ /(^|[[:space:];|&()])install[[:space:]]+--[a-z-]+/)
+    if (line ~ /(^|[;|&(])[[:space:]]*((sudo|doas|command)[[:space:]]+)*install[[:space:]]+--[a-z-]+/)
         emit(gsev(), NR, "install long options are GNU-only", "GNU install(1); OpenBSD install(1)", "Use -m, -d, -o, -g short options")
-    if (line ~ /(^|[[:space:];|&()])cp[[:space:]]+--[a-z-]+/)
+    if (line ~ /(^|[;|&(])[[:space:]]*((sudo|doas|command)[[:space:]]+)*cp[[:space:]]+--[a-z-]+/)
         emit(gsev(), NR, "cp long options are GNU-only", "GNU cp(1); OpenBSD cp(1)", "Use short options (-a, -R, -p, ...)")
     # mktemp without a template is GNU-only. Handle the common
     # case where the template sits on a continuation line.
@@ -213,7 +213,7 @@ function check(line, raw) {
             mktemp_pending = 0
         }
     }
-    if (line ~ /(^|[;|&(])mktemp([[:space:]]|$)/ && raw !~ /XXXX/) {
+    if (!cont && line ~ /(^|[;|&(])mktemp([[:space:]]|[);|&]|$)/ && raw !~ /XXXX/) {
         if (line ~ /\\[[:space:]]*$/) mktemp_pending = NR
         else
             emit(gsev(), NR, "mktemp without a template is GNU-only", "GNU mktemp(1); OpenBSD mktemp(1)", "Always pass a template ending in XXXXXX")
@@ -329,6 +329,8 @@ function check(line, raw) {
         }
         next
     }
+    cont = prev_cont
+    prev_cont = 0
     raw = $0
     masked = $0
     if (masked ~ /^[[:space:]]*#/) next
@@ -341,6 +343,9 @@ function check(line, raw) {
     check(masked, raw)
     prev_pipe = 0
     if (masked ~ /\|[[:space:]]*$/) prev_pipe = 1
+    # A trailing backslash means the next physical line continues this
+    # logical line; do not treat its arguments as new commands.
+    prev_cont = (masked ~ /\\[[:space:]]*$/) ? 1 : 0
     # Track here-document bodies: they are skipped entirely
     # (they are generated code or config, not shell to audit).
     if ($0 ~ /<<-?[[:space:]]*['"]?[A-Za-z_][A-Za-z0-9_]*['"]?/) {

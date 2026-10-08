@@ -81,6 +81,11 @@ fetch_source() {
 	local tag="$1" dest="$2" src_dir=""
 	mkdir -p "$dest"
 
+	# A previous run may have left a checkout behind; git clone refuses an
+	# existing non-empty destination, and a stale tree could otherwise be
+	# picked up by the tarball fallback.
+	rm -rf "$dest/btop"
+
 	log "Cloning btop tag ${tag} with git..."
 	if git clone --depth 1 --branch "$tag" "$REPO_URL" "$dest/btop"; then
 		src_dir="$dest/btop"
@@ -95,10 +100,16 @@ fetch_source() {
 	log "Git clone failed, downloading tarball ${tarball_url}..."
 	curl -fLsS --retry 5 "$tarball_url" -o "$tarball"
 	tar -xzf "$tarball" -C "$dest"
-	# sed reads the whole stream; `| head -n1` would exit early
-	# and make find die of SIGPIPE (141 under pipefail).
-	src_dir="$(find "$dest" -maxdepth 1 -type d -name 'btop*' |
-		sed -n '1p')"
+	# GitHub tarballs unpack to <name>-<tag without leading v>.
+	local extracted="$dest/btop-${tag#v}"
+	if [ -d "$extracted" ]; then
+		src_dir="$extracted"
+	else
+		# sed reads the whole stream; `| head -n1` would exit early
+		# and make find die of SIGPIPE (141 under pipefail).
+		src_dir="$(find "$dest" -maxdepth 1 -type d -name 'btop*' |
+			sed -n '1p')"
+	fi
 	[[ -n $src_dir ]] && printf '%s\n' "$src_dir"
 }
 

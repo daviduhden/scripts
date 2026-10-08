@@ -107,6 +107,7 @@ stage_from_source() {
 			--exclude=".git" \
 			--exclude=".github" \
 			--exclude=".gitattributes" \
+			--exclude=".sync.lock" \
 			"$srcdir"/ "$WWW_DIR"/; then
 			return 1
 		fi
@@ -116,6 +117,7 @@ stage_from_source() {
 			! -name ".git" \
 			! -name ".github" \
 			! -name ".gitattributes" \
+			! -name ".sync.lock" \
 			-exec rm -rf {} +; then
 			return 1
 		fi

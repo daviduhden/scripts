@@ -580,7 +580,7 @@ sub emit_error {
     my ($line) = @_;
     $line = '' unless defined $line;
     push @LOG, $line;
-    print STDERR "normalize-files: $line\n" unless $CFG && $CFG->{quiet};
+    print STDERR "normalize-files: $line\n";
     return;
 }
 
@@ -1032,6 +1032,10 @@ sub looks_text {
     my ($b) = @_;
     return 1 if $b =~ /^\xEF\xBB\xBF/;
     return 1 if $b =~ /^\xFF\xFE/ || $b =~ /^\xFE\xFF/;
+
+    # UTF-32 BOMs contain NUL bytes; recognize them before the NUL test
+    # so detect_encoding() can report them consistently with UTF-32LE.
+    return 1 if $b =~ /^\x00\x00\xFE\xFF/ || $b =~ /^\xFF\xFE\x00\x00/;
     return 0 if $b =~ /\x00/;
     my $len = length $b;
     return 1 if $len == 0;
@@ -1570,7 +1574,7 @@ sub process_content {
         if ( !$certain ) {
             $R->{ambiguous}++;
             $R->{warnings}++;
-            $R->{interventions}++ if $cfg->{want}{encoding};
+            $R->{interventions}++;
             my $hint =
               $enc eq 'ambiguous-cp1252'
               ? 'possibly Windows-1252/CP-125x'
@@ -2098,7 +2102,8 @@ a space or a dot, or a Windows reserved name.
   "Solución recuperación programación.txt" -> "solucion-recuperacion-programacion.txt"
   "Tema 9- POO Avanzada(4).pdf" -> "tema-9-poo-avanzada-4.pdf"
 
-Non-UTF-8 file names on Unix are reported and left unrenamed.
+Non-UTF-8 file names on Unix are left unrenamed; they are noted under
+C<--verbose> when content processing runs.
 
 =head1 ENCODING POLICY
 
@@ -2122,8 +2127,8 @@ dominates the default. Files classified as binary are never rewritten.
 
 =item * Dry-run by default; only C<--apply> writes.
 
-=item * No overwrites: collisions are detected before any change and the
-involved renames are skipped.
+=item * No overwrites: rename collisions are detected and the involved renames
+are skipped (content changes may still have been applied beforehand).
 
 =item * Case-only renames and rename cycles are handled with unique temporary
 names inside the same directory.

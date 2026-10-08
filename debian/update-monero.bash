@@ -438,7 +438,7 @@ configure_monero_privacy_transports() {
 			"$TOR_CONF_FILE"; then
 			log "Adding monero-lws to the" \
 				"existing Monero onion service..."
-			sed -i \
+			sed -i -E \
 				"/${key_line_8443}/a HiddenServicePort 8443 127.0.0.1:8443" \
 				"$TOR_CONF_FILE"
 		fi
@@ -447,7 +447,7 @@ configure_monero_privacy_transports() {
 			"$TOR_CONF_FILE"; then
 			log "Adding monerod restricted RPC" \
 				"to the existing Monero onion service..."
-			sed -i \
+			sed -i -E \
 				"/${key_line_18081}/a HiddenServicePort 18081 127.0.0.1:18081" \
 				"$TOR_CONF_FILE"
 		fi
@@ -584,12 +584,10 @@ install_or_update_lws() {
 	lws_tmp="$(mktemp -d \
 		/tmp/monero-lws-src-XXXXXX)"
 	lws_build="${lws_tmp}/build"
+	# The EXIT trap installed in run_update (cleanup) already removes
+	# ${LWS_TMP:-}; do not replace it here or the monerod restore logic is
+	# lost for the rest of the run.
 	LWS_TMP="$lws_tmp"
-
-	trap 'rm -rf "${TMPDIR:-}" \
-		"${GPG_HOME:-}" \
-		"${LWS_TMP:-}" \
-		2>/dev/null || true' EXIT
 
 	log "Cloning monero-lws (${lws_tag})..."
 	if ! git clone --depth 1 \
@@ -737,7 +735,7 @@ run_update() {
 	GPG_HOME="$(mktemp -d /tmp/monero-gpg-XXXXXX)"
 	cleanup() {
 		rm -rf "$TMPDIR" "$GPG_HOME" \
-			2>/dev/null || true
+			"${LWS_TMP:-}" 2>/dev/null || true
 		# If this run stopped a running monerod and a later
 		# step failed before the restart below, bring the
 		# node back up instead of leaving it down.

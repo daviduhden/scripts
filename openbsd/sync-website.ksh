@@ -115,6 +115,7 @@ stage_from_source() {
 			--exclude=".git" \
 			--exclude=".github" \
 			--exclude=".gitattributes" \
+			--exclude=".sync.lock" \
 			"$srcdir"/ "$WWW_DIR"/; then
 			return 1
 		fi
@@ -123,6 +124,7 @@ stage_from_source() {
 			! -name ".git" \
 			! -name ".github" \
 			! -name ".gitattributes" \
+			! -name ".sync.lock" \
 			-exec rm -rf {} +; then
 			return 1
 		fi
@@ -261,11 +263,21 @@ sync_with_github_zip() {
 			rm -rf "$tmpdir"
 			return 1
 		fi
-	else
+	elif command -v wget >/dev/null 2>&1; then
 		if ! wget -qO "$zipfile" "$ZIP_URL"; then
 			rm -rf "$tmpdir"
 			return 1
 		fi
+	elif command -v ftp >/dev/null 2>&1; then
+		# On stock OpenBSD the base HTTP client is ftp(1).
+		if ! ftp -o "$zipfile" "$ZIP_URL"; then
+			rm -rf "$tmpdir"
+			return 1
+		fi
+	else
+		error "no downloader found (curl, wget or ftp)."
+		rm -rf "$tmpdir"
+		return 1
 	fi
 
 	unpack_dir="$tmpdir/unpacked"

@@ -38,6 +38,7 @@ require_cmd() {
 run_clang_tidy_all() {
 
 	ROOT_DIR=${1:-.}
+	[ "$#" -le 1 ] || usage
 	[ "${ROOT_DIR#-}" = "$ROOT_DIR" ] || usage
 	[ -d "$ROOT_DIR" ] || {
 		printf '%s\n' "[ERROR] ROOT_DIR is not a directory: $ROOT_DIR" >&2

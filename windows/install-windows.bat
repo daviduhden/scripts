@@ -11,8 +11,10 @@ rem   * Copies the public programs listed in perl\programs.txt and creates
 rem     <install>\bin\<program>.cmd launchers from windows\launcher.cmd.
 rem   * Adds <install>\bin to the *user* PATH (HKCU\Environment) only, in an
 rem     idempotent way. The system PATH is never touched.
-rem   * Never requires administrator rights for the steps it performs, never
-rem     downloads arbitrary binaries, never disables security features.
+rem   * No step requires administrator rights for its own setup (per-user files
+rem     and HKCU\Environment only); installing Strawberry Perl through winget
+rem     uses the vendor MSI and may prompt for elevation. Never downloads
+rem     arbitrary binaries, never disables security features.
 rem
 rem Usage: install-windows.bat [--dry-run] [--no-path] [--install-dir PATH]
 rem                            [--help]
@@ -86,6 +88,8 @@ if defined LOCALAPPDATA set "OPT_INSTALL_DIR=%LOCALAPPDATA%\Programs\%PROJECT%"
 if not defined OPT_INSTALL_DIR set "OPT_INSTALL_DIR=%USERPROFILE%\Programs\%PROJECT%"
 :install_dir_ready
 set "INSTALL_DIR=%OPT_INSTALL_DIR%"
+rem Canonicalize so a relative --install-dir is not stored verbatim in PATH.
+for %%I in ("%INSTALL_DIR%") do set "INSTALL_DIR=%%~fI"
 call :warn_if_system_dir "%INSTALL_DIR%"
 
 rem --------------------------------------------------------------------

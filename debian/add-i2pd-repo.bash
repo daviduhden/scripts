@@ -107,10 +107,9 @@ validate_supported_base() {
 }
 
 compute_repo_release() {
+	# The Purple I2P raspbian repository uses the plain Debian codename
+	# (bookworm/trixie), not a "-rpi" suffix.
 	REPO_RELEASE="$RELEASE"
-	if [[ $DIST == "raspbian" ]]; then
-		REPO_RELEASE="${RELEASE}-rpi"
-	fi
 }
 
 log_detected_platform() {

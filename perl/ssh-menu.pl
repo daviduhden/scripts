@@ -228,7 +228,7 @@ sub write_freq_file {
 
 sub write_last_user_file {
     my ($last_ref) = @_;
-    return unless defined $last_ref && %{$last_ref};
+    return unless defined $last_ref;
 
     my $dir = parent_dir($last_user_file);
     make_path($dir) if defined $dir && length $dir;
@@ -371,8 +371,11 @@ sub parse_known_hosts {
         # trust/revocations, not connectable hosts; skip them.
         next if $line =~ /^\s*@/;
 
-        my ($field) = split /\s+/, $line, 2;
+        my ( $field, $rest ) = split ' ', $line, 2;
         next unless defined $field && length $field;
+
+        # Require a key type (a bare host token is not a valid entry).
+        next unless defined $rest && $rest =~ /\S/;
 
         my @parts =
           grep { defined $_ && length $_ && $_ !~ /^\s*#/ && $_ !~ /^\s*\|/ }
@@ -381,8 +384,12 @@ sub parse_known_hosts {
         next unless @parts;
 
         my $primary = $parts[0];
-        my $host    = $primary;
-        my $port    = '';
+
+        # Host patterns (wildcards) and negations are not connectable hosts.
+        next if $primary =~ /^!/ || $primary =~ /[*?]/;
+
+        my $host = $primary;
+        my $port = '';
 
         if ( $host =~ /^\[(.+)\]:(\d+)$/ ) {
             $host = $1;
@@ -468,6 +475,16 @@ sub sort_entries {
     }
 }
 
+# Reload state and re-read known_hosts. Used at startup and after a mutating
+# menu action so the menu never offers stale/removed hosts.
+sub refresh_entries {
+    load_state_from_disk();
+    parse_known_hosts();
+    ensure_entries_present();
+    prune_stale_data();
+    sort_entries();
+}
+
 ###################
 # 4. Menu actions #
 ###################
@@ -513,7 +530,7 @@ sub add_alias_menu {
 
         $alias{$key} = $alias_val;
         write_alias_file( \%alias );
-        logi('Alias saved. Re-run ssh-menu to refresh the list.');
+        logi('Alias saved. List refreshed.');
         return;
     }
 }
@@ -535,23 +552,33 @@ sub remove_known_host_entry {
     }
     while ( my $line = <$fh> ) {
         my $probe = $line;
+        my ($eol) = $probe =~ /(\r?\n)\z/;
         $probe =~ s/\r?\n\z//;
         my $matches = 0;
+        my $rewrite;
         if ( $probe !~ /^\s*(?:#|\||@)/ && $probe =~ /\S/ ) {
-            my ($field) = split /\s+/, $probe, 2;
-            if ( defined $field && length $field ) {
-                for my $cand ( split /,/, $field ) {
+            my ( $field, $rest ) = split ' ', $probe, 2;
+            if ( defined $field && length $field && defined $rest ) {
+                my @remain;
+                for my $cand ( split /,/, $field, -1 ) {
                     my ( $h, $p ) = ( $cand, '' );
                     if ( $h =~ /^\[(.+)\]:(\d+)$/ ) { $h = $1; $p = $2; }
                     if ( $h eq $host && $p eq $port ) {
                         $matches = 1;
-                        last;
+                        next;
                     }
+                    push @remain, $cand;
+                }
+
+                # Keep the line (and its key) when other names remain.
+                if ( $matches && @remain ) {
+                    $rewrite = join( ',', @remain ) . ' ' . $rest;
+                    $rewrite .= $eol if defined $eol;
                 }
             }
         }
-        if ($matches) { $removed++; next; }
-        push @kept, $line;
+        if ($matches) { $removed++; next unless defined $rewrite; }
+        push @kept, defined $rewrite ? $rewrite : $line;
     }
     close $fh;
 
@@ -625,26 +652,26 @@ sub manage_known_hosts_menu {
         else {
             logw("No matching line found for $host in $known_hosts.");
         }
-        logi('Re-run ssh-menu to refresh the list.');
+        logi('List refreshed.');
         return;
     }
 }
 
-sub select_entry_menu {
-
-    # Returns the selected entry index after handling menu actions.
+sub print_entry_menu {
     logi("Select a server to connect to:");
     print "\n";
     for my $i ( 0 .. $#entries ) {
         printf "  %2d) %s\n", $i + 1, $entries[$i]{display};
     }
-    printf "  %2d)"
-      . " Manage known_hosts (delete)\n",
-      scalar(@entries) + 1;
-    printf "  %2d)"
-      . " Add custom name (alias)\n",
-      scalar(@entries) + 2;
-    printf "  %2d) Quit\n\n", scalar(@entries) + 3;
+    printf "  %2d) Manage known_hosts (delete)\n", scalar(@entries) + 1;
+    printf "  %2d) Add custom name (alias)\n",     scalar(@entries) + 2;
+    printf "  %2d) Quit\n\n",                      scalar(@entries) + 3;
+}
+
+sub select_entry_menu {
+
+    # Returns the selected entry index after handling menu actions.
+    print_entry_menu();
 
     my $selected_idx;
     while (1) {
@@ -668,11 +695,15 @@ sub select_entry_menu {
 
         if ( $num == scalar(@entries) + 1 ) {
             manage_known_hosts_menu();
+            refresh_entries();
+            print_entry_menu();
             next;
         }
 
         if ( $num == scalar(@entries) + 2 ) {
             add_alias_menu();
+            refresh_entries();
+            print_entry_menu();
             next;
         }
 
@@ -721,10 +752,6 @@ sub question_ssh_user {
         }
     }
 
-    if ( $ssh_user =~ /^\s+$/ ) {
-        die_tool("Empty user. Aborting.");
-    }
-
     $last_user{$selected_key} = $ssh_user;
     write_last_user_file( \%last_user );
 
@@ -734,6 +761,12 @@ sub question_ssh_user {
 sub build_ssh_command {
     my ( $ssh_path, $ssh_user, $selected_host, $selected_port ) = @_;
     my @cmd;
+
+    # The user name is inserted into the ssh destination; reject anything
+    # that could be parsed as an ssh option (for example "-oProxyCommand=...").
+    if ( !defined $ssh_user || $ssh_user !~ /\A[A-Za-z0-9._-]+\z/ ) {
+        die_tool("Invalid SSH user name: '$ssh_user'.");
+    }
 
     if ($selected_port) {
         logi(   "Connecting to $ssh_user\@$selected_host"
@@ -783,15 +816,8 @@ sub main {
     setup_ssh_askpass();
     setup_openbsd_sandbox();
 
-    load_state_from_disk();
-    parse_known_hosts();
-
-    # Validate before pruning: with an empty (for example all-hashed) host
-    # list, pruning would delete all saved aliases/frequencies and then
-    # ensure_entries_present() would abort, losing the state permanently.
-    ensure_entries_present();
-    prune_stale_data();
-    sort_entries();
+    # Loads state, parses known_hosts, validates before pruning, then sorts.
+    refresh_entries();
 
     logw("Skipped $hashed_count hashed known_hosts entries.")
       if $hashed_count > 0;
@@ -908,7 +934,8 @@ The menu lists numbered hosts followed by three action entries:
   N+2) Add custom name (alias)
   N+3) Quit
 
-Entering a number selects that server. Entering C<q> quits at any prompt.
+Entering a number selects that server. Entering C<q> at a selection prompt
+quits; the SSH-user and alias text prompts treat it as literal input.
 Deleting an entry asks for confirmation (C<y>) and rewrites the
 F<known_hosts> file atomically, preserving its permissions and keeping
 comments, markers and hashed lines.

@@ -34,9 +34,9 @@ From PowerShell, check AI CLI versions without installing updates:
 ```
 
 Other updater parameters are `-Target All|Codex|OpenCode|Bun`,
-`-OpenCodeVersion`, `-CodexVersion`, `-Force`, and `-RemoveWinget`. The last
-option explicitly removes winget CLI packages after installation. Bun uses
-winget; Codex and OpenCode use upstream downloads.
+`-OpenCodeVersion`, `-CodexVersion`, `-Force`, `-Check`, and `-RemoveWinget`.
+The last option explicitly removes winget CLI packages after installation. Bun
+uses winget; Codex and OpenCode use upstream downloads.
 
 Run history cleanup in the intended user's session. `SWIVAL_PROJECT_HOME`
 selects the project whose `.swival` state is removed; it defaults to the working

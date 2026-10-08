@@ -155,7 +155,7 @@ run_download_and_convert() {
 	output="${sanitized_title%.*}.ogg"
 
 	log "Converting to OGG Vorbis..."
-	ffmpeg -i "$input" -c:a vorbis -q:a 6 -strict -2 "$output"
+	ffmpeg -y -i "$input" -c:a vorbis -q:a 6 -strict -2 "$output"
 
 	log "File saved as $output"
 }

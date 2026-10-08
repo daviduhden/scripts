@@ -134,7 +134,7 @@ function Test-PsfmtExcluded {
     $normalized = $Path.Replace('\', '/')
     $relative = [IO.Path]::GetRelativePath($BasePath, $Path).Replace('\', '/')
     $name = [IO.Path]::GetFileName($Path)
-    $parent = [string] [IO.Path]::GetDirectoryName($Path)
+    $parent = [string] [IO.Path]::GetDirectoryName($relative)
     $ignored = @('.git', '.svn', '.hg', 'node_modules', 'bin', 'obj', 'vendor')
     if (([IO.Directory]::Exists($Path) -and $name -in $ignored) -or
         @($parent.Replace('\', '/').Split('/') | Where-Object { $_ -in $ignored }).Count -gt 0) { return $true }
