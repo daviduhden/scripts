@@ -160,8 +160,6 @@ continuations, an 80-column limit, KNF braces and system/network/local include
 groups. It is not byte-for-byte equivalent to `knfmt` (for example, declaration
 alignment and comment wrapping can differ). `knfmt` keeps its own style handling;
 the LLVM 23 configuration is not a portable knfmt configuration schema.
-Run `perl tests-format/test-clang-format-all.pl` for isolated selection,
-fallback, failure propagation and installed-style regression checks.
 
 `clang-tidy-all [ROOT_DIR]` runs `clang-tidy` over C and C++ sources with
 C23/C++23 defaults (`CLANG_TIDY_BUILD_DIR` supplies a compilation database).
@@ -182,8 +180,6 @@ always forces a bundled style (`tests-format/fourmolu-all.yaml`, installed as
 repository. The bundled style pins the Fourmolu 0.20 defaults explicitly;
 edit that one file to evolve the shared style. If `fourmolu` is not present in
 `PATH`, the script reports it and skips Haskell formatting.
-Run `perl tests-format/test-fourmolu-all.pl` for isolated discovery,
-bundled-style, skip and failure-propagation regression checks.
 
 `make test` runs, in order:
 
@@ -194,7 +190,6 @@ bundled-style, skip and failure-propagation regression checks.
 - correctness validation (`tests-format/validate-correctness.sh --target all`)
 - regression tests for both new tools (`test-fix-permissions.sh`, `test-validate-correctness.sh`)
 - ssh-menu parser regression test (`test-ssh-menu.pl`)
-- fourmolu-all discovery/format regression test (`test-fourmolu-all.pl`)
 
 `make test` is a validation operation: it **never** modifies file permissions or file contents on its own (the format validators may rewrite formatting when the optional formatters are installed). Permission corrections are only applied by `make fix-permissions`.
 

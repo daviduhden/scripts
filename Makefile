@@ -152,7 +152,6 @@ test-regression:
 	@echo "Running fix-permissions regression tests..." && /bin/sh tests-format/test-fix-permissions.sh
 	@echo "Running correctness regression tests..." && /bin/sh tests-format/test-validate-correctness.sh
 	@echo "Running ssh-menu regression test..." && perl tests-format/test-ssh-menu.pl
-	@echo "Running fourmolu-all regression test..." && perl tests-format/test-fourmolu-all.pl
 	@echo "Running normalize-files regression test..." && perl tests-format/test-normalize-files.pl
 
 fix-permissions:

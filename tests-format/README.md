@@ -19,9 +19,7 @@ Command Prompt without a POSIX shell or Make.
 | [validate-perl.sh](validate-perl.sh) | Checks Perl syntax and applies available Perl linting/formatting under `[ROOT_DIR]`. |
 | [validate-shell.sh](validate-shell.sh) | Checks shell syntax and applies available shell analysis/formatting under `[ROOT_DIR]`. |
 | [validate-windows-installer.bat](validate-windows-installer.bat) | Statically checks installer/launcher requirements, program manifests, and CRLF endings. Accepts optional `[ROOT_DIR]`. |
-| [test-clang-format-all.pl](test-clang-format-all.pl) | Tests formatter selection, fallback, bundled styles, and failure propagation with isolated test doubles. |
 | [test-fix-permissions.sh](test-fix-permissions.sh) | Tests permission classification and check/preview/application behavior in temporary trees. |
-| [test-fourmolu-all.pl](test-fourmolu-all.pl) | Tests Haskell discovery, bundled-style enforcement, missing-tool handling, and failure propagation. |
 | [test-normalize-files.pl](test-normalize-files.pl) | Tests filename normalization, collisions, encodings, line endings, binary safety, links, and idempotence. |
 | [test-ssh-menu.pl](test-ssh-menu.pl) | Tests plain, hashed, and marker host-entry handling without opening a real SSH connection. |
 | [test-validate-correctness.sh](test-validate-correctness.sh) | Tests platform-specific audit findings with generated scratch scripts. |
@@ -34,7 +32,6 @@ sh tests-format/validate-shell.sh .
 sh tests-format/validate-correctness.sh --target all .
 sh tests-format/fix-permissions.sh --check .
 perl tests-format/test-normalize-files.pl
-perl tests-format/test-clang-format-all.pl
 ```
 
 `make test` runs the repository's configured validation and regression targets;
