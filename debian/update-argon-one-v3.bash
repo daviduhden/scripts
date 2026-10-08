@@ -22,7 +22,7 @@ TMP_FILES=()
 #   "question" -> ask (default in interactive mode)
 #   "yes"    -> automatically reboot
 #   "no"     -> never reboot automatically
-AUTO_REBOOT="no"
+AUTO_REBOOT="question"
 
 usage() {
 	cat <<EOF

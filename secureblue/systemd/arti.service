@@ -19,12 +19,13 @@ LimitNOFILE=16384
 # Hardening
 NoNewPrivileges=yes
 PrivateTmp=yes
-ProtectHome=yes
+ProtectHome=read-only
 ProtectSystem=full
 ReadOnlyPaths=/
 ReadWritePaths=%h/.config/arti
 ReadWritePaths=%h/.local/share/arti
 ReadWritePaths=%h/.local/state/arti
+ReadWritePaths=%h/.cache/arti
 
 [Install]
 WantedBy=default.target

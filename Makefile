@@ -64,9 +64,6 @@ TESTS_FORMAT_SCRIPTS = \
 	tests-format/fourmolu-all.sh \
 	tests-format/fix-permissions.sh \
 	tests-format/install-knfmt-linux.sh \
-	tests-format/test-fix-permissions.sh \
-	tests-format/test-ssh-menu.pl \
-	tests-format/test-validate-correctness.sh \
 	tests-format/validate-correctness.sh \
 	tests-format/validate-make.sh \
 	tests-format/validate-manpages.sh \
@@ -76,7 +73,7 @@ TESTS_FORMAT_SCRIPTS = \
 # Public Perl programs are listed in perl/programs.txt.
 PERL_PROGRAMS_MANIFEST = perl/programs.txt
 
-.PHONY: all clean install-debian install-openbsd install-secureblue install-shell install-shell-bash install-shell-bash-unlock install-shell-bash-copy install-shell-bash-lock install-shell-openbsd install-perl install-tests-format test test-validate test-regression fix-permissions check-permissions help
+.PHONY: all clean install-debian install-openbsd install-secureblue install-shell install-shell-bash install-shell-bash-unlock install-shell-bash-copy install-shell-openbsd install-perl install-tests-format test test-validate test-regression fix-permissions check-permissions help
 
 all: install-debian install-openbsd install-secureblue install-perl install-tests-format
 
@@ -106,7 +103,7 @@ install-secureblue:
 install-shell: install-shell-bash
 	@echo "${INFO} Shell helpers installed"
 
-install-shell-bash: install-shell-bash-unlock install-shell-bash-copy install-shell-bash-lock
+install-shell-bash: install-shell-bash-unlock install-shell-bash-copy
 	@echo "${INFO} Installing shell aliases for SecureBlue user '${SECUREBLUE_USER}'"
 	@echo "${INFO} SecureBlue shell aliases installed"
 

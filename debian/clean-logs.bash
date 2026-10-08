@@ -40,15 +40,22 @@ require_cmd() {
 DRY_RUN="${DRY_RUN:-0}"
 
 parse_args() {
-	case "${1:-}" in
-	--dry-run | -n)
-		DRY_RUN=1
-		warn "CLI flag detected;" \
-			"using non-default options" \
-			"instead of standard behavior."
-		shift
-		;;
-	esac
+	while [ "$#" -gt 0 ]; do
+		case "$1" in
+		--dry-run | -n)
+			DRY_RUN=1
+			warn "CLI flag detected;" \
+				"using non-default options" \
+				"instead of standard behavior."
+			shift
+			;;
+		*)
+			error "Unknown option: $1"
+			error "Try: $0 --dry-run"
+			exit 1
+			;;
+		esac
+	done
 }
 
 cleanup_gz_logs() {

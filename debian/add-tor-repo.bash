@@ -117,7 +117,7 @@ install_tor_key() {
 	key_url="https://deb.torproject.org/torproject.org"
 	key_url="${key_url}/A3C4F0F979CAA22CDBA8F512EE8CBC9E886DDD89.asc"
 	net_curl "$key_url" |
-		gpg --dearmor \
+		gpg --batch --yes --dearmor \
 			-o /usr/share/keyrings/deb.torproject.org-keyring.gpg
 }
 
@@ -373,8 +373,7 @@ enable_tor_runit() {
 	if [[ -d /etc/sv/tor &&
 		! -e /etc/service/tor ]]; then
 		mkdir -p /etc/service
-		service_action "link tor into runit" \
-			"service directory" \
+		service_action "link tor into runit service directory" \
 			ln -s /etc/sv/tor \
 			/etc/service/tor || return 1
 	fi
@@ -443,8 +442,7 @@ enable_tor_sysv() {
 			warn "Failed to restart tor via" \
 				"/etc/init.d/tor; trying start" \
 				"instead."
-			service_action "start tor via" \
-				"/etc/init.d/tor" \
+			service_action "start tor via /etc/init.d/tor" \
 				/etc/init.d/tor start ||
 				failed=1
 		fi

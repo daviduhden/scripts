@@ -432,10 +432,7 @@ update_system_image() {
 	fi
 
 	log "Updating system via rpm-ostree (non-interactive)..."
-	if ! rpm-ostree update; then
-		warn "rpm-ostree update failed."
-		phase_failed=1
-	fi
+	# 'rpm-ostree update' is an alias for 'upgrade'; run it once.
 	if ! rpm-ostree upgrade; then
 		warn "rpm-ostree upgrade failed."
 		phase_failed=1
@@ -453,18 +450,21 @@ update_system_image() {
 }
 
 cleanup_inactive_rpm_ostree_requests() {
-	local inactive_line
-	inactive_line="$(
-		rpm-ostree status --verbose 2>/dev/null |
-			awk '/InactiveRequests:/ {
-				sub(/.*InactiveRequests:[[:space:]]*/, "", $0)
-				print
-				exit
-			}'
-	)" || {
+	local inactive_line status_out
+	# Capture the full output first and let awk consume all of it, so neither
+	# rpm-ostree nor printf dies of SIGPIPE under `pipefail`.
+	if ! status_out="$(rpm-ostree status --verbose 2>/dev/null)"; then
 		warn "Could not query rpm-ostree status for inactive requests."
 		return 1
-	}
+	fi
+	inactive_line="$(
+		printf '%s\n' "$status_out" |
+			awk '/InactiveRequests:/ && !seen {
+				sub(/.*InactiveRequests:[[:space:]]*/, "", $0)
+				print
+				seen = 1
+			}'
+	)"
 
 	if [[ -z ${inactive_line:-} || ${inactive_line} == "(none)" ]]; then
 		log "No inactive rpm-ostree requests detected."
@@ -500,27 +500,25 @@ update_firmware() {
 		warn "fwupdmgr refresh failed."
 		phase_failed=1
 	fi
-	if ! fwupdmgr get-updates; then
-		local rc=$?
-		if [[ $rc -eq 2 ]]; then
-			log "No firmware updates available."
-			updates_available=0
-		else
-			warn "fwupdmgr get-updates failed" \
-				" (rc=${rc}); continuing with" \
-				" fwupdmgr update as" \
-				" authoritative step."
-		fi
+	local rc=0
+	fwupdmgr get-updates || rc=$?
+	if [[ $rc -eq 2 ]]; then
+		log "No firmware updates available."
+		updates_available=0
+	elif [[ $rc -ne 0 ]]; then
+		warn "fwupdmgr get-updates failed" \
+			" (rc=${rc}); continuing with" \
+			" fwupdmgr update as" \
+			" authoritative step."
 	fi
 	if ((updates_available == 1)); then
-		if ! fwupdmgr update -y --no-reboot-check; then
-			local rc=$?
-			if [[ $rc -eq 2 ]]; then
-				log "No firmware updates to apply."
-			else
-				warn "fwupdmgr update failed."
-				phase_failed=1
-			fi
+		rc=0
+		fwupdmgr update -y --no-reboot-check || rc=$?
+		if [[ $rc -eq 2 ]]; then
+			log "No firmware updates to apply."
+		elif [[ $rc -ne 0 ]]; then
+			warn "fwupdmgr update failed."
+			phase_failed=1
 		fi
 	else
 		log "Skipping firmware apply step because no updates are available."

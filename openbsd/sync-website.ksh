@@ -211,7 +211,7 @@ sync_with_gh_cli() {
 # Git sync #
 ############
 sync_with_git() {
-	typeset origin_url tmpdir stagedir
+	typeset origin_url="" tmpdir stagedir
 	if ! command -v git >/dev/null 2>&1; then return 1; fi
 
 	if git -C "$WWW_DIR" rev-parse --is-inside-work-tree \

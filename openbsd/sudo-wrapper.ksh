@@ -83,7 +83,7 @@ handle_visudo() {
 
 handle_sudoedit() {
 	typeset editor
-	typeset -a editor_cmd
+	typeset editor_cmd
 
 	if [ "$#" -lt 1 ]; then
 		error "Usage: sudoedit FILE..."
@@ -92,9 +92,12 @@ handle_sudoedit() {
 
 	editor="${SUDO_EDITOR:-${VISUAL:-${EDITOR:-vi}}}"
 
-	set -A editor_cmd -- "$editor"
+	# Split the editor string on whitespace so values such as
+	# "vi -u NONE" or "code --wait" work, matching the Bash wrapper.
+	# shellcheck disable=SC2086
+	set -A editor_cmd -- $editor
 
-	if [ "${#editor_cmd[@]}" -eq 0 ] || [ -z "${editor_cmd[0]:-}" ]; then
+	if [ -z "${editor_cmd[0]:-}" ]; then
 		error "sudo-wrapper error: editor is empty."
 		exit 1
 	fi

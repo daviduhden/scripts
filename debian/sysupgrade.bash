@@ -199,7 +199,9 @@ parse_args() {
 			usage
 			;;
 		*)
-			break
+			error "Unknown option: $1"
+			error "Try: $0 --help"
+			exit 1
 			;;
 		esac
 	done
@@ -338,13 +340,21 @@ run_security_audit() {
 	fi
 
 	if find /tmp -maxdepth 1 -type f \
-		\( -name 'lynis-audit-*.log' \
-		-o -name 'lynis-report-*.dat' \
-		-o -name 'systemcheck-*.log' \) \
-		-mtime +7 -print0 2>/dev/null | xargs -0r rm -f; then
-		log "Old audit logs older than 7 days removed (if any)."
+		-name 'systemcheck-*.log' \
+		-mtime +7 -print0 2>/dev/null |
+		xargs -0r rm -f; then
+		log "Old systemcheck logs older than 7 days removed (if any)."
 	else
-		warn "Failed to clean old audit logs in /tmp."
+		warn "Failed to clean old systemcheck logs in /tmp."
+	fi
+
+	if [ -d /tmp/lynis-audit ] &&
+		find /tmp/lynis-audit -type f \
+			\( -name 'lynis-*.log' -o -name 'lynis-*.dat' \
+			-o -name 'terminal-*.log' \) \
+			-mtime +7 -print0 2>/dev/null |
+		xargs -0r rm -f; then
+		log "Old Lynis audit logs older than 7 days removed (if any)."
 	fi
 }
 
@@ -386,6 +396,7 @@ run_systemcheck_audit() {
 
 collect_system_info_and_upload() {
 	local info_ts info_log
+	local rc=0
 	info_ts="$(date +%Y%m%d-%H%M%S)"
 	info_log="/tmp/debian-info-${info_ts}.log"
 
@@ -460,8 +471,7 @@ collect_system_info_and_upload() {
 		# under pipefail on busy systems.
 		ps -eo pid,ppid,cmd,%mem,%cpu,rss --sort=-rss |
 			sed -n '1,20p'
-	} 2>&1 | tee "$info_log"
-	local rc=$?
+	} 2>&1 | tee "$info_log" || rc=$?
 	set +o pipefail
 
 	chmod 0600 "$info_log" 2>/dev/null || true

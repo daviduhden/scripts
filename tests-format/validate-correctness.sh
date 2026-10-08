@@ -170,7 +170,7 @@ function gsev(   s) {
     # portability warning in generic/POSIX contexts.
     s = "WARNING"
     if (fam == "openbsd") s = "ERROR"
-    else if (fam == "debian" || fam == "secureblue") s = "INFO"
+    else if (fam == "debian" || fam == "secureblue" || fam == "shell") s = "INFO"
     return s
 }
 function emit(sev, ln, msg, ref, fix) {

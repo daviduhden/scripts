@@ -178,8 +178,7 @@ enable_tor_runit() {
 	if [[ -d /etc/sv/tor &&
 		! -e /etc/service/tor ]]; then
 		mkdir -p /etc/service
-		service_action "link tor into runit" \
-			"service directory" \
+		service_action "link tor into runit service directory" \
 			ln -s /etc/sv/tor \
 			/etc/service/tor || return 1
 	fi
@@ -248,8 +247,7 @@ enable_tor_sysv() {
 			warn "Failed to restart tor via" \
 				"/etc/init.d/tor; trying start" \
 				"instead."
-			service_action "start tor via" \
-				"/etc/init.d/tor" \
+			service_action "start tor via /etc/init.d/tor" \
 				/etc/init.d/tor start ||
 				failed=1
 		fi

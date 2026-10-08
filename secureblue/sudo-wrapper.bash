@@ -53,6 +53,7 @@ require_cmd() {
 
 handle_visudo() {
 	local real_visudo="$1"
+	shift
 	if [[ ! -x $real_visudo ]]; then
 		error "sudo-wrapper error: could not locate the" \
 			"real 'visudo' binary. Expected" \

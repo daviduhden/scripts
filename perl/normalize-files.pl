@@ -133,53 +133,65 @@ sub setup_openbsd_sandbox {
         require OpenBSD::Pledge;
         require OpenBSD::Unveil;
 
+        # The binding returns false and sets $! on failure; collect failures
+        # instead of silently running with an incomplete veil.
+        # See OpenBSD::Unveil(3p).
+        my @uv_failed;
+        my $unveil = sub {
+            my ( $path, $perm ) = @_;
+            return 1 unless defined $path && length $path && -d $path;
+            return 1 if OpenBSD::Unveil::unveil( $path, $perm );
+            push @uv_failed, "$path ($perm)";
+            return 0;
+        };
+
         # Perl may lazily load modules (Encode tables, Pod::Text for --help).
         for my $inc (@INC) {
             next if ref $inc;
-            next unless defined $inc && length $inc && -d $inc;
-            OpenBSD::Unveil::unveil( $inc, 'r' );
+            $unveil->( $inc, 'r' );
         }
 
         # The tree being processed, plus repository metadata for git.
-        OpenBSD::Unveil::unveil( $target_raw, 'rwc' );
-        OpenBSD::Unveil::unveil( $repo_raw,   'rwc' ) if $repo_raw;
+        $unveil->( $target_raw, 'rwc' );
+        $unveil->( $repo_raw,   'rwc' );
 
         # The single-source VERSION file next to this program.
         my ( undef, $dir ) = fileparse($0);
         for my $d ( $dir, File::Spec->catdir( $dir, File::Spec->updir ) ) {
-            OpenBSD::Unveil::unveil( $d, 'r' ) if defined $d && -d $d;
+            $unveil->( $d, 'r' );
         }
 
         # --report may point outside the processed tree.
         if ( defined $cfg->{report} ) {
-            my $rdir = dirname( $cfg->{report} );
-            OpenBSD::Unveil::unveil( $rdir, 'rwc' )
-              if defined $rdir && -d $rdir;
+            $unveil->( dirname( $cfg->{report} ), 'rwc' );
         }
 
         if ($use_git) {
             my %seen;
             for my $path_dir ( File::Spec->path() ) {
                 next unless defined $path_dir && length $path_dir;
-                next unless -d $path_dir;
                 next if $seen{$path_dir}++;
-                OpenBSD::Unveil::unveil( $path_dir, 'rx' );
+                $unveil->( $path_dir, 'rx' );
             }
-            my $home = $ENV{HOME};
-            OpenBSD::Unveil::unveil( $home, 'r' )
-              if defined $home && length $home && -d $home;
+            $unveil->( $ENV{HOME}, 'r' );
             for my $lib (
                 qw(/etc /usr/lib /usr/libexec /usr/local/lib /usr/share /var))
             {
-                OpenBSD::Unveil::unveil( $lib, 'r' ) if -d $lib;
+                $unveil->( $lib, 'r' );
             }
         }
 
-        OpenBSD::Unveil::unveil();
+        OpenBSD::Unveil::unveil()
+          or die "unveil lock failed: $!";
 
-        my $promises = 'stdio rpath wpath cpath fattr';
-        $promises .= ' exec proc flock unix' if $use_git;
-        OpenBSD::Pledge::pledge($promises) or die "pledge failed";
+        # The binding takes a list of promises and always adds 'stdio';
+        # see OpenBSD::Pledge(3p).
+        my @promises = qw(stdio rpath wpath cpath fattr);
+        push @promises, qw(exec proc flock unix) if $use_git;
+        OpenBSD::Pledge::pledge(@promises) or die "pledge failed: $!";
+
+        die 'unveil failed for: ' . join( ', ', @uv_failed ) . "\n"
+          if @uv_failed;
         1;
     } or do {
         emit_error("OpenBSD pledge/unveil setup failed: $@");
@@ -359,6 +371,23 @@ sub unreserve {
 }
 
 sub normalize_basename {
+    my ($name) = @_;
+    return $name unless defined $name;
+
+    # The transliteration table can map a character to '.' (for example the
+    # ellipsis U+2026), which the extension splitter may reinterpret on a
+    # later pass. Iterate to a fixed point so the documented property
+    # normalize(normalize(x)) == normalize(x) holds.
+    my $result = normalize_basename_once($name);
+    for ( 1 .. 8 ) {
+        my $next = normalize_basename_once($result);
+        last if $next eq $result;
+        $result = $next;
+    }
+    return $result;
+}
+
+sub normalize_basename_once {
     my ($name) = @_;
     return $name unless defined $name;
     return $name if $name eq '' || $name eq '.' || $name eq '..';
@@ -1163,8 +1192,11 @@ sub glob_regex {
                 $i = $j + 1;
             }
         }
-        elsif ( $c =~ /[.^$+()|\\]/ ) { $re .= '\\' . $c; $i++ }
-        else                          { $re .= $c;        $i++ }
+        elsif ( index( '.^$+()|\\', $c ) >= 0 ) {
+            $re .= '\\' . $c;
+            $i++;
+        }
+        else { $re .= $c; $i++ }
     }
     return $re;
 }
@@ -1176,8 +1208,15 @@ sub glob_match {
     my $anchored = ( $p =~ m{/} ) ? 1 : 0;
     $p =~ s{^/}{};
     my $re = glob_regex($p);
-    if ($anchored) { return $path =~ m{^$re$} ? 1 : 0 }
-    return $path =~ m{(?:^|/)$re$} ? 1 : 0;
+
+    # A malformed pattern (for example "[]" or "[!]") can produce an invalid
+    # character class; treat it as a non-match instead of dying mid-run.
+    my $matched = eval {
+        if   ($anchored) { $path =~ m{^$re$}       ? 1 : 0 }
+        else             { $path =~ m{(?:^|/)$re$} ? 1 : 0 }
+    };
+    return 0 if $@;
+    return $matched ? 1 : 0;
 }
 
 sub path_rel_posix {

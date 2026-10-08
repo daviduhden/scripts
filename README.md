@@ -27,7 +27,10 @@ Each directory documents its scripts, requirements, and usage:
 
 ## Installation
 
-Targets are system-specific; there is no generic "install all". Adjust `PREFIX`/`BINDIR` if you need a different path (defaults to `/usr/local/bin`).
+Targets are system-specific. `make all` installs the POSIX helper sets (Debian,
+OpenBSD, SecureBlue, Perl and tests/format) but not the interactive shell
+helpers. Adjust `PREFIX`/`BINDIR` if you need a different path (defaults to
+`/usr/local/bin`).
 
 ```
 # Debian
@@ -48,7 +51,7 @@ make install-shell-bash
 # Perl
 make install-perl
 
-# Tests/formatting scripts (for developers)
+# Validation/formatting tools (for developers)
 make install-tests-format
 ```
 
@@ -189,7 +192,7 @@ edit that one file to evolve the shared style. If `fourmolu` is not present in
 - permission validation (`tests-format/fix-permissions.sh --check`, read-only)
 - correctness validation (`tests-format/validate-correctness.sh --target all`)
 - regression tests for both new tools (`test-fix-permissions.sh`, `test-validate-correctness.sh`)
-- ssh-menu parser regression test (`test-ssh-menu.pl`)
+- ssh-menu and normalize-files regression tests (`test-ssh-menu.pl`, `test-normalize-files.pl`)
 
 `make test` is a validation operation: it **never** modifies file permissions or file contents on its own (the format validators may rewrite formatting when the optional formatters are installed). Permission corrections are only applied by `make fix-permissions`.
 
@@ -202,7 +205,8 @@ File modes are derived from the actual content, as classified by `file(1)`:
 | directories                            | 0755 |
 | scripts (shell, Perl, Python, ...)     | 0755 |
 | native executables (ELF)               | 0755 |
-| text, config, documentation, Makefiles, data | 0644 |
+| text, config, documentation, data     | 0644 |
+| Makefiles                              | 0755 |
 
 A shebang (`#!`) is used as an additional signal for files that `file(1)` classifies as plain text. File extensions alone never make a file executable. Content is authoritative: a file that looks like a script (script content detected by `file(1)`, or a shebang) is treated as executable even if it was deliberately non-executable — to keep a script non-executable by design, give it no shebang.
 
@@ -227,7 +231,8 @@ Findings are classified as `ERROR`, `WARNING`, `INFO` or `UNVERIFIED`. The exit 
 
 ## SecureBlue shell aliases
 
-`make install-shell` installs `shell/aliases.bash` to `${BASH_CONF_DST_DIR}/aliases.bash`.
+`make install-shell` installs `shell/aliases.bash` and `shell/vi-mode.bash` to
+`${BASH_CONF_DST_DIR}`.
 
 - Default user: `SECUREBLUE_USER=david`
 - Default path: `BASH_CONF_DST_DIR=/var/home/${SECUREBLUE_USER}/.bashrc.d`

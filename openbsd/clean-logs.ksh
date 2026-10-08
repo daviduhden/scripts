@@ -31,15 +31,21 @@ error() {
 }
 
 parse_args() {
-	case "${1:-}" in
-	--dry-run | -n)
-		DRY_RUN=1
-		warn "CLI flag detected:" \
-			"using non-default options instead of standard behavior."
-		shift
-		;;
-	esac
-	set -- "$@"
+	while [ "$#" -gt 0 ]; do
+		case "$1" in
+		--dry-run | -n)
+			DRY_RUN=1
+			warn "CLI flag detected:" \
+				"using non-default options instead of standard behavior."
+			shift
+			;;
+		*)
+			error "Unknown option: $1"
+			error "Try: $0 --dry-run"
+			exit 1
+			;;
+		esac
+	done
 }
 
 clean_gz_logs() {

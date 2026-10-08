@@ -398,8 +398,7 @@ RequiresMountsFor=${LWS_DATA_DIR}
 Type=simple
 User=${MONERO_USER}
 Group=${MONERO_USER}
-ExecStart=${INSTALL_DIR}/monero-lws-daemon
-ExecStart=\${ExecStart} --config-file ${LWS_CONF_FILE}
+ExecStart=${INSTALL_DIR}/monero-lws-daemon --config-file ${LWS_CONF_FILE}
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=true
@@ -976,6 +975,13 @@ EOF
 			error "failed to download systemd" \
 				"unit (git/curl chain)"
 		fi
+
+		# The upstream unit ships Debian-repo paths; rewrite them to the
+		# locations this script installs into (/usr/bin + /etc/monerod.conf).
+		sed -i \
+			-e "s#/usr/local/bin/monerod#${INSTALL_DIR}/monerod#g" \
+			-e "s#/etc/monero/monerod.conf#${MONEROD_CONF}#g" \
+			"${UNIT_TMP}"
 
 		install -m 0644 "${UNIT_TMP}" \
 			/etc/systemd/system/monerod.service

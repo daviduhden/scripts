@@ -158,7 +158,6 @@ is_up_to_date() {
 run_update() {
 	local latest_tag
 
-	install_build_deps
 	latest_tag="$(resolve_latest_tag)"
 	log "Latest release tag: ${latest_tag}"
 
@@ -169,6 +168,8 @@ run_update() {
 }
 
 main() {
+	require_root
+	install_build_deps
 	check_prereqs
 	run_update
 }

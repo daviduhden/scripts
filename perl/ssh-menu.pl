@@ -144,17 +144,48 @@ sub setup_openbsd_sandbox {
         require OpenBSD::Pledge;
         require OpenBSD::Unveil;
 
+        # The binding returns false and sets $! on failure; collect failures
+        # instead of silently running with an incomplete veil.
+        # See OpenBSD::Unveil(3p).
+        my @uv_failed;
         for my $dir (@path_dirs) {
-            OpenBSD::Unveil::unveil( $dir, 'rx' );
-        }
-        for my $dir (@rw_dirs) {
-            OpenBSD::Unveil::unveil( $dir, 'rwc' );
+            next unless -d $dir;
+            next if OpenBSD::Unveil::unveil( $dir, 'rx' );
+            push @uv_failed, "$dir (rx)";
         }
 
-        OpenBSD::Unveil::unveil();
+        # unveil(2) requires every directory in the path to exist. For a state
+        # directory that has not been created yet, unveil the nearest existing
+        # ancestor so the program can still create it.
+        for my $dir (@rw_dirs) {
+            my $target = $dir;
+            my $ok     = 0;
+            while (1) {
+                if ( OpenBSD::Unveil::unveil( $target, 'rwc' ) ) {
+                    $ok = 1;
+                    last;
+                }
+                my $parent = parent_dir($target);
+                last
+                  unless defined $parent
+                  && length $parent
+                  && $parent ne $target;
+                $target = $parent;
+            }
+            push @uv_failed, "$dir (rwc)" unless $ok;
+        }
+
+        OpenBSD::Unveil::unveil()
+          or die "unveil lock failed: $!";
+
+        # The binding takes a list of promises and always adds 'stdio';
+        # see OpenBSD::Pledge(3p).
         OpenBSD::Pledge::pledge(
-            'stdio rpath wpath cpath fattr exec proc inet dns unix')
-          or die "pledge failed";
+            qw(stdio rpath wpath cpath fattr exec proc inet dns unix))
+          or die "pledge failed: $!";
+
+        die 'unveil failed for: ' . join( ', ', @uv_failed ) . "\n"
+          if @uv_failed;
         1;
     } or do {
         logw("OpenBSD pledge/unveil setup failed: $@");
@@ -754,8 +785,12 @@ sub main {
 
     load_state_from_disk();
     parse_known_hosts();
-    prune_stale_data();
+
+    # Validate before pruning: with an empty (for example all-hashed) host
+    # list, pruning would delete all saved aliases/frequencies and then
+    # ensure_entries_present() would abort, losing the state permanently.
     ensure_entries_present();
+    prune_stale_data();
     sort_entries();
 
     logw("Skipped $hashed_count hashed known_hosts entries.")

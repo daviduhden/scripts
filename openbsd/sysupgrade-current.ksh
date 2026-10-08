@@ -142,7 +142,12 @@ run_sysmerge() {
     print "Backups are saved under /var/sysmerge/backups."
     print "---"
     print ""
-    /usr/sbin/sysmerge -b
+    if /usr/sbin/sysmerge -b; then
+        print "sysmerge completed."
+    else
+        print "sysmerge reported issues; review the output above"
+        print "and /var/sysmerge/backups."
+    fi
 }
 
 upgrade_packages() {

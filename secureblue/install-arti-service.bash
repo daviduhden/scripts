@@ -56,6 +56,7 @@ setup_paths() {
 	CONFIG_FILE="${CONFIG_DIR}/arti.toml"
 	DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/arti"
 	STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/arti"
+	CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/arti"
 }
 
 install_arti_unit_and_config() {
@@ -65,8 +66,8 @@ install_arti_unit_and_config() {
 	log "Installing arti.service to user unit directory..."
 	install -m 0640 "$SERVICE_SRC" "$SYSTEMD_USER_DIR/arti.service"
 
-	log "Creating arti directories (config/data/state)..."
-	install -d -m 0750 "$CONFIG_DIR" "$DATA_DIR" "$STATE_DIR"
+	log "Creating arti directories (config/data/state/cache)..."
+	install -d -m 0750 "$CONFIG_DIR" "$DATA_DIR" "$STATE_DIR" "$CACHE_DIR"
 
 	if [[ -f $CONFIG_FILE ]]; then
 		BACKUP_FILE="${CONFIG_FILE}.bak.$(date +%Y%m%d%H%M%S)"
@@ -108,6 +109,7 @@ maybe_install_bridge_service() {
 		else
 			warn "Bridge unit template not found at" \
 				"${BRIDGE_SRC}; skipping bridge install"
+			return
 		fi
 
 		log "Reloading systemd --user units (bridge)..."

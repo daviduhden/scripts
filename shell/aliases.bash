@@ -64,6 +64,7 @@ alias wget='wget -c'
 # Full system upgrade helper
 sysupgrade-all() {
 	local sysupgrade_rc=0
+	local remaining_rc=0
 	local sysupgrade_user="${SYSUPGRADE_USER:-${USER:-$(id -un)}}"
 
 	echo "Starting full system upgrade..."
@@ -78,7 +79,13 @@ sysupgrade-all() {
 		update-lyrebird &&
 		update-xd-torrent --skip-service-and-user-setup &&
 		pipx upgrade-all &&
-		echo "[OK] System upgrade completed successfully."
+		echo "[OK] System upgrade completed successfully." ||
+		remaining_rc=$?
+
+	if ((sysupgrade_rc != 0)); then
+		return "$sysupgrade_rc"
+	fi
+	return "$remaining_rc"
 }
 
 # --------------------------------------------------

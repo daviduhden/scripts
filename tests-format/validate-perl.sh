@@ -31,9 +31,8 @@ require_cmd() {
 
 run_validate_perl() {
 
-	ROOT_DIR=${1:-}
+	ROOT_DIR=${1:-.}
 	[ "${ROOT_DIR#-}" = "$ROOT_DIR" ] || usage
-	[ -n "$ROOT_DIR" ] || usage
 	[ -d "$ROOT_DIR" ] || {
 		printf '%s\n' "[ERROR] ROOT_DIR is not a directory: $ROOT_DIR" >&2
 		exit 2

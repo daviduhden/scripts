@@ -379,12 +379,13 @@ check_prereqs() {
 	require_cmd rpm-ostree
 	require_cmd rpm
 	require_cmd restorecon
-	require_cmd semanage
 }
 
 run_setup() {
 	install_packages
 	resolve_clamav_account
+	# policycoreutils-python-utils (install_packages) provides semanage.
+	require_cmd semanage
 	fix_permissions
 	fix_selinux
 	configure_freshclam

@@ -278,12 +278,13 @@ BINDIR=/usr/local/bin
 MANDIR=/usr/local/man/man1
 DOCDIR=/usr/local/share/doc/crush
 
-check_root
 CRUSH_USER=${1:-root}
 
 if [ "${CRUSH_USER#-}" != "$CRUSH_USER" ]; then
 	usage
 fi
+
+check_root
 
 if [ "$(uname -s)" != "OpenBSD" ]; then
 	error "This script is intended for OpenBSD."

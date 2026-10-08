@@ -124,7 +124,7 @@ install_repo_key() {
 	log "Importing signing key..."
 	install -d -m 0755 /usr/share/keyrings
 	net_curl https://repo.i2pd.xyz/r4sas.gpg |
-		gpg --dearmor \
+		gpg --batch --yes --dearmor \
 			-o /usr/share/keyrings/purplei2p.gpg
 }
 
@@ -427,8 +427,7 @@ enable_i2pd_runit() {
 	if [[ -d /etc/sv/i2pd &&
 		! -e /etc/service/i2pd ]]; then
 		mkdir -p /etc/service
-		service_action "link i2pd into runit" \
-			"service directory" \
+		service_action "link i2pd into runit service directory" \
 			ln -s /etc/sv/i2pd \
 			/etc/service/i2pd || return 1
 	fi
@@ -495,8 +494,7 @@ enable_i2pd_sysv() {
 			warn "Failed to restart i2pd via" \
 				"/etc/init.d/i2pd; trying start" \
 				"instead."
-			service_action "start i2pd via" \
-				"/etc/init.d/i2pd" \
+			service_action "start i2pd via /etc/init.d/i2pd" \
 				/etc/init.d/i2pd start ||
 				failed=1
 		fi

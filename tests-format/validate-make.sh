@@ -9,10 +9,10 @@ exec >"$TMPLOG" 2>&1
 
 # validate-make.sh
 # - Recursively finds all Makefiles under ROOT_DIR
-#   (default: current directory) and checks formatting
-#   with makefmt and Makefile syntax.
+#   (default: current directory), checks formatting with
+#   mbake, lints with checkmake and runs a bmake/make dry run.
 # - Usage: ./validate-make.sh [ROOT_DIR]
-# - Requires: makefmt, gmake in PATH
+# - Uses: mbake, checkmake, bmake (or make) in PATH when available
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
@@ -31,9 +31,8 @@ require_cmd() {
 
 run_validate_make() {
 
-	ROOT_DIR=${1:-}
+	ROOT_DIR=${1:-.}
 	[ "${ROOT_DIR#-}" = "$ROOT_DIR" ] || usage
-	[ -n "$ROOT_DIR" ] || usage
 	[ -d "$ROOT_DIR" ] || {
 		printf '%s\n' "[ERROR] ROOT_DIR is not a directory: $ROOT_DIR" >&2
 		exit 2

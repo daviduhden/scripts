@@ -121,14 +121,15 @@ subtest 'normalize_basename: Windows reserved names' => sub {
 
 subtest 'normalize_basename is idempotent' => sub {
     my @names = (
-        'foo.txt',        'A B C.TXT',
-        'Solución.txt',   'Año.md',
-        'CON',            'aux.pdf',
-        '---x---.txt',    '.hidden',
-        'a(1).b(2).c',    'Tema 9- POO Avanzada(4).pdf',
-        'ñandú ñoño Ñ.Ö', 'x.tar.gz',
-        '####',           '    ',
-        '...',            '..a..b..'
+        'foo.txt',              'A B C.TXT',
+        'Solución.txt',         'Año.md',
+        'CON',                  'aux.pdf',
+        '---x---.txt',          '.hidden',
+        'a(1).b(2).c',          'Tema 9- POO Avanzada(4).pdf',
+        'ñandú ñoño Ñ.Ö',       'x.tar.gz',
+        '####',                 '    ',
+        '...',                  '..a..b..',
+        "Report\x{2026} final", "a\x{2026}b.txt"
     );
     for my $n (@names) {
         my $once  = NormalizeFiles::normalize_basename($n);
@@ -606,6 +607,21 @@ subtest 'undecodable file name: content processed, rename skipped' => sub {
     is( $rc,           0,        'exit 0' );
     is( slurp_raw($p), "a\nb\n", 'content normalized despite weird name' );
     ok( -e $p, 'name left untouched' );
+    done_testing();
+};
+
+subtest 'glob_match is robust' => sub {
+    is( NormalizeFiles::glob_match( '*.py', 'a.py' ), 1,
+        'simple glob matches' );
+    is( NormalizeFiles::glob_match( '*.py', 'a.txt' ),
+        0, 'simple glob rejects' );
+    is( NormalizeFiles::glob_match( 'a+b', 'a+b' ), 1, 'plus is literal' );
+    is( NormalizeFiles::glob_match( 'a+b', 'aab' ),
+        0, 'plus is not a regex quantifier' );
+    is( NormalizeFiles::glob_match( '[]', 'x' ), 0,
+        'empty class does not die' );
+    is( NormalizeFiles::glob_match( '[!]', 'x' ),
+        0, 'empty negated class does not die' );
     done_testing();
 };
 

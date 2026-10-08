@@ -269,8 +269,9 @@ main() {
 	log "Detected architecture: $arch"
 
 	ensure_debian13
-	check_prereqs
+	require_root
 	install_build_deps
+	check_prereqs
 
 	log "Checking latest hardened_malloc release..."
 	latest_tag="$(get_latest_tag)"

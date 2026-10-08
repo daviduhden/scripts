@@ -132,19 +132,32 @@ function Add-PathEntry {
     $known = @($script:ManagedDirs | Where-Object { $_.TrimEnd('\') -ieq $normalized }).Count -gt 0
     if (-not $known) { $script:ManagedDirs += $Directory }
 
-    # Persistent user PATH (prepend so we win over winget).
-    $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-    if ($null -eq $userPath) { $userPath = '' }
-    $entries = @($userPath -split ';' | Where-Object {
-        $value = $_.TrimEnd('\')
-        if ([string]::IsNullOrWhiteSpace($value)) { return $false }
-        return -not (@($script:ManagedDirs | Where-Object { $_.TrimEnd('\') -ieq $value }).Count)
-    })
-    $newUserPath = (@($script:ManagedDirs) + $entries) -join ';'
-    if ($newUserPath -ne $userPath) {
-        [Environment]::SetEnvironmentVariable('Path', $newUserPath, 'User')
-        Write-Info "User PATH updated: $Directory"
-        $script:PathChanged = $true
+    # Persistent user PATH (prepend so we win over winget). Use the registry
+    # directly: Environment.SetEnvironmentVariable rewrites the value as
+    # REG_SZ and expands %VAR% entries, while install-windows.bat preserves
+    # the original REG_EXPAND_SZ kind and unexpanded value.
+    $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true)
+    if ($null -eq $key) {
+        $key = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment')
+    }
+    try {
+        $userPath = $key.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+        if ($null -eq $userPath) { $userPath = '' }
+        $kind = [Microsoft.Win32.RegistryValueKind]::ExpandString
+        if ($key.GetValueNames() -contains 'Path') { $kind = $key.GetValueKind('Path') }
+        $entries = @($userPath -split ';' | Where-Object {
+            $value = $_.TrimEnd('\')
+            if ([string]::IsNullOrWhiteSpace($value)) { return $false }
+            return -not (@($script:ManagedDirs | Where-Object { $_.TrimEnd('\') -ieq $value }).Count)
+        })
+        $newUserPath = (@($script:ManagedDirs) + $entries) -join ';'
+        if ($newUserPath -ne $userPath) {
+            $key.SetValue('Path', $newUserPath, $kind)
+            Write-Info "User PATH updated: $Directory"
+            $script:PathChanged = $true
+        }
+    } finally {
+        $key.Close()
     }
 
     # Current process PATH so we can verify immediately.
@@ -684,10 +697,12 @@ if ($RemoveWinget -and -not $Check) {
 }
 
 # Repair existing installations even when an update failed (for example, offline).
+# OpenCode and Codex come first so their directories are prepended before Bun's
+# win-get Links directory (which may contain shims for the same commands).
 foreach ($cli in @(
-    @{ Enabled = $doBun; Name = 'bun'; ExePath = $null; DefaultArgument = '' }
     @{ Enabled = $doOpenCode; Name = 'opencode'; ExePath = $script:OpenCodeExe; DefaultArgument = '--auto' }
     @{ Enabled = $doCodex; Name = 'codex'; ExePath = $script:CodexExe; DefaultArgument = '--yolo' }
+    @{ Enabled = $doBun; Name = 'bun'; ExePath = $null; DefaultArgument = '' }
 )) {
     if (-not $cli.Enabled) { continue }
     try {
