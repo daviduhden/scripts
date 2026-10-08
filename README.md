@@ -183,7 +183,7 @@ finding is reported.
 always forces a bundled style (`tests-format/fourmolu-all.yaml`, installed as
 `${BINDIR}/fourmolu-all.yaml`) and ignores project-local
 `fourmolu.yaml`/`.fourmolu.yaml` files, so the shared style cannot drift per
-repository. The bundled style pins the Fourmolu 0.20 defaults explicitly;
+repository. The bundled style pins the Fourmolu 0.21 defaults explicitly;
 edit that one file to evolve the shared style. If `fourmolu` is not present in
 `PATH`, the script reports it and skips Haskell formatting.
 

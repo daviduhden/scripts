@@ -4,7 +4,8 @@ set -euo pipefail
 # SecureBlue arti.service installation script
 # Automated script to install and enable arti.service for user systemd
 # - Installs arti.service systemd user unit from bundled template
-# - Downloads example arti config.toml from upstream Tor repository
+# - Downloads the example arti config matching the installed Arti version
+#   (release tag arti-vX.Y.Z), falling back to the main branch
 # - Creates necessary config/data/state directories under XDG paths
 # - Enables and starts arti.service under user systemd
 # - Optionally installs arti-socks-proxy.service if socat is available
@@ -39,7 +40,32 @@ net_curl() {
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SERVICE_SRC="${SCRIPT_DIR}/systemd/arti.service"
 BRIDGE_SRC="${SCRIPT_DIR}/systemd/arti-socks-proxy.service"
-CONFIG_URL="https://gitlab.torproject.org/tpo/core/arti/-/raw/main/crates/arti/src/arti-example-config.toml"
+ARTI_REPO_RAW="https://gitlab.torproject.org/tpo/core/arti/-/raw"
+ARTI_EXAMPLE_PATH="crates/arti/src/arti-example-config.toml"
+
+# Choose the ref whose example config matches the installed Arti. Prefer the
+# release tag for the running version (arti-vX.Y.Z); fall back to main when the
+# version cannot be determined.
+detect_arti_ref() {
+	local arti_bin version
+	arti_bin="$(command -v arti 2>/dev/null || true)"
+	if [[ -z $arti_bin && -x /usr/local/bin/arti ]]; then
+		arti_bin=/usr/local/bin/arti
+	fi
+	if [[ -n $arti_bin ]]; then
+		version="$("$arti_bin" --version 2>/dev/null |
+			sed -n '1s/^[^0-9]*\([0-9][0-9.]*\).*/\1/p')"
+		if [[ -n $version ]]; then
+			printf 'arti-v%s\n' "$version"
+			return 0
+		fi
+	fi
+	printf 'main\n'
+}
+
+config_url_for_ref() {
+	printf '%s/%s/%s\n' "$ARTI_REPO_RAW" "$1" "$ARTI_EXAMPLE_PATH"
+}
 
 check_prereqs() {
 	require_cmd systemctl
@@ -83,12 +109,20 @@ install_arti_unit_and_config() {
 		cp "$CONFIG_FILE" "$BACKUP_FILE"
 	fi
 
+	local arti_ref config_url
 	log "Downloading example arti config from upstream..."
-	if ! net_curl "$CONFIG_URL" -o "$CONFIG_FILE"; then
-		error "failed to download arti config from $CONFIG_URL"
-		exit 1
+	arti_ref="$(detect_arti_ref)"
+	config_url="$(config_url_for_ref "$arti_ref")"
+	if ! net_curl "$config_url" -o "$CONFIG_FILE"; then
+		warn "failed to download $config_url; falling back to main"
+		arti_ref=main
+		config_url="$(config_url_for_ref "$arti_ref")"
+		if ! net_curl "$config_url" -o "$CONFIG_FILE"; then
+			error "failed to download arti config from $config_url"
+			exit 1
+		fi
 	fi
-	log "Saved arti config to $CONFIG_FILE"
+	log "Saved arti config ($arti_ref) to $CONFIG_FILE"
 }
 
 enable_arti_service() {
