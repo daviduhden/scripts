@@ -1089,8 +1089,8 @@ EOF
 }
 
 main() {
-	require_root
 	parse_args "$@"
+	require_root
 	resolve_lws_account
 	ensure_lws_build_dependencies
 	check_prereqs
