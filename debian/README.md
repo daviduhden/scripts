@@ -27,7 +27,7 @@ use `bash debian/<script>.bash` with the privileges required by that script.
 | [update-fastfetch.bash](update-fastfetch.bash) | Downloads the latest Fastfetch Debian package and installs it through APT. |
 | [update-golang.bash](update-golang.bash) | Installs the latest stable Go from official tarballs into `/usr/local/go` and updates the system PATH. |
 | [update-lyrebird.bash](update-lyrebird.bash) | Builds the Lyrebird Tor transport with Go and Make and installs it into `/usr/local/bin`. |
-| [update-monero.bash](update-monero.bash) | Updates Monero CLI binaries, configures `monerod`, and optionally builds and configures monero-lws. |
+| [update-monero.bash](update-monero.bash) | Updates Monero CLI binaries, configures `monerod`, and optionally builds and configures monero-lws. The LWS account is auto-detected (`monero-lws` if present, else the monerod user); override with `LWS_USER`/`LWS_GROUP`. |
 | [update-msedit.bash](update-msedit.bash) | Installs or updates Microsoft Edit from precompiled GitHub release binaries. |
 | [update-openrsync.bash](update-openrsync.bash) | Builds and installs openrsync, installing build dependencies through APT. |
 | [update-signify.bash](update-signify.bash) | Builds and installs the portable OpenBSD signify utility. |

@@ -39,6 +39,13 @@ LWS_REPO_URL="https://github.com/${LWS_REPO}.git"
 
 INSTALL_DIR="/usr/bin"
 MONERO_USER="monero"
+# Account that runs monero-lws. Empty means auto-detect: use an existing
+# "monero-lws" system user when present, otherwise the monerod user.
+LWS_USER="${LWS_USER:-}"
+LWS_GROUP="${LWS_GROUP:-}"
+# Whether monero-lws accepts created/imported accounts automatically.
+LWS_AUTO_ACCEPT_CREATION="${LWS_AUTO_ACCEPT_CREATION:-1}"
+LWS_AUTO_ACCEPT_IMPORT="${LWS_AUTO_ACCEPT_IMPORT:-1}"
 MONERO_DATA_DIR="${MONERO_DATA_DIR:-/var/lib/monero}"
 MONERO_LOG_DIR="/var/log/monero"
 MONEROD_CONF="/etc/monerod.conf"
@@ -85,6 +92,22 @@ Options:
         monerod+lws to run together.
   -h, --help
         Show this help message and exit.
+
+Environment:
+  LWS_USER        Account that runs monero-lws. Default: an
+                  existing 'monero-lws' user if present,
+                  otherwise the monerod user.
+  LWS_GROUP       Group for monero-lws. Default: LWS_USER's
+                  primary group.
+  LWS_DATA_DIR    monero-lws database directory. Default:
+                  /var/lib/monero-lws/light_wallet_server.
+  LWS_REST_ADDR, LWS_ADMIN_REST_ADDR
+                  monero-lws REST bind addresses.
+  LWS_AUTO_ACCEPT_CREATION, LWS_AUTO_ACCEPT_IMPORT
+                  Auto-accept created/imported accounts (0/1,
+                  default 1).
+  MONERO_DATA_DIR Monerod data directory. Default:
+                  /var/lib/monero.
 EOF
 }
 
@@ -139,6 +162,20 @@ require_cmd() {
 	if ! command -v "$1" >/dev/null 2>&1; then
 		error "required command '$1' is not" \
 			"installed or not in PATH."
+	fi
+}
+
+resolve_lws_account() {
+	if [[ -z ${LWS_USER} ]]; then
+		if id -u monero-lws >/dev/null 2>&1; then
+			LWS_USER="monero-lws"
+		else
+			LWS_USER="${MONERO_USER}"
+		fi
+	fi
+	if [[ -z ${LWS_GROUP} ]]; then
+		LWS_GROUP="$(id -gn "${LWS_USER}" 2>/dev/null ||
+			printf '%s' "${LWS_USER}")"
 	fi
 }
 
@@ -330,10 +367,19 @@ configure_monerod_for_lws() {
 }
 
 configure_lws_service() {
+	if [[ ${LWS_USER} != "${MONERO_USER}" ]] &&
+		! id -u "${LWS_USER}" >/dev/null 2>&1; then
+		log "Creating system user '${LWS_USER}'..."
+		useradd --system \
+			--home-dir "${LWS_DATA_DIR}" \
+			--shell /usr/sbin/nologin \
+			"${LWS_USER}"
+	fi
+
 	log "Preparing monero-lws runtime directories..."
 	mkdir -p "$LWS_CONF_DIR" "$LWS_DATA_DIR" \
 		"$LWS_LOG_DIR"
-	chown -R "${MONERO_USER}:${MONERO_USER}" \
+	chown -R "${LWS_USER}:${LWS_GROUP}" \
 		"$LWS_DATA_DIR" "$LWS_LOG_DIR"
 
 	if [[ ! -f $LWS_CONF_FILE ]]; then
@@ -370,9 +416,9 @@ EOF
 	set_config_value "$LWS_CONF_FILE" \
 		"confirm-external-bind" "1"
 	set_config_value "$LWS_CONF_FILE" \
-		"auto-accept-creation" "1"
+		"auto-accept-creation" "${LWS_AUTO_ACCEPT_CREATION}"
 	set_config_value "$LWS_CONF_FILE" \
-		"auto-accept-import" "1"
+		"auto-accept-import" "${LWS_AUTO_ACCEPT_IMPORT}"
 	set_config_value "$LWS_CONF_FILE" \
 		"max-subaddresses" "500"
 	set_config_value "$LWS_CONF_FILE" \
@@ -381,7 +427,7 @@ EOF
 		"rest-threads" "2"
 	set_config_value "$LWS_CONF_FILE" \
 		"log-level" "1"
-	chown "${MONERO_USER}:${MONERO_USER}" \
+	chown "${LWS_USER}:${LWS_GROUP}" \
 		"$LWS_CONF_FILE"
 
 	log "Installing systemd unit:" \
@@ -396,8 +442,8 @@ RequiresMountsFor=${LWS_DATA_DIR}
 
 [Service]
 Type=simple
-User=${MONERO_USER}
-Group=${MONERO_USER}
+User=${LWS_USER}
+Group=${LWS_GROUP}
 ExecStart=${INSTALL_DIR}/monero-lws-daemon --config-file ${LWS_CONF_FILE}
 Restart=on-failure
 RestartSec=5
@@ -1045,6 +1091,7 @@ EOF
 main() {
 	require_root
 	parse_args "$@"
+	resolve_lws_account
 	ensure_lws_build_dependencies
 	check_prereqs
 	run_update
