@@ -64,7 +64,7 @@ LWS_ADMIN_REST_ADDR="${LWS_ADMIN_REST_ADDR:-http://127.0.0.1:8444}"
 LWS_ADMIN_REST_ADDR_V6="${LWS_ADMIN_REST_ADDR_V6:-}"
 TOR_CONF_FILE="/etc/tor/torrc"
 I2PD_TUNNELS_FILE="/etc/i2pd/tunnels.conf"
-UFW_TCP_PORTS="${UFW_TCP_PORTS:-18080 8443}"
+FIREWALL_TCP_PORTS="${FIREWALL_TCP_PORTS:-18080 8443}"
 LWS_BUILD_PACKAGES="build-essential cmake git pkg-config"
 LWS_BUILD_PACKAGES="${LWS_BUILD_PACKAGES} libboost-all-dev"
 LWS_BUILD_PACKAGES="${LWS_BUILD_PACKAGES} libunbound-dev libzmq3-dev"
@@ -108,6 +108,13 @@ Environment:
                   default 1).
   MONERO_DATA_DIR Monerod data directory. Default:
                   /var/lib/monero.
+  FIREWALL_TCP_PORTS
+                  TCP ports to allow in the host firewall
+                  (nftables). Default: 18080 8443.
+  NFT_TABLE, NFT_CHAIN
+                  nftables family/table and chain to edit.
+                  Default: auto-detect (inet mainfw or
+                  inet filter) with chain "input".
 EOF
 }
 
@@ -225,25 +232,64 @@ ensure_lws_build_dependencies() {
 		"${missing[@]}"
 }
 
-open_ufw_ports() {
-	if ! command -v ufw >/dev/null 2>&1; then
-		log "ufw is not installed;" \
+# Open the service ports in the host firewall with nftables. Ports that the
+# active ruleset already allows are left untouched. The family/table/chain is
+# taken from NFT_TABLE/NFT_CHAIN, or auto-detected among the common input
+# chains (for example "inet mainfw").
+open_firewall_ports() {
+	if ! command -v nft >/dev/null 2>&1; then
+		log "nft is not installed;" \
 			"skipping firewall rule updates."
 		return 0
 	fi
 
-	log "Opening UFW ports for clearnet access..."
-	for port in $UFW_TCP_PORTS; do
-		# grep without -q reads the whole stream, so ufw never
-		# dies of SIGPIPE (which under pipefail would make the
-		# pipeline report 141 and re-run ufw allow).
-		if ufw status |
-			grep -E "^${port}/tcp[[:space:]]+ALLOW" \
-				>/dev/null; then
-			log "ufw already allows ${port}/tcp"
+	local family="inet" chain="${NFT_CHAIN:-input}" table=""
+	if [[ -n ${NFT_TABLE:-} ]]; then
+		if [[ ${NFT_TABLE} == *" "* ]]; then
+			family="${NFT_TABLE%% *}"
+			table="${NFT_TABLE##* }"
+		else
+			table="${NFT_TABLE}"
+		fi
+	else
+		local candidate
+		for candidate in mainfw filter; do
+			if nft list chain "$family" "$candidate" \
+				"$chain" >/dev/null 2>&1; then
+				table="$candidate"
+				break
+			fi
+		done
+	fi
+	if [[ -z $table ]] ||
+		! nft list chain "$family" "$table" "$chain" \
+			>/dev/null 2>&1; then
+		log "no nftables input chain found;" \
+			"skipping firewall rule updates."
+		return 0
+	fi
+
+	log "Opening nftables ports in ${family} ${table}" \
+		"${chain}..."
+	local port rules
+	for port in $FIREWALL_TCP_PORTS; do
+		rules="$(nft list chain "$family" "$table" "$chain" \
+			2>/dev/null || true)"
+		# Match the port only as a whole number (80 must not match 18080).
+		if printf '%s\n' "$rules" |
+			grep -Eq "(^|[^0-9])${port}([^0-9]|$)"; then
+			log "nftables already allows ${port}/tcp"
 			continue
 		fi
-		ufw allow "${port}/tcp"
+		if nft add rule "$family" "$table" "$chain" \
+			tcp dport "$port" accept \
+			comment "scripts-allow-${port}"; then
+			log "nftables: allowed ${port}/tcp" \
+				"(runtime rule)"
+		else
+			warn "failed to add nftables rule" \
+				"for ${port}/tcp"
+		fi
 	done
 }
 
@@ -739,7 +785,7 @@ run_update() {
 			if [[ ${SKIP_SERVICE_AND_USER_SETUP} -eq 0 ]]; then
 				configure_monerod_for_lws
 				configure_lws_service
-				open_ufw_ports
+				open_firewall_ports
 				systemctl daemon-reload
 				systemctl restart monerod
 				systemctl enable monero-lws \
@@ -1062,7 +1108,7 @@ EOF
 			configure_monerod_for_lws
 			configure_lws_service
 			configure_monero_privacy_transports
-			open_ufw_ports
+			open_firewall_ports
 			log "Reloading systemd daemon..."
 			systemctl daemon-reload
 			log "Restarting monerod with ZMQ" \
