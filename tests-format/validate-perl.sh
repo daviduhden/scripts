@@ -13,8 +13,10 @@ exec >"$TMPLOG" 2>&1
 #   with perltidy, Perl syntax and Perl::Critic.
 # - Usage: ./validate-perl.sh [ROOT_DIR]
 # - Requires: perltidy, perl in PATH
-# - Optional: perlcritic in PATH. It is run at --severity 5 by default;
-#   set PERLCRITIC_SEVERITY to change the threshold (lower is stricter).
+# - Optional: perlcritic, either in PATH or in the local::lib
+#   $PERL_LOCAL_LIB (default ~/perl5). It is run at --severity 5 by
+#   default; set PERLCRITIC_SEVERITY to change the threshold (lower is
+#   stricter).
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
 
@@ -128,7 +130,21 @@ run_validate_perl() {
 	done
 
 	printf '%s\n' "[INFO] Running Perl::Critic..."
+
+	# perlcritic may be installed in a local::lib (cpanm -l) instead of
+	# PATH; fall back to $PERL_LOCAL_LIB/bin (default ~/perl5) and make
+	# the matching lib visible to it.
+	PERLCRITIC=""
+	PERLCRITIC_PERL5LIB=${PERL5LIB:-}
+	PERL_LOCAL_LIB=${PERL_LOCAL_LIB:-${HOME:-}/perl5}
 	if command -v perlcritic >/dev/null 2>&1; then
+		PERLCRITIC=$(command -v perlcritic)
+	elif [ -x "$PERL_LOCAL_LIB/bin/perlcritic" ]; then
+		PERLCRITIC="$PERL_LOCAL_LIB/bin/perlcritic"
+		PERLCRITIC_PERL5LIB="$PERL_LOCAL_LIB/lib/perl5${PERLCRITIC_PERL5LIB:+:$PERLCRITIC_PERL5LIB}"
+	fi
+
+	if [ -n "$PERLCRITIC" ]; then
 		PERLCRITIC_SEVERITY=${PERLCRITIC_SEVERITY:-5}
 		find "$ROOT_DIR" \
 			\( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) \
@@ -139,7 +155,9 @@ run_validate_perl() {
 			while IFS= read -r f; do
 				[ -n "$f" ] || continue
 				set +e
-				critic_out=$(perlcritic --severity "$PERLCRITIC_SEVERITY" "$f" 2>&1)
+				critic_out=$(PERL5LIB="$PERLCRITIC_PERL5LIB" \
+					"$PERLCRITIC" --severity "$PERLCRITIC_SEVERITY" \
+					"$f" 2>&1)
 				critic_rc=$?
 				set -e
 				if [ "${critic_rc:-0}" -ne 0 ]; then
@@ -152,7 +170,7 @@ run_validate_perl() {
 			done
 	else
 		printf '%s\n' \
-			"[INFO] perlcritic not installed;" \
+			"[INFO] perlcritic not installed (PATH or $PERL_LOCAL_LIB/bin);" \
 			" skipping Perl::Critic"
 	fi
 
