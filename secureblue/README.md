@@ -21,6 +21,7 @@ user services and desktop configuration run in the target user's session.
 | [update-arti-oniux.bash](update-arti-oniux.bash) | Builds and installs Arti and oniux with Rust/Cargo, manages OpenSSL dependencies, and patches binary library paths. |
 | [update-krohnkite.bash](update-krohnkite.bash) | Builds the Krohnkite KWin package and installs or updates it with `kpackagetool6`. |
 | [update-lyrebird.bash](update-lyrebird.bash) | Builds the Lyrebird Go-based Tor transport and installs it into `/usr/local/bin`. |
+| [update-perl-modules.bash](update-perl-modules.bash) | Updates the Perl distributions in the user's local::lib (default `$HOME/perl5`) with `cpan-outdated` and `cpanm`, excluding dual-life core modules unless `--include-core` is given. |
 | [update-xd-torrent.bash](update-xd-torrent.bash) | Builds XD and installs its systemd user service and XDG data directory; supports `--skip-service-and-user-setup`. |
 
 Examples from the repository root:

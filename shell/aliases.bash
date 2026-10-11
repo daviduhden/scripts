@@ -78,6 +78,7 @@ sysupgrade-all() {
 		update-arti-oniux &&
 		update-lyrebird &&
 		update-xd-torrent --skip-service-and-user-setup &&
+		update-perl-modules &&
 		pipx upgrade-all &&
 		echo "[OK] System upgrade completed successfully." ||
 		remaining_rc=$?

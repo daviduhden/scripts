@@ -55,6 +55,7 @@ SECUREBLUE_SCRIPTS = \
 	secureblue/update-arti-oniux.bash \
 	secureblue/update-krohnkite.bash \
 	secureblue/update-lyrebird.bash \
+	secureblue/update-perl-modules.bash \
 	secureblue/update-xd-torrent.bash \
 	secureblue/ai-purge-history.bash
 
