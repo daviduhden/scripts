@@ -86,7 +86,7 @@ sub run_perl {
     waitpid $pid, 0;
     my $status = $?;
     seek $out, 0, 0 or die "seek output: $!";
-    my $output = do { local $/; <$out> };
+    my $output = do { local $/ = undef; <$out> };
     close $in;
     close $out;
     return ( $output, $status );
@@ -113,7 +113,7 @@ if ( $out =~ /host3\.example\.com/ ) {
 my ($del_out)  = run_perl( "3\n1\ny\nq\n", $script );
 my ($kh_after) = do {
     open my $fh, '<', $known_hosts or fail_test("cannot read $known_hosts");
-    local $/;
+    local $/ = undef;
     <$fh>;
 };
 if ( $del_out !~ /Removed 1 line/ ) {

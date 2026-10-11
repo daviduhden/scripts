@@ -32,8 +32,8 @@ my $WINDOWS = ( $^O eq 'MSWin32' ) ? 1 : 0;
 
 sub slurp_raw {
     my ($path) = @_;
-    open my $fh, '<:raw', $path or return undef;
-    local $/;
+    open my $fh, '<:raw', $path or return;
+    local $/ = undef;
     my $data = <$fh>;
     close $fh;
     return $data;
@@ -50,7 +50,7 @@ sub write_raw {
 sub run_capture {
     my (@args) = @_;
     open my $fh, '-|', $^X, $SCRIPT, @args or die "cannot run script: $!";
-    local $/;
+    local $/ = undef;
     my $out = <$fh>;
     close $fh;
     return ( $? >> 8, defined $out ? $out : '' );
@@ -525,11 +525,11 @@ subtest 'read-only files are skipped, never made writable' => sub {
     my $path = File::Spec->catfile( $tmp, 'ro.txt' );
     write_raw( $path, "a\r\nb\r\n" );
     chmod 0444, $path;
-    my ($mode_before) = ( stat($path) )[2] & 07777;
+    my ($mode_before) = ( stat($path) )[2] & oct(7777);
     my ( $rc, undef ) = run_capture( '--apply', '--line-endings', $tmp );
     is( $rc,              2,            'exit 2: intervention required' );
     is( slurp_raw($path), "a\r\nb\r\n", 'content untouched' );
-    my ($mode_after) = ( stat($path) )[2] & 07777;
+    my ($mode_after) = ( stat($path) )[2] & oct(7777);
     is( $mode_after, $mode_before, 'read-only bit preserved' );
     chmod 0644, $path;
     done_testing();
@@ -552,9 +552,9 @@ subtest 'staging leaves no temporary files behind' => sub {
     my ( $rc, undef ) = run_capture( '--apply', '--rename', $tmp );
     is( $rc, 0, 'exit 0' );
     opendir my $dh, $tmp or die "opendir $tmp: $!";
-    my @left = grep { m{^\.norm-} } readdir $dh;
+    my @leftovers = grep { m{^\.norm-} } readdir $dh;
     closedir $dh;
-    is( scalar @left, 0, 'no .norm-* leftovers' );
+    is( scalar @leftovers, 0, 'no .norm-* leftovers' );
     done_testing();
 };
 

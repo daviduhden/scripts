@@ -167,9 +167,9 @@ sub setup_openbsd_sandbox {
                 }
                 my $parent = parent_dir($target);
                 last
-                  unless defined $parent
-                  && length $parent
-                  && $parent ne $target;
+                  if !defined $parent
+                  || !length $parent
+                  || $parent eq $target;
                 $target = $parent;
             }
             push @uv_failed, "$dir (rwc)" unless $ok;
@@ -598,7 +598,7 @@ sub remove_known_host_entry {
     close $tfh;
 
     if ( my @st = stat($known_hosts) ) {
-        chmod( $st[2] & 07777, $tmp );
+        chmod( $st[2] & oct(7777), $tmp );
     }
     if ( !rename $tmp, $known_hosts ) {
         logw("Could not replace $known_hosts: $!");
@@ -724,7 +724,8 @@ sub select_entry_menu {
 
 sub question_ssh_user {
     my ($selected_key) = @_;
-    my $per_host_user = $last_user{$selected_key} if defined $selected_key;
+    my $per_host_user =
+      defined $selected_key ? $last_user{$selected_key} : undef;
     my $default_user =
          $per_host_user
       || $ENV{SSH_MENU_USER}

@@ -110,7 +110,6 @@ my %TRANSLIT = (
     "\x{00BF}" => '',
 );
 
-my %TEMP_CACHE;
 my %GA_CACHE;
 my %EC_CACHE;
 
@@ -231,7 +230,7 @@ sub version_string {
 
 sub find_in_path {
     my ($cmd) = @_;
-    return undef unless defined $cmd && length $cmd;
+    return unless defined $cmd && length $cmd;
     my @exts = ('');
     if ( is_windows() ) {
         my $pathext = $ENV{PATHEXT} // '.COM;.EXE;.BAT;.CMD';
@@ -248,7 +247,7 @@ sub find_in_path {
             }
         }
     }
-    return undef;
+    return;
 }
 
 sub _devino {
@@ -647,7 +646,7 @@ sub report_summary {
 # Traversal  #
 ##############
 
-sub sortkey { return byte_key( $_[0] ) }
+sub sortkey { my ($s) = @_; return byte_key($s) }
 
 sub stat_key {
     my ($path) = @_;
@@ -864,7 +863,7 @@ sub stage_to_temp {
         return $tmp;
     }
     eval { unlink $tmp };
-    return undef;
+    return;
 }
 
 # Returns 1 when the rename happened and any requested verification passed,
@@ -1016,7 +1015,7 @@ sub execute_rename_group {
 sub sha256_file {
     my ($path) = @_;
     my $fh;
-    return undef unless open( $fh, '<:raw', $path );
+    return unless open( $fh, '<:raw', $path );
     my $sha = Digest::SHA->new(256);
     my $buf;
     while ( read( $fh, $buf, 1048576 ) ) { $sha->add($buf) }
@@ -1071,23 +1070,24 @@ sub detect_encoding {
 
 sub decode_known {
     my ( $bytes, $enc, $cfg ) = @_;
-    my $b = $bytes;
+    my $bytes_copy = $bytes;
     if ( $enc eq 'utf-8-bom' ) {
-        $b = substr( $b, 3 );
-        return decode( 'UTF-8', $b, FB_CROAK | LEAVE_SRC );
+        $bytes_copy = substr( $bytes_copy, 3 );
+        return decode( 'UTF-8', $bytes_copy, FB_CROAK | LEAVE_SRC );
     }
     if ( $enc eq 'utf-16le' ) {
-        $b = substr( $b, 2 );
-        return decode( 'UTF-16LE', $b, FB_CROAK | LEAVE_SRC );
+        $bytes_copy = substr( $bytes_copy, 2 );
+        return decode( 'UTF-16LE', $bytes_copy, FB_CROAK | LEAVE_SRC );
     }
     if ( $enc eq 'utf-16be' ) {
-        $b = substr( $b, 2 );
-        return decode( 'UTF-16BE', $b, FB_CROAK | LEAVE_SRC );
+        $bytes_copy = substr( $bytes_copy, 2 );
+        return decode( 'UTF-16BE', $bytes_copy, FB_CROAK | LEAVE_SRC );
     }
     if ( $enc eq 'assumed' ) {
-        return decode( $cfg->{assume_encoding}, $b, FB_CROAK | LEAVE_SRC );
+        return decode( $cfg->{assume_encoding}, $bytes_copy,
+            FB_CROAK | LEAVE_SRC );
     }
-    return decode( 'UTF-8', $b, FB_CROAK | LEAVE_SRC );
+    return decode( 'UTF-8', $bytes_copy, FB_CROAK | LEAVE_SRC );
 }
 
 sub encode_result {
@@ -1178,7 +1178,7 @@ sub glob_regex {
         elsif ( $c eq '?' ) { $re .= '[^/]'; $i++ }
         elsif ( $c eq '[' ) {
             my $j = index( $pat, ']', $i + 1 );
-            if ( $j < 0 ) { $re .= '\[', $i++ }
+            if ( $j < 0 ) { $re .= '\['; $i++ }
             else {
                 my $cls = substr( $pat, $i + 1, $j - $i - 1 );
                 $cls =~ s/^!/^/;
@@ -1188,7 +1188,7 @@ sub glob_regex {
         }
         elsif ( $c eq '{' ) {
             my $j = index( $pat, '}', $i + 1 );
-            if ( $j < 0 ) { $re .= '\{', $i++ }
+            if ( $j < 0 ) { $re .= '\{'; $i++ }
             else {
                 my $alt  = substr( $pat, $i + 1, $j - $i - 1 );
                 my @opts = split /,/, $alt, -1;
@@ -1246,20 +1246,20 @@ sub read_attr_rules {
         my @fields = split ' ', $line;
         my $pat    = shift @fields;
         next unless defined $pat;
-        my %set;
+        my %set_attrs;
         my %unset;
         my %val;
 
         for my $a (@fields) {
-            if    ( $a =~ /^-(.+)\z/ )      { $unset{$1} = 1 }
-            elsif ( $a =~ /^(.+?)=(.+)\z/ ) { $val{$1}   = $2 }
-            else                            { $set{$a}   = 1 }
+            if    ( $a =~ /^-(.+)\z/ )      { $unset{$1}     = 1 }
+            elsif ( $a =~ /^(.+?)=(.+)\z/ ) { $val{$1}       = $2 }
+            else                            { $set_attrs{$a} = 1 }
         }
         push @rules,
           {
             base  => $base,
             pat   => $pat,
-            set   => \%set,
+            set   => \%set_attrs,
             unset => \%unset,
             val   => \%val
           };
@@ -1427,7 +1427,7 @@ sub atomic_write {
     }
 
     if (@before) {
-        chmod( $before[2] & 07777, $tmp );
+        chmod( $before[2] & oct(7777), $tmp );
         if ( $cfg->{preserve_times} ) {
             utime( $before[8], $before[9], $tmp );
         }
@@ -1459,7 +1459,7 @@ sub atomic_write {
 sub read_sniff {
     my ( $path, $n ) = @_;
     my $fh;
-    return undef unless open( $fh, '<:raw', $path );
+    return unless open( $fh, '<:raw', $path );
     my $buf = '';
     read( $fh, $buf, $n );
     close $fh;
@@ -1469,8 +1469,8 @@ sub read_sniff {
 sub read_all {
     my ($path) = @_;
     my $fh;
-    return undef unless open( $fh, '<:raw', $path );
-    local $/;
+    return unless open( $fh, '<:raw', $path );
+    local $/ = undef;
     my $data = <$fh>;
     close $fh;
     return defined $data ? $data : '';
@@ -1740,13 +1740,13 @@ sub process_content {
 sub repo_root_for {
     my ($dir_raw) = @_;
     my $dir = abs_path($dir_raw);
-    return undef unless defined $dir && length $dir;
+    return unless defined $dir && length $dir;
     while (1) {
         my $g = File::Spec->catfile( $dir, '.git' );
         return $dir if -e $g;
         my $parent = abs_path( File::Spec->catdir( $dir, File::Spec->updir ) );
-        return undef unless defined $parent && length $parent;
-        return undef if $parent eq $dir;
+        return unless defined $parent && length $parent;
+        return if $parent eq $dir;
         $dir = $parent;
     }
 }
@@ -1757,7 +1757,7 @@ sub git_capture {
     return ( undef, 'git not found' ) unless $git;
     my $pid = open( my $fh, '-|', $git, @args );
     return ( undef, 'cannot run git' ) unless defined $pid;
-    local $/;
+    local $/ = undef;
     my $out = <$fh>;
     close $fh;
     return ( defined $out ? $out : '', undef );
@@ -1856,13 +1856,11 @@ sub run {
     }
 
     $CFG = $cfg;
-    eval {
-        binmode( STDOUT, ':encoding(UTF-8)' );
-        binmode( STDERR, ':encoding(UTF-8)' );
-        1;
-    } or do {
-        eval { binmode( STDOUT, ':utf8' ); binmode( STDERR, ':utf8' ); };
-    };
+
+    # Encode is a hard dependency, so the validated UTF-8 layer is always
+    # available; if it were not, the handles would stay as raw bytes.
+    binmode( STDOUT, ':encoding(UTF-8)' );
+    binmode( STDERR, ':encoding(UTF-8)' );
 
     my $target = $rest->[0];
     $target = '.' unless defined $target && length $target;
