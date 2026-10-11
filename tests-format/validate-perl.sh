@@ -10,10 +10,11 @@ exec >"$TMPLOG" 2>&1
 # validate-perl.sh
 # - Recursively finds all Perl files under ROOT_DIR
 #   (default: current directory) and checks formatting
-#   with perltidy and Perl syntax.
+#   with perltidy, Perl syntax and Perl::Critic.
 # - Usage: ./validate-perl.sh [ROOT_DIR]
 # - Requires: perltidy, perl in PATH
-#
+# - Optional: perlcritic in PATH. It is run at --severity 5 by default;
+#   set PERLCRITIC_SEVERITY to change the threshold (lower is stricter).
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
 
@@ -126,6 +127,35 @@ run_validate_perl() {
 		[ -n "$bad" ] && note_fail "$bad"
 	done
 
+	printf '%s\n' "[INFO] Running Perl::Critic..."
+	if command -v perlcritic >/dev/null 2>&1; then
+		PERLCRITIC_SEVERITY=${PERLCRITIC_SEVERITY:-5}
+		find "$ROOT_DIR" \
+			\( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) \
+			-prune -o -type f \
+			\( -name '*.pl' -o -name '*.pm' \
+			-o -name '*.t' -o -name '*.psgi' \) \
+			-print |
+			while IFS= read -r f; do
+				[ -n "$f" ] || continue
+				set +e
+				critic_out=$(perlcritic --severity "$PERLCRITIC_SEVERITY" "$f" 2>&1)
+				critic_rc=$?
+				set -e
+				if [ "${critic_rc:-0}" -ne 0 ]; then
+					printf '%s\n' \
+						"[ERROR] Perl::Critic (severity $PERLCRITIC_SEVERITY) in: $f" \
+						1>&2
+					printf '%s\n' "$critic_out" | sed 's/^/  /' 1>&2
+					note_fail "$f"
+				fi
+			done
+	else
+		printf '%s\n' \
+			"[INFO] perlcritic not installed;" \
+			" skipping Perl::Critic"
+	fi
+
 	issues=0
 	if [ -f "$TMP_FAILS" ]; then
 		issues=$(sort -u "$TMP_FAILS" | wc -l | tr -d ' ')
@@ -134,7 +164,7 @@ run_validate_perl() {
 	if [ "${issues:-0}" -ne 0 ]; then
 		printf '%s\n' \
 			"[INFO] Completed with $issues issue(s)" \
-			" (format changes and/or errors)"
+			" (format changes, syntax or Perl::Critic errors)"
 		printf '%s\n' "[INFO] Affected files (unique, first 200):"
 		sort -u "$TMP_FAILS" | sed -n '1,200p' | sed 's/^/  - /'
 		exit 2
