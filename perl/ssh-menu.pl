@@ -204,7 +204,8 @@ sub write_alias_file {
         for my $k ( sort keys %{$aliases_ref} ) {
             printf $afh "%s %s\n", $k, $aliases_ref->{$k};
         }
-        close $afh;
+        close $afh
+          or logw("Could not write alias file $alias_file: $!");
     }
     else {
         logw("Could not write alias file $alias_file: $!");
@@ -219,7 +220,8 @@ sub write_freq_file {
         for my $k ( sort keys %{$freq_ref} ) {
             printf $ffh "%s %d\n", $k, $freq_ref->{$k};
         }
-        close $ffh;
+        close $ffh
+          or logw("Could not write frequency file $freq_file: $!");
     }
     else {
         logw("Could not write frequency file $freq_file: $!");
@@ -237,7 +239,8 @@ sub write_last_user_file {
         for my $k ( sort keys %{$last_ref} ) {
             printf $ufh "%s %s\n", $k, $last_ref->{$k};
         }
-        close $ufh;
+        close $ufh
+          or logw("Could not write last user file $last_user_file: $!");
     }
     else {
         logw("Could not write last user file $last_user_file: $!");
