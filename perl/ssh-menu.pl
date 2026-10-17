@@ -141,7 +141,6 @@ sub setup_openbsd_sandbox {
       grep { defined $_ && length $_ && !$uniq{$_}++ } @rw_dirs;
 
     eval {
-        require OpenBSD::Pledge;
         require OpenBSD::Unveil;
 
         # The binding returns false and sets $! on failure; collect failures
@@ -178,17 +177,14 @@ sub setup_openbsd_sandbox {
         OpenBSD::Unveil::unveil()
           or die "unveil lock failed: $!";
 
-        # The binding takes a list of promises and always adds 'stdio';
-        # see OpenBSD::Pledge(3p).
-        OpenBSD::Pledge::pledge(
-            qw(stdio rpath wpath cpath fattr exec proc inet dns unix))
-          or die "pledge failed: $!";
+        # SSH and its helpers need to execute. Keep unveil for this parent
+        # without installing a syscall ceiling that would prevent execve.
 
         die 'unveil failed for: ' . join( ', ', @uv_failed ) . "\n"
           if @uv_failed;
         1;
     } or do {
-        logw("OpenBSD pledge/unveil setup failed: $@");
+        logw("OpenBSD unveil setup failed: $@");
     };
 }
 
@@ -958,7 +954,9 @@ known_hosts verification.
 
 On OpenBSD the program unveils the directories in C<PATH> (read/execute) and
 the directories holding its state files (read/write/create), then locks the
-veil and pledges C<stdio rpath wpath cpath fattr exec proc inet dns unix>.
+veil. The launcher stays unpledged because SSH may execute other programs.
+The view restricts this process only: without execpromises the kernel clears
+it when SSH is executed. There is no launcher syscall ceiling.
 Sandbox setup is best-effort: a failure is reported as a warning and the
 program continues.
 

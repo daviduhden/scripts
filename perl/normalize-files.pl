@@ -186,8 +186,10 @@ sub setup_openbsd_sandbox {
         # The binding takes a list of promises and always adds 'stdio';
         # see OpenBSD::Pledge(3p).
         my @promises = qw(stdio rpath wpath cpath fattr);
-        push @promises, qw(exec proc flock unix) if $use_git;
-        OpenBSD::Pledge::pledge(@promises) or die "pledge failed: $!";
+        # Git runs external helpers. Pledge only the in-process mode,
+        # which never needs to execute another program.
+        OpenBSD::Pledge::pledge(@promises) or die "pledge failed: $!"
+          unless $use_git;
 
         die 'unveil failed for: ' . join( ', ', @uv_failed ) . "\n"
           if @uv_failed;
@@ -2166,8 +2168,10 @@ copied. Long paths are used as given; no C<\\?> prefix is added.
 
 On OpenBSD the program unveils the processed tree (read/write/create), the
 repository metadata when git is used, the VERSION file and I<@INC>, then
-pledges C<stdio rpath wpath cpath fattr> (plus C<exec proc flock unix> when
-git may run). Sandbox setup is best-effort and does not abort the run.
+pledges C<stdio rpath wpath cpath fattr> only when Git will not run.
+Git mode stays unpledged to allow external helpers; its locked unveil view
+still restricts pathname operations in this Perl process. Execve clears that
+view in the helpers. Sandbox setup remains best-effort.
 
 =head1 EXIT STATUS
 
