@@ -186,9 +186,11 @@ sub setup_openbsd_sandbox {
         # The binding takes a list of promises and always adds 'stdio';
         # see OpenBSD::Pledge(3p).
         my @promises = qw(stdio rpath wpath cpath fattr);
+
         # Git runs external helpers. Pledge only the in-process mode,
         # which never needs to execute another program.
-        OpenBSD::Pledge::pledge(@promises) or die "pledge failed: $!"
+        OpenBSD::Pledge::pledge(@promises)
+          or die "pledge failed: $!"
           unless $use_git;
 
         die 'unveil failed for: ' . join( ', ', @uv_failed ) . "\n"
