@@ -8,15 +8,20 @@ printf '%s\n' "[INFO] Logging to: $TMPLOG" >&3
 exec >"$TMPLOG" 2>&1
 
 # clang-format-all.sh
-# - Recursively finds all C/C++ source files under ROOT_DIR
+# - Recursively finds all C/C++ and Java source files under ROOT_DIR
 #   (default: current directory, excluding .git directories) and applies
 #   formatting.
-# - Prefers clang-format for C11/C17/C23 projects, otherwise knfmt.
-# - Detects literal standards in build metadata in ancestor directories.
-# - C_FORMAT_STANDARD overrides detection (e.g. c23 or c99).
+# - Prefers clang-format for C++11/14/17/20/23 and C11/C17/C23 projects,
+#   otherwise knfmt.
+# - Detects literal C and C++ standards in build metadata in ancestor
+#   directories.
+# - C_FORMAT_STANDARD overrides detection (e.g. c++23, cxx23, c23 or c99).
+# - Java sources are always formatted with clang-format; knfmt is never used
+#   for Java.
+# - Uses a project-root .clang-format when present; otherwise uses the bundled
+#   Openbar style.
 # - Usage: ./clang-format-all.sh [ROOT_DIR]
-# - Requires: knfmt or clang-format in PATH
-# - clang-format always uses the bundled Openbar style, including after install.
+# - Requires: knfmt or clang-format in PATH.
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
@@ -41,15 +46,33 @@ detect_standard() {
 	while :; do
 		standard=$(
 			for metadata in Makefile.inc Makefile makefile GNUmakefile BSDmakefile \
-				CMakeLists.txt meson.build compile_commands.json; do
+				CMakeLists.txt build/CMakeLists.txt meson.build compile_commands.json; do
 				[ -f "$standard_dir/$metadata" ] || continue
 				sed 's/#.*//' "$standard_dir/$metadata"
 			done | awk '
+			match($0, /-std=[[:space:]]*(gnu\+\+|c\+\+)(11|14|17|20|23)([^[:alnum:]_]|$)/) {
+				s = substr($0, RSTART, RLENGTH)
+				sub(/^-std=[[:space:]]*/, "", s)
+				sub(/[^[:alnum:]+].*$/, "", s)
+				last = s
+			}
 			match($0, /-std=[[:space:]]*(gnu|c)(89|90|99|11|17|18|23|2x|1x)([^[:alnum:]_]|$)/) {
 				s = substr($0, RSTART, RLENGTH)
 				sub(/^-std=[[:space:]]*/, "", s)
 				sub(/[^[:alnum:]].*$/, "", s)
 				last = s
+			}
+			match($0, /CXX_STANDARD[[:space:]]+(11|14|17|20|23)([^[:alnum:]_]|$)/) {
+				s = substr($0, RSTART, RLENGTH)
+				sub(/^CXX_STANDARD[[:space:]]+/, "", s)
+				sub(/[^[:digit:]].*$/, "", s)
+				last = "c++" s
+			}
+			match($0, /cxx_std_(11|14|17|20|23)([^[:alnum:]_]|$)/) {
+				s = substr($0, RSTART, RLENGTH)
+				sub(/^cxx_std_/, "", s)
+				sub(/[^[:digit:]].*$/, "", s)
+				last = "c++" s
 			}
 			match($0, /C_STANDARD[[:space:]]+(90|99|11|17|18|23)([^[:alnum:]_]|$)/) {
 				s = substr($0, RSTART, RLENGTH)
@@ -87,12 +110,16 @@ run_clang_format_all() {
 	}
 	ROOT_DIR=$(CDPATH='' cd "$ROOT_DIR" && pwd -P)
 	SCRIPT_DIR=$(CDPATH='' cd "$(dirname "$0")" && pwd -P)
-	STYLE_FILE="$SCRIPT_DIR/clang-format-all.yaml"
-	if [ "${0##*/}" = clang-format-all.sh ]; then
-		STYLE_FILE="$SCRIPT_DIR/clang-format"
+	if [ -r "$ROOT_DIR/.clang-format" ]; then
+		STYLE_FILE="$ROOT_DIR/.clang-format"
+	else
+		STYLE_FILE="$SCRIPT_DIR/clang-format-all.yaml"
+		if [ "${0##*/}" = clang-format-all.sh ]; then
+			STYLE_FILE="$SCRIPT_DIR/clang-format"
+		fi
 	fi
 	case ${C_FORMAT_STANDARD:-} in
-	'' | c89 | c90 | c99 | c11 | c1x | c17 | c18 | c23 | c2x | gnu89 | gnu90 | gnu99 | gnu11 | gnu1x | gnu17 | gnu18 | gnu23 | gnu2x) ;;
+	'' | c89 | c90 | c99 | c11 | c1x | c17 | c18 | c23 | c2x | gnu89 | gnu90 | gnu99 | gnu11 | gnu1x | gnu17 | gnu18 | gnu23 | gnu2x | c++11 | c++14 | c++17 | c++20 | c++23 | cxx11 | cxx14 | cxx17 | cxx20 | cxx23 | gnu++11 | gnu++14 | gnu++17 | gnu++20 | gnu++23) ;;
 	*)
 		printf '%s\n' '[ERROR] Unsupported C_FORMAT_STANDARD' >&2
 		exit 2
@@ -127,9 +154,9 @@ run_clang_format_all() {
 		-prune -o -type f \
 		\( -name "*.[ch]" -o -name "*.cc" -o -name "*.cpp" \
 		-o -name "*.cxx" -o -name "*.hh" -o -name "*.hpp" \
-		-o -name "*.hxx" \) \
+		-o -name "*.hxx" -o -name "*.java" \) \
 		-print | sed -n '1p' | grep -q .; then
-		printf '%s\n' "[INFO] No C/C++ source files found under: $ROOT_DIR"
+		printf '%s\n' "[INFO] No C/C++/Java source files found under: $ROOT_DIR"
 		exit 0
 	fi
 
@@ -144,7 +171,7 @@ run_clang_format_all() {
 		clang-format "-style=file:$STYLE_FILE" -assume-filename=check.cpp \
 			-dump-config >/dev/null
 	fi
-	printf '%s\n' "[INFO] Applying C/C++ formatting (default: $FORMATTER)..."
+	printf '%s\n' '[INFO] Applying C/C++ formatting (standard-aware selection)...'
 	find "$ROOT_DIR" \
 		-name .git \
 		-prune -o -type f \
@@ -157,7 +184,7 @@ run_clang_format_all() {
 			standard=${C_FORMAT_STANDARD:-$(detect_standard "$f")}
 			selected=$FORMATTER
 			case "$standard" in
-			c11 | c1x | c17 | c18 | c23 | c2x | gnu11 | gnu1x | gnu17 | gnu18 | gnu23 | gnu2x)
+			c11 | c1x | c17 | c18 | c23 | c2x | gnu11 | gnu1x | gnu17 | gnu18 | gnu23 | gnu2x | c++11 | c++14 | c++17 | c++20 | c++23 | cxx11 | cxx14 | cxx17 | cxx20 | cxx23 | gnu++11 | gnu++14 | gnu++17 | gnu++20 | gnu++23)
 				if command -v clang-format >/dev/null 2>&1; then
 					selected=clang-format
 				else
@@ -172,7 +199,27 @@ run_clang_format_all() {
 				clang-format -i "-style=file:$STYLE_FILE" -fallback-style=none "$f"
 			fi
 		done
-	printf '%s\n' '[INFO] C/C++ formatting applied'
+	if find "$ROOT_DIR" \
+		-name .git \
+		-prune -o -type f -name "*.java" \
+		-print | sed -n '1p' | grep -q .; then
+		if ! command -v clang-format >/dev/null 2>&1; then
+			printf '%s\n' '[ERROR] Java sources found but clang-format is unavailable; Java formatting skipped' >&2
+		else
+			printf '%s\n' '[INFO] Applying Java formatting with clang-format...'
+			find "$ROOT_DIR" \
+				-name .git \
+				-prune -o -type f -name "*.java" \
+				-print |
+				while IFS= read -r f; do
+					[ -n "$f" ] || continue
+					printf '[INFO] %s: clang-format (Java)\n' "$f"
+					clang-format -i "-style=file:$STYLE_FILE" -fallback-style=none "$f"
+				done
+			printf '%s\n' '[INFO] Java formatting applied'
+		fi
+	fi
+	printf '%s\n' '[INFO] C/C++/Java formatting applied'
 	exit 0
 }
 
