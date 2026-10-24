@@ -16,7 +16,7 @@ use `bash debian/<script>.bash` with the privileges required by that script.
 | [add-i2pd-repo.bash](add-i2pd-repo.bash) | Adds the Purple I2P APT repository, installs `i2pd`, and starts its service on supported init systems. |
 | [add-lynis-repo.bash](add-lynis-repo.bash) | Adds the CISOfy APT repository and installs Lynis. |
 | [add-tor-repo.bash](add-tor-repo.bash) | Adds the Tor Project APT repository, installs Tor, and configures its service. |
-| [ai-purge-history.bash](ai-purge-history.bash) | Deletes Codex, Copilot, OpenCode, Crush, and project-local Swival history/state while retaining configuration and credentials. |
+| [ai-purge-history.bash](ai-purge-history.bash) | Deletes Codex, Copilot, OpenCode, Crush, and project-local Swival history/state while retaining configuration and credentials. Supports `--dry-run`/`-n` or `DRY_RUN=1`. |
 | [clean-logs.bash](clean-logs.bash) | Deletes compressed logs under `/var/log` and `.old` files on the root file system; supports `--dry-run` or `DRY_RUN=1`. |
 | [enable-tor-transport.bash](enable-tor-transport.bash) | Installs Tor transport support and rewrites APT sources to use it, keeping timestamped source backups. |
 | [install-hardened-malloc.bash](install-hardened-malloc.bash) | Builds GrapheneOS hardened_malloc on Debian 13 and configures global preloading; supports amd64 and arm64. |

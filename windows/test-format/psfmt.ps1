@@ -40,7 +40,7 @@ Examples:
   .\psfmt.ps1 -d .
   .\psfmt.ps1 -l -exclude '*.generated.ps1' -exclude 'build' .
   .\psfmt.ps1 -c .
-  .\psfmt.ps1 -w -settings .\PSScriptAnalyzerSettings.psd1 .
+  .\psfmt.ps1 -w -settings .\my-settings.psd1 .
 
 Writes preserve UTF-8 (with/without BOM), BOM-marked UTF-16 LE/BE,
 uniform LF/CRLF and the exact trailing newline sequence. Ambiguous encodings,

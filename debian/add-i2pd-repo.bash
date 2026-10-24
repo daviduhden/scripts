@@ -120,11 +120,24 @@ log_detected_platform() {
 }
 
 install_repo_key() {
+	local key_tmp
+
 	log "Importing signing key..."
 	install -d -m 0755 /usr/share/keyrings
-	net_curl https://repo.i2pd.xyz/r4sas.gpg |
-		gpg --batch --yes --dearmor \
-			-o /usr/share/keyrings/purplei2p.gpg
+	key_tmp="$(mktemp /tmp/purplei2p-key.XXXXXX)" || {
+		error "Cannot create a temporary key file."
+	}
+	if ! net_curl https://repo.i2pd.xyz/r4sas.gpg \
+		-o "$key_tmp"; then
+		rm -f "$key_tmp"
+		error "Cannot download the Purple I2P signing key."
+	fi
+	if ! gpg --batch --yes --dearmor \
+		-o /usr/share/keyrings/purplei2p.gpg <"$key_tmp"; then
+		rm -f "$key_tmp"
+		error "Cannot dearmor the Purple I2P signing key."
+	fi
+	rm -f "$key_tmp"
 }
 
 write_i2pd_sources() {
@@ -179,6 +192,8 @@ main() {
 	require_root
 	require_cmd curl
 	require_cmd dpkg
+	require_cmd gpg
+	require_cmd mktemp
 	require_cmd ps
 	detect_apt_cmd
 	load_os_release

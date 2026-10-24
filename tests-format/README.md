@@ -15,7 +15,7 @@ Command Prompt without a POSIX shell or Make.
 | [install-knfmt-linux.sh](install-knfmt-linux.sh) | Builds and installs knfmt on Linux with optional `[PREFIX]` (default `/usr/local`). |
 | [validate-correctness.sh](validate-correctness.sh) | Audits shell semantics, command portability, unsafe operations, and platform assumptions. Supports target selection, strict checks, and text/JSON output. |
 | [validate-make.sh](validate-make.sh) | Checks Makefile syntax and formatting under `[ROOT_DIR]` with `mbake`, lints with `checkmake`, and runs a `bmake` dry run for BSD make compatibility. |
-| [validate-manpages.sh](validate-manpages.sh) | Runs `mandoc` lint on manual pages under `[ROOT_DIR]`, treating warnings as errors. |
+| [validate-manpages.sh](validate-manpages.sh) | Runs `mandoc` lint on manual pages under `[ROOT_DIR]`, treating warnings as errors; skips when `mandoc` is absent. |
 | [validate-perl.sh](validate-perl.sh) | Checks Perl syntax and applies available Perl linting/formatting under `[ROOT_DIR]`. |
 | [validate-shell.sh](validate-shell.sh) | Checks shell syntax and applies available shell analysis/formatting under `[ROOT_DIR]`. |
 | [validate-windows-installer.bat](validate-windows-installer.bat) | Statically checks installer/launcher requirements, program manifests, and CRLF endings. Accepts optional `[ROOT_DIR]`. |
@@ -34,9 +34,10 @@ sh tests-format/fix-permissions.sh --check .
 perl tests-format/test-normalize-files.pl
 ```
 
-`make test` runs the repository's configured validation and regression targets;
-it does not run every script in this directory. See the root
-[README](../README.md) and [Makefile](../Makefile) for the exact sequence.
+`make test` runs the repository's configured validation and regression targets,
+including `validate-manpages.sh` (which skips when `mandoc` is absent); it does
+not run every script in this directory. See the root [README](../README.md) and
+[Makefile](../Makefile) for the exact sequence.
 `make install-tests-format` installs the tools selected by the Makefile,
 removing `.sh` from shell command names.
 

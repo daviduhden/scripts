@@ -153,19 +153,19 @@ run_fastfetch_update() {
 	fi
 
 	PKG_ARCH="$(detect_pkg_arch)"
-	TMPDIR="$(mktemp -d /tmp/fastfetch-XXXXXX)"
-	DEB_FILE="$TMPDIR/fastfetch-linux-${PKG_ARCH}.deb"
-	trap 'rm -rf "$TMPDIR" 2>/dev/null || true' EXIT
+	WORK_DIR="$(mktemp -d /tmp/fastfetch-XXXXXX)"
+	DEB_FILE="$WORK_DIR/fastfetch-linux-${PKG_ARCH}.deb"
+	trap 'rm -rf "$WORK_DIR" 2>/dev/null || true' EXIT
 
 	log "Downloading fastfetch ${LATEST_VERSION} (${PKG_ARCH})..."
 	if ! download_deb "$LATEST_VERSION" \
-		"$PKG_ARCH" "$TMPDIR" "$DEB_FILE"; then
+		"$PKG_ARCH" "$WORK_DIR" "$DEB_FILE"; then
 		error "download failed for fastfetch" \
 			"${LATEST_VERSION} (${PKG_ARCH})"
 	fi
 
 	if [[ ! -f $DEB_FILE ]]; then
-		alt_file="$(find "$TMPDIR" -maxdepth 1 \
+		alt_file="$(find "$WORK_DIR" -maxdepth 1 \
 			-type f -name 'fastfetch-linux-*.deb' |
 			sed -n '1p')"
 		if [[ -n $alt_file ]]; then

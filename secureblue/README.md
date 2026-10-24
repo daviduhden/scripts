@@ -8,7 +8,7 @@ user services and desktop configuration run in the target user's session.
 
 | Script | Purpose |
 | --- | --- |
-| [ai-purge-history.bash](ai-purge-history.bash) | Deletes Codex, Copilot, OpenCode, Crush, and project-local Swival history/state while retaining configuration and credentials. |
+| [ai-purge-history.bash](ai-purge-history.bash) | Deletes Codex, Copilot, OpenCode, Crush, and project-local Swival history/state while retaining configuration and credentials. Supports `--dry-run`/`-n` or `DRY_RUN=1`. |
 | [down-music.bash](down-music.bash) | Downloads YouTube audio with `yt-dlp`, converts it to OGG Vorbis with FFmpeg, and normalizes the output filename. Takes a video URL. |
 | [install-arti-service.bash](install-arti-service.bash) | Installs and starts the Arti systemd user service, creates XDG directories and configuration, and optionally enables the socat proxy. |
 | [install-openrsync.bash](install-openrsync.bash) | Builds openrsync from its upstream master branch and installs it to `/usr/local`, using Homebrew build dependencies. |

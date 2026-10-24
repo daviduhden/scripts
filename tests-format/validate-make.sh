@@ -113,7 +113,8 @@ run_validate_make() {
 			while IFS= read -r f; do
 				[ -n "$f" ] || continue
 				if ! checkmake "$f" >/dev/null 2>&1; then
-					printf '%s\n' "[WARN] checkmake found issues in: $f" 1>&2
+					printf '%s\n' "[ERROR] checkmake found issues in: $f" 1>&2
+					note_fail "$f"
 				fi
 			done || true
 	else

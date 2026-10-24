@@ -12,8 +12,9 @@ exec >"$TMPLOG" 2>&1
 #   (default: current directory) and checks formatting
 #   with perltidy, Perl syntax and Perl::Critic.
 # - Usage: ./validate-perl.sh [ROOT_DIR]
-# - Requires: perltidy, perl in PATH
-# - Optional: perlcritic, either in PATH or in the local::lib
+# - Requires: perl in PATH
+# - Optional: perltidy in PATH (formatting is skipped when absent);
+#   perlcritic, either in PATH or in the local::lib
 #   $PERL_LOCAL_LIB (default ~/perl5). It is run at --severity 5 by
 #   default; set PERLCRITIC_SEVERITY to change the threshold (lower is
 #   stricter).
@@ -69,7 +70,7 @@ run_validate_perl() {
 			-print |
 			while IFS= read -r f; do
 				[ -n "$f" ] || continue
-				if ! perltidy -ast -se -o /dev/null "$f" >/dev/null 2>&1; then
+				if ! perltidy -npro -ast -se -o /dev/null "$f" >/dev/null 2>&1; then
 					printf "%s\n" "$f"
 				fi
 			done >"$UNFMT" || true
@@ -80,9 +81,11 @@ run_validate_perl() {
 
 			while IFS= read -r file; do
 				[ -n "$file" ] || continue
-				# Format in-place without backups
-				# (backup extension "/" disables backups)
-				if perltidy --backup-and-modify-in-place \
+				# Ignore user/global profiles so validation is
+				# reproducible. "/" makes the temporary backup
+				# extension unusable; perltidy removes the backup
+				# after a successful rewrite.
+				if perltidy -npro --backup-and-modify-in-place \
 					--backup-file-extension=/ \
 					-se "$file" >/dev/null 2>&1; then
 					note_fail "$file"

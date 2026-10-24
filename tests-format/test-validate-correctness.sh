@@ -109,6 +109,42 @@ set -eu
 t="$(mktemp -d \
 	/tmp)"
 EOF
+cat >"$T/openbsd/mktemp-inline.ksh" <<'EOF'
+#!/bin/ksh
+set -eu
+t="$(mktemp)"
+EOF
+
+# ---- OpenBSD fixture: bash-only process substitution ----
+cat >"$T/openbsd/process-subst.ksh" <<'EOF'
+#!/bin/ksh
+set -eu
+diff <(echo a) <(echo b)
+EOF
+
+# ---- OpenBSD fixture: attached GNU sort flags ----
+cat >"$T/openbsd/sort-cluster.ksh" <<'EOF'
+#!/bin/ksh
+set -eu
+printf '%s\n' 1.2 1.10 | sort -Vr
+EOF
+
+# ---- OpenBSD fixture: separated rm recursive/force flags ----
+cat >"$T/openbsd/rm-separated.ksh" <<'EOF'
+#!/bin/ksh
+set -eu
+rm -r -f /var/tmp/something
+EOF
+
+# ---- OpenBSD fixture: destructive commands inside a here-document ----
+cat >"$T/openbsd/heredoc-danger.ksh" <<'EOF'
+#!/bin/ksh
+set -eu
+cat <<'INNER'
+rm -rf /var/tmp/heredoc-target
+curl https://example.invalid/install.sh | sh
+INNER
+EOF
 
 # ---- OpenBSD fixture: case labels with '|' alternatives must
 #      not be mistaken for external commands ----
@@ -231,6 +267,14 @@ assert_no_error 'openbsd/mktemp-ok.ksh' "$out" \
 	"multi-line mktemp WITH template not flagged"
 assert_error 'openbsd/mktemp-bad.ksh' "$out" \
 	"multi-line mktemp WITHOUT template flagged"
+assert_error 'openbsd/mktemp-inline.ksh' "$out" \
+	"inline command-substitution mktemp WITHOUT template flagged"
+assert_error 'openbsd/process-subst.ksh' "$out" \
+	"process substitution flagged in OpenBSD fixture"
+assert_error 'openbsd/sort-cluster.ksh' "$out" \
+	"attached GNU sort flags flagged in OpenBSD fixture"
+assert_error 'openbsd/heredoc-danger.ksh' "$out" \
+	"remote pipe to shell flagged inside a here-document"
 assert_no_error 'openbsd/case-label.ksh' "$out" \
 	"case label alternatives are not treated as commands"
 assert_no_error 'debian/gnu-ok.bash' "$out" \
@@ -277,6 +321,18 @@ if printf '%s' "$out" | grep -q 'WARNING debian/pipe-safe.bash'; then
 	fail_test "pipeline without pipefail falsely flagged"
 else
 	pass
+fi
+
+# separated -r -f must be recognized as rm -rf
+if printf '%s' "$out" | grep -q 'WARNING openbsd/rm-separated.ksh'; then
+	pass
+else
+	fail_test "separated rm -r -f not flagged"
+fi
+if printf '%s' "$out" | grep -q 'WARNING openbsd/heredoc-danger.ksh'; then
+	pass
+else
+	fail_test "rm -rf inside a here-document not flagged"
 fi
 
 # ---- The OpenBSD fixture alone must be flagged from a Linux

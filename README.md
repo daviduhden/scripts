@@ -1,6 +1,6 @@
 # Scripts
 
-Shell and Perl utilities for system administration and maintenance across multiple operating systems.
+Shell, Perl, and PowerShell utilities for system administration and maintenance across multiple operating systems.
 
 ## Structure
 
@@ -142,8 +142,9 @@ also work through their full path. Perl is provided by Strawberry Perl and is
 not removed automatically: other applications may depend on it.
 
 `ssh-menu` needs an SSH client at runtime. Windows 10/11 usually provide
-OpenSSH through *Settings → Apps → Optional features → OpenSSH Client*; the
-installer reports it but does not install it.
+OpenSSH through *Settings → Apps → Optional features → OpenSSH Client*. The
+installer does not install or verify it; `ssh-menu` reports a missing client
+when it runs.
 
 ## Validation and formatting
 
@@ -194,6 +195,7 @@ edit that one file to evolve the shared style. If `fourmolu` is not present in
 - make validation/formatting (`tests-format/validate-make.sh`)
 - permission validation (`tests-format/fix-permissions.sh --check`, read-only)
 - correctness validation (`tests-format/validate-correctness.sh --target all`)
+- man page validation (`tests-format/validate-manpages.sh`, skipped when `mandoc` is absent)
 - regression tests for both new tools (`test-fix-permissions.sh`, `test-validate-correctness.sh`)
 - ssh-menu and normalize-files regression tests (`test-ssh-menu.pl`, `test-normalize-files.pl`)
 
@@ -211,7 +213,7 @@ File modes are derived from the actual content, as classified by `file(1)`:
 | text, config, documentation, data     | 0644 |
 | Makefiles                              | 0755 |
 
-A shebang (`#!`) is used as an additional signal for files that `file(1)` classifies as plain text. File extensions alone never make a file executable. Content is authoritative: a file that looks like a script (script content detected by `file(1)`, or a shebang) is treated as executable even if it was deliberately non-executable — to keep a script non-executable by design, give it no shebang.
+A shebang (`#!`) is used as an additional signal for files that `file(1)` classifies as plain text. File extensions alone never make a file executable. Content is authoritative: a file that looks like a script (script content detected by `file(1)`, or a shebang) is treated as executable even if it was deliberately non-executable. To keep a script non-executable, avoid both a shebang and content that `file(1)` recognizes as a script; removing only the shebang is not sufficient.
 
 - `make fix-permissions` (or `tests-format/fix-permissions.sh`): applies the policy above to the whole tree. `-n`/`--dry-run` shows what would change; `-v`/`--verbose` shows every decision; after fixing, the mode changes visible to git are shown with `git diff --summary`.
 - `make check-permissions` (or `fix-permissions.sh --check`): read-only; exits 1 when any file has incorrect permissions.
@@ -239,7 +241,7 @@ Findings are classified as `ERROR`, `WARNING`, `INFO` or `UNVERIFIED`. The exit 
 
 - Default user: `SECUREBLUE_USER=david`
 - Default path: `BASH_CONF_DST_DIR=/var/home/${SECUREBLUE_USER}/.bashrc.d`
-- Immutable handling: removes immutable bit (`chattr -i`) on directory/file before install, then restores it (`chattr +i`) afterwards.
+- Immutable handling: removes the immutable bit (`chattr -i`) from the destination directory before install, then restores it (`chattr +i`) afterwards. The installed files themselves are not made immutable.
 
 Examples:
 

@@ -38,6 +38,10 @@ require_cmd() {
 # If DRY_RUN=1 is set in the environment, the script will only show
 # what would be deleted, without actually removing files.
 DRY_RUN="${DRY_RUN:-0}"
+case "$DRY_RUN" in
+1 | true | TRUE | yes | YES | on | ON) DRY_RUN=1 ;;
+*) DRY_RUN=0 ;;
+esac
 
 parse_args() {
 	while [ "$#" -gt 0 ]; do
@@ -104,6 +108,12 @@ cleanup_old_files() {
 main() {
 	parse_args "$@"
 	require_cmd find
+
+	if [[ $DRY_RUN -ne 1 && ${EUID:-$(id -u)} -ne 0 ]]; then
+		error "This script must be run as root unless --dry-run is used." \
+			"Try: sudo $0"
+		exit 1
+	fi
 
 	log "----------------------------------------"
 	log "Log cleanup started"

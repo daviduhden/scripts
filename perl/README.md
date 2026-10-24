@@ -13,7 +13,7 @@ Run from the repository root:
 
 ```sh
 perl perl/normalize-files.pl --help
-perl perl/normalize-files.pl --dry-run ./example
+perl perl/normalize-files.pl --dry-run ./some-directory
 perl perl/ssh-menu.pl
 ```
 

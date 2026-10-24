@@ -37,8 +37,9 @@ set -u
 #   has -0/-r/-P but no long options; stat(1) uses -f format (no -c);
 #   date(1) has no -d; head(1) has no -c; sort(1) has no -V/-h/-R;
 #   cp(1) has -a; rcctl(8) has -q; basename(1) has no options at all;
-#   ksh(1) is pdksh: no local, no declare, no pipefail, no <<<,
-#   print(1) supports only -n/-e/-E.
+#   ksh(1) is pdksh-derived: declare, <<<, process substitution and
+#   $'...' are not portable. The project also requires typeset instead
+#   of local and a guarded pipefail for portability across ksh versions.
 # - GNU-only behavior was verified against the coreutils/findutils
 #   documentation.
 # - The pipefail/SIGPIPE rules reflect verified behavior: a
@@ -52,6 +53,12 @@ set -u
 # UNVERIFIED findings are emitted when a construct cannot be
 # classified with enough confidence (e.g. an unknown interpreter in
 # a shebang); they never turn into errors on their own.
+#
+# Here-document bodies are not parsed as normal shell because they are often
+# configuration or generated code. A narrow set of high-confidence patterns
+# (remote pipe to shell, unguarded rm -rf, recursive chmod/chown, find /,
+# mktemp without a template) is still checked. Review generated scripts for
+# anything else.
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
@@ -132,7 +139,7 @@ KEYWORDS='if then else elif fi for while until do done case esac in function sel
 
 COMMON_CMDS='awk bash basename bmake bzip2 cat cc chgrp chmod chown chsh clang cmake cmp comm cp csh cut date dd df diff dirname du expr false fgrep file find fmt ftp getent git gh git-lfs gmake gpg grep gunzip gzip head hostname id install join jq kill ksh ksh93 ldconfig less ln ls make mandoc md5 mkdir mount mv netstat nice nl nohup od openssl passwd paste patch perl pgrep pkill printf ps pwd readlink reboot rm rmdir scp sed seq sh sha1 sha256 sha384 sha512 sleep sort ssh stat su sudo tail tar tee test touch tr true tty uname uniq unzip uptime vi wc wget who xargs xz zip curl rsync mktemp'
 
-OPENBSD_CMDS='doas rcctl sysmerge sysupgrade syspatch pkg_add pkg_delete pkg_info acme-client crush lynis signify'
+OPENBSD_CMDS='doas rcctl sysmerge sysupgrade syspatch dbupdate pkg_add pkg_delete pkg_info acme-client crush lynis signify'
 
 DEBIAN_CMDS='apt apt-get apt-cache dpkg dpkg-query lsb_release needrestart runuser lscpu lspci lsusb free uptime ip ss journalctl systemctl update-rc.d chkconfig service sv herd rc-update rc-service s6-rc s6-svc systemd runit runit-init openrc-init shepherd s6-svscan tor torsocks i2pd monerod monero-wallet-cli monero-lws-daemon useradd groupadd logname sha256sum certbot lynis systemcheck nproc sysctl btop fastfetch edit signify go'
 
@@ -180,6 +187,41 @@ function emit(sev, ln, msg, ref, fix) {
     else if (sev == "INFO") n_info++
     else if (sev == "UNVERIFIED") n_unver++
 }
+function rm_rf_line(line,    rmpart) {
+    if (line !~ /(^|[[:space:];|&()])rm[[:space:]]/)
+        return 0
+    rmpart = line
+    sub(/^.*rm[[:space:]]+/, "", rmpart)
+    if (rmpart ~ /-[a-zA-Z]*r[a-zA-Z]*f/ ||
+        (rmpart ~ /-[a-zA-Z]*r/ && rmpart ~ /-[a-zA-Z]*f/) ||
+        (rmpart ~ /--recursive/ && rmpart ~ /--force/))
+        return 1
+    return 0
+}
+
+function hd_check(line, raw, ln) {
+    # The validator itself and its regression tests embed deliberately bad
+    # snippets as here-documents; do not audit those fixtures.
+    if (FILENAME ~ /(^|\/)(validate-correctness|test-[^/]*)\.sh$/)
+        return
+    # Here-document bodies are usually configuration or generated code, so
+    # only high-confidence destructive/remote patterns are audited here.
+    if (line ~ /(curl|wget|ftp)[^;|&]*\|[[:space:]]*(ba)?sh([[:space:]]|$)/)
+        emit("ERROR", ln, "piping a remote script directly into a shell in a here-document", "ShellCheck SC2320", "Download to a file, verify it, then execute it")
+    if (rm_rf_line(line)) {
+        if (raw ~ /\$|"|\{\}|--/)
+            emit("INFO", ln, "rm -rf with quoted/bounded operand in a here-document", "rm(1)", "Ensure the operand is bounded and quoted")
+        else
+            emit("WARNING", ln, "rm -rf with unquoted/unbounded operand in a here-document", "rm(1)", "Quote the path and bound the deletion")
+    }
+    if (line ~ /(^|[[:space:];|&()])(chmod|chown)[[:space:]]+-R/ && raw !~ /"/)
+        emit("WARNING", ln, "recursive permission change with unquoted target in a here-document", "chmod(1), chown(1)", "Quote the path and bound the recursion")
+    if (line ~ /(^|[[:space:];|&()])find[[:space:]]+\// && line !~ /-xdev/)
+        emit("WARNING", ln, "find rooted at / without -xdev in a here-document", "find(1)", "Bound the search or use -xdev")
+    if (line ~ /(^|[;|&(])mktemp([[:space:]]|[);|&]|$)/ && raw !~ /XXXX/)
+        emit(gsev(), ln, "mktemp without a template is GNU-only in a here-document", "GNU mktemp(1); OpenBSD mktemp(1)", "Always pass a template ending in XXXXXX")
+}
+
 function check(line, raw) {
     # ---- GNU-only options (severity depends on target) ----
     if (line ~ /(^|[[:space:];|&()])(grep|egrep)[[:space:]]+(-P|--perl-regexp)([[:space:]]|$)/)
@@ -194,7 +236,7 @@ function check(line, raw) {
         emit(gsev(), NR, "stat -c/--format is GNU-only", "GNU stat(1); OpenBSD stat(1)", "OpenBSD stat uses -f format")
     if (line ~ /(^|[[:space:];|&()])date[[:space:]]+(-d|--date)([[:space:]]|$)/)
         emit(gsev(), NR, "date -d/--date is GNU-only", "GNU date(1); OpenBSD date(1)", "Use date -r seconds or compute the date differently")
-    if (line ~ /(^|[[:space:];|&()])sort[[:space:]]+(-V|--version-sort|-h|--human-numeric-sort|-R|--random-sort)([[:space:]]|$)/)
+    if (line ~ /(^|[[:space:];|&()])sort[[:space:]]+(-[a-zA-Z]*[VhR][a-zA-Z]*|--version-sort|--human-numeric-sort|--random-sort)([[:space:]]|$)/)
         emit(gsev(), NR, "GNU-only sort option", "GNU sort(1); OpenBSD sort(1)", "Implement version/numeric/random ordering explicitly")
     if (line ~ /(^|[[:space:];|&()])head[[:space:]]+(-c|--bytes)([[:space:]]|$)/)
         emit(gsev(), NR, "head -c is GNU-only", "GNU head(1); OpenBSD head(1)", "Use dd bs=N count=1 or head -n")
@@ -218,6 +260,14 @@ function check(line, raw) {
         else
             emit(gsev(), NR, "mktemp without a template is GNU-only", "GNU mktemp(1); OpenBSD mktemp(1)", "Always pass a template ending in XXXXXX")
     }
+    # Quoted-string masking hides the common $(mktemp) form. Check the
+    # raw line so command substitution is still audited, including a
+    # template that continues on the next physical line.
+    if (raw ~ /(\$\(|`)[^`)]*mktemp([[:space:]]|[)`]|$)/ && raw !~ /XXXX/) {
+        if (line ~ /\\[[:space:]]*$/) mktemp_pending = NR
+        else
+            emit(gsev(), NR, "mktemp without a template is GNU-only", "GNU mktemp(1); OpenBSD mktemp(1)", "Always pass a template ending in XXXXXX")
+    }
     if (line ~ /(^|[[:space:];|&()])readlink[[:space:]]+(-m|-e)([[:space:]]|$)/)
         emit(gsev(), NR, "readlink -m/-e are GNU-only", "GNU readlink(1); OpenBSD readlink(1)", "OpenBSD readlink supports -f and -n")
 
@@ -227,7 +277,7 @@ function check(line, raw) {
             emit("ERROR", NR, "Linux-specific command used in an OpenBSD script", "OpenBSD base system; man.openbsd.org", "Replace with the OpenBSD equivalent")
         if (line ~ /(^|[^[:alnum:]_$])(ip|ss)([[:space:]]|$)/)
             emit("ERROR", NR, "iproute2 command not available in OpenBSD base", "OpenBSD ifconfig(8), route(8)", "Use ifconfig/route on OpenBSD")
-        if (line ~ /(^|[[:space:];|&()])chattr([[:space:]]|$)/)
+        if (line ~ /(^|[[:space:];|&()])(chattr|lsattr)([[:space:]]|$)/)
             emit("ERROR", NR, "chattr/lsattr do not exist on OpenBSD", "OpenBSD chflags(1)", "Use chflags instead")
     }
     if (fam == "debian" || fam == "secureblue") {
@@ -253,17 +303,17 @@ function check(line, raw) {
     # positives.
     if (fam == "openbsd" && lang != "data") {
         if (line ~ /(^|[^[:alnum:]_])local([[:space:]]|$)/)
-            emit("ERROR", NR, "bash 'local' is not available in OpenBSD ksh (pdksh)", "OpenBSD ksh(1)", "Use typeset inside functions")
+            emit("ERROR", NR, "bash 'local' is not portable in this OpenBSD tree", "OpenBSD ksh(1); project convention", "Use typeset inside functions")
         if (line ~ /(^|[[:space:];|&()])(declare|readarray|mapfile|shopt)([[:space:]]|$)/)
             emit("ERROR", NR, "bash builtin not available in OpenBSD ksh", "OpenBSD ksh(1)", "Use typeset and ksh constructs")
         if (line ~ /PIPESTATUS|BASH_SOURCE|BASH_VERSION|\$\{BASH_/)
             emit("ERROR", NR, "bash-specific variable in an OpenBSD script", "OpenBSD ksh(1)", "Use ksh equivalents or declare the script as bash")
         if (line ~ /<<</)
             emit("ERROR", NR, "here-string <<< is bash-only", "OpenBSD ksh(1)", "Use printf '%s' \"$x\" | cmd or a here-document")
-        if (line ~ /\(\(</)
-            emit("ERROR", NR, "process substitution <(...) is bash-only", "OpenBSD ksh(1)", "Use a temporary file or a FIFO")
+        if (line ~ /[<>]\(/)
+            emit("ERROR", NR, "process substitution <(...) / >(...) is bash-only", "OpenBSD ksh(1)", "Use a temporary file or a FIFO")
         if (raw ~ /\$'[^']*\\/)
-            emit("ERROR", NR, "$'...' quoting is not available in OpenBSD ksh (pdksh)", "OpenBSD ksh(1)", "Use printf with octal escapes instead")
+            emit("ERROR", NR, "$'...' quoting is not portable in this OpenBSD tree", "OpenBSD ksh(1); project convention", "Use printf with octal escapes instead")
     }
     if (fam == "generic") {
         if (line ~ /(^|[[:space:];|&()])\[\[([[:space:]]|$)/)
@@ -273,7 +323,7 @@ function check(line, raw) {
     }
 
     # ---- destructive operations ----
-    if (line ~ /(^|[[:space:];|&()])rm[[:space:]]+-[a-zA-Z]*r[a-zA-Z]*f([[:space:]]|$)/) {
+    if (rm_rf_line(line)) {
         if (raw ~ /\$|"|\{\}|--/)
             emit("INFO", NR, "rm -rf with quoted/bounded operand", "rm(1)", "Ensure the operand is bounded and quoted")
         else
@@ -326,6 +376,11 @@ function check(line, raw) {
         if ($0 ~ ("^" hd_delim "[[:space:]]*$")) {
             skip_hd = 0
             hd_delim = ""
+        } else {
+            hdline = $0
+            sub(/^[[:space:]]*/, "", hdline)
+            if (hdline !~ /^#/)
+                hd_check(hdline, $0, NR)
         }
         next
     }
@@ -346,8 +401,8 @@ function check(line, raw) {
     # A trailing backslash means the next physical line continues this
     # logical line; do not treat its arguments as new commands.
     prev_cont = (masked ~ /\\[[:space:]]*$/) ? 1 : 0
-    # Track here-document bodies: they are skipped entirely
-    # (they are generated code or config, not shell to audit).
+    # Track here-document bodies: they are not parsed as normal shell,
+    # but hd_check still audits high-confidence destructive patterns.
     if ($0 ~ /<<-?[[:space:]]*['"]?[A-Za-z_][A-Za-z0-9_]*['"]?/) {
         m = $0
         sub(/^.*<<-?[[:space:]]*/, "", m)
@@ -369,7 +424,7 @@ END {
             emit("WARNING", pipe_grep[i], "grep -q closes the pipe early; under pipefail the producer may die of SIGPIPE and fail the pipeline", "bash(1) pipefail; signal(7) SIGPIPE", "Capture the output first, or drop -q and redirect grep's output")
     }
     if (fam == "openbsd" && has_pipefail && !has_guard)
-        emit("ERROR", 1, "set -o pipefail is not available in OpenBSD ksh (pdksh)", "OpenBSD ksh(1)", "Guard it: if (set -o pipefail) >/dev/null 2>&1; then set -o pipefail; fi")
+        emit("ERROR", 1, "unguarded set -o pipefail in an OpenBSD script", "OpenBSD ksh(1) versions; project convention", "Guard it: if (set -o pipefail) >/dev/null 2>&1; then set -o pipefail; fi")
     if (fam == "generic" && has_pipefail)
         emit("WARNING", 1, "pipefail is not POSIX", "POSIX sh(1)", "Guard the option or document the required shell")
     if ((fam == "debian" || fam == "secureblue" || fam == "openbsd") && has_destructive && !has_sete)
@@ -874,8 +929,9 @@ main() {
 	all)
 		scan_dir openbsd "openbsd"
 		scan_dir debian "debian"
+		# The secureblue family already scans shell/; scanning it again
+		# would duplicate every finding.
 		scan_dir secureblue "secureblue"
-		scan_dir shell "shell"
 		;;
 	esac
 

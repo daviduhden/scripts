@@ -7,12 +7,12 @@ appropriate root permissions. User history cleanup uses the current user's data.
 
 | Script | Purpose and usage |
 | --- | --- |
-| [ai-purge-history.ksh](ai-purge-history.ksh) | Deletes Codex and Copilot sessions, Crush data, and project-local Swival history/state; preserves configuration and credentials. OpenCode is not handled on OpenBSD. |
+| [ai-purge-history.ksh](ai-purge-history.ksh) | Deletes Codex and Copilot sessions, Crush data, and project-local Swival history/state; preserves configuration and credentials. Supports `--dry-run`/`-n` or `DRY_RUN=1`. OpenCode is not handled on OpenBSD. |
 | [clean-logs.ksh](clean-logs.ksh) | Removes `.gz` logs under `/var/log` and `.old` files on the root file system. Use `--dry-run`, `-n`, or `DRY_RUN=1` to preview. |
 | [sudo-wrapper.ksh](sudo-wrapper.ksh) | Routes `sudo` to `doas` and handles `visudo` and `sudoedit`. The install target creates matching symlinks; configure `doas` permissions separately. |
 | [sync-website.ksh](sync-website.ksh) | Synchronizes the configured website from GitHub through `gh`, Git, or a ZIP fallback, fixes permissions, and restarts its service. |
-| [sysupgrade-current.ksh](sysupgrade-current.ksh) | Upgrades to an OpenBSD snapshot and schedules post-upgrade tasks through `/upgrade.site` and `/etc/rc.firsttime`, including configuration/package maintenance and system reporting. |
-| [update-crush.ksh](update-crush.ksh) | Installs the latest OpenBSD Crush binary after checksum verification and configures DeepSeek for the specified user. Usage: `update-crush.ksh [USER]`; the default user is root. |
+| [sysupgrade-current.ksh](sysupgrade-current.ksh) | Upgrades to an OpenBSD snapshot and schedules post-upgrade tasks through `/upgrade.site` and `/etc/rc.firsttime`, including configuration maintenance, `dbupdate` system databases, package upgrades, and system reporting. |
+| [update-crush.ksh](update-crush.ksh) | Installs the latest OpenBSD Crush binary after checksum verification, keeps a timestamped backup of the previous binary, and configures DeepSeek for the specified user. Usage: `update-crush.ksh [USER]`; the default user is root. |
 
 Example from the repository root:
 

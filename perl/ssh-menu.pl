@@ -14,8 +14,10 @@
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
 
+use 5.010_001;
 use strict;
 use warnings;
+use Cwd        qw(abs_path);
 use File::Path qw(make_path);
 use File::Spec;
 use File::Temp qw(tempfile);
@@ -192,55 +194,77 @@ sub setup_openbsd_sandbox {
 # 2. State persistence #
 ########################
 
+sub replace_state_file {
+    my ( $path, $tmp ) = @_;
+
+    return 1 if rename $tmp, $path;
+
+    # Windows does not replace an existing destination with rename(2).
+    # Move the old file aside, install the new one, and restore on failure.
+    if ( is_windows() && -e $path ) {
+        my $backup = "$path.bak";
+        unlink $backup;
+        if ( rename $path, $backup ) {
+            if ( rename $tmp, $path ) {
+                unlink $backup;
+                return 1;
+            }
+            rename $backup, $path;
+        }
+    }
+
+    unlink $tmp;
+    return 0;
+}
+
+sub write_state_file {
+    my ( $path, $lines_ref ) = @_;
+    my $dir = parent_dir($path);
+    $dir = '.' unless defined $dir && length $dir;
+    make_path($dir) if $dir ne '.';
+
+    my ( $fh, $tmp ) = tempfile( 'ssh-menu.XXXXXX', DIR => $dir, UNLINK => 0 );
+    if ( !$fh ) {
+        logw("Could not create a temporary file in $dir: $!");
+        return;
+    }
+
+    print {$fh} @{$lines_ref};
+    if ( !close $fh ) {
+        logw("Could not write $path: $!");
+        unlink $tmp;
+        return;
+    }
+
+    if ( my @st = stat($path) ) {
+        chmod( $st[2] & oct(7777), $tmp );
+    }
+    if ( !replace_state_file( $path, $tmp ) ) {
+        logw("Could not replace $path: $!");
+    }
+}
+
 sub write_alias_file {
     my ($aliases_ref) = @_;
-    my $dir = parent_dir($alias_file);
-    make_path($dir) if defined $dir && length $dir;
-    if ( open my $afh, '>', $alias_file ) {
-        for my $k ( sort keys %{$aliases_ref} ) {
-            printf $afh "%s %s\n", $k, $aliases_ref->{$k};
-        }
-        close $afh
-          or logw("Could not write alias file $alias_file: $!");
-    }
-    else {
-        logw("Could not write alias file $alias_file: $!");
-    }
+    my @lines = map { sprintf "%s %s\n", $_, $aliases_ref->{$_} }
+      sort keys %{$aliases_ref};
+    write_state_file( $alias_file, \@lines );
 }
 
 sub write_freq_file {
     my ($freq_ref) = @_;
-    my $dir = parent_dir($freq_file);
-    make_path($dir) if defined $dir && length $dir;
-    if ( open my $ffh, '>', $freq_file ) {
-        for my $k ( sort keys %{$freq_ref} ) {
-            printf $ffh "%s %d\n", $k, $freq_ref->{$k};
-        }
-        close $ffh
-          or logw("Could not write frequency file $freq_file: $!");
-    }
-    else {
-        logw("Could not write frequency file $freq_file: $!");
-    }
+    my @lines = map { sprintf "%s %d\n", $_, $freq_ref->{$_} }
+      sort keys %{$freq_ref};
+    write_state_file( $freq_file, \@lines );
 }
 
 sub write_last_user_file {
     my ($last_ref) = @_;
     return unless defined $last_ref;
 
-    my $dir = parent_dir($last_user_file);
-    make_path($dir) if defined $dir && length $dir;
-
-    if ( open my $ufh, '>', $last_user_file ) {
-        for my $k ( sort keys %{$last_ref} ) {
-            printf $ufh "%s %s\n", $k, $last_ref->{$k};
-        }
-        close $ufh
-          or logw("Could not write last user file $last_user_file: $!");
-    }
-    else {
-        logw("Could not write last user file $last_user_file: $!");
-    }
+    my @lines = map { sprintf "%s %s\n", $_, $last_ref->{$_} }
+      sort keys %{$last_ref};
+    write_state_file( $last_user_file, \@lines );
 }
 
 sub reset_state {
@@ -583,8 +607,15 @@ sub remove_known_host_entry {
 
     return 0 unless $removed;
 
-    # Replace the file atomically, preserving its permission bits.
-    my $dir = parent_dir($known_hosts);
+    # Replace the target atomically, preserving its permission bits. If
+    # known_hosts is a symlink, write through to its target so the link is
+    # not silently replaced by a regular file.
+    my $target = $known_hosts;
+    if ( -l $known_hosts ) {
+        my $resolved = abs_path($known_hosts);
+        $target = $resolved if defined $resolved && length $resolved;
+    }
+    my $dir = parent_dir($target);
     $dir = '.' unless defined $dir && length $dir;
 
     my ( $tfh, $tmp ) =
@@ -596,12 +627,11 @@ sub remove_known_host_entry {
     print {$tfh} @kept;
     close $tfh;
 
-    if ( my @st = stat($known_hosts) ) {
+    if ( my @st = stat($target) ) {
         chmod( $st[2] & oct(7777), $tmp );
     }
-    if ( !rename $tmp, $known_hosts ) {
-        logw("Could not replace $known_hosts: $!");
-        unlink $tmp;
+    if ( !replace_state_file( $target, $tmp ) ) {
+        logw("Could not replace $target: $!");
         return 0;
     }
     return $removed;

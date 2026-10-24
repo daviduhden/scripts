@@ -12,7 +12,7 @@ exec >"$TMPLOG" 2>&1
 #   (default: current directory excluding .git) and runs
 #   mandoc lint on them, treating warnings as errors.
 # - Usage: ./validate-manpages.sh [ROOT_DIR]
-# - Requires: mandoc in PATH
+# - Optional: mandoc in PATH; validation is skipped when it is absent
 #
 # Note: mandoc is a BSD tool; on Linux, install it via
 # your package manager (e.g., apt, dnf).
@@ -51,8 +51,8 @@ run_validate_manpages() {
 	fi
 
 	if ! command -v mandoc >/dev/null 2>&1; then
-		printf '%s\n' "[ERROR] mandoc not found in PATH" >&2
-		exit 1
+		printf '%s\n' "[INFO] mandoc not installed; skipping man page validation"
+		exit 0
 	fi
 
 	# Find man pages and run mandoc lint.

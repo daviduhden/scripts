@@ -74,7 +74,7 @@ TESTS_FORMAT_SCRIPTS = \
 # Public Perl programs are listed in perl/programs.txt.
 PERL_PROGRAMS_MANIFEST = perl/programs.txt
 
-.PHONY: all clean install-debian install-openbsd install-secureblue install-shell install-shell-bash install-shell-bash-unlock install-shell-bash-copy install-shell-openbsd install-perl install-tests-format test test-validate test-regression fix-permissions check-permissions help
+.PHONY: all clean install-debian install-openbsd install-secureblue install-shell install-shell-bash install-shell-bash-unlock install-shell-bash-copy install-shell-openbsd install-perl install-tests-format test test-validate test-manpages test-regression fix-permissions check-permissions help
 
 # OS-specific sets install the same command names, so they cannot share a
 # single BINDIR. 'all' installs only the OS-independent helpers; choose
@@ -137,7 +137,7 @@ install-tests-format:
 	@for f in ${TESTS_FORMAT_SCRIPTS}; do base=$${f##*/}; name=$${base%.sh}; printf '%s Installing %s -> %s\n' "${INFO}" "$$f" "${BINDIR}/$$name"; install -m 0755 "$$f" "${BINDIR}/$$name"; done
 	@echo "${INFO} Tests/Format helpers installed"
 
-test: test-validate test-regression
+test: test-validate test-manpages test-regression
 	@echo "All tests passed."
 
 test-validate:
@@ -146,6 +146,9 @@ test-validate:
 	@echo "Running make validation..." && /bin/sh tests-format/validate-make.sh .
 	@echo "Checking file permissions (read-only)..." && /bin/sh tests-format/fix-permissions.sh --check .
 	@echo "Running correctness audit..." && /bin/sh tests-format/validate-correctness.sh --target all .
+
+test-manpages:
+	@echo "Running man page validation..." && /bin/sh tests-format/validate-manpages.sh .
 
 test-regression:
 	@echo "Running fix-permissions regression tests..." && /bin/sh tests-format/test-fix-permissions.sh
@@ -160,4 +163,4 @@ check-permissions:
 	@/bin/sh tests-format/fix-permissions.sh --check .
 
 help:
-	@printf "Usage: make [target]\n\nTargets:\n  all                      Install the OS-independent helpers (Perl and tests/format)\n  install-debian           Install Debian helper scripts into ${BINDIR}\n  install-openbsd          Install OpenBSD helper scripts into ${BINDIR}\n  install-secureblue       Install secureblue helper scripts into ${BINDIR}\n  install-shell            Install SecureBlue Bash shell helpers\n  install-shell-bash       Install shell aliases into ${BASH_CONF_DST_DIR} (with chattr -i/+i)\n  install-shell-openbsd    Guidance for installing shell helpers on OpenBSD\n  install-perl             Install perl helper scripts into ${BINDIR}\n  install-tests-format     Install tests-format helper scripts into ${BINDIR}\n  test                     Run validation tests (formatters may rewrite formatting)\n  test-validate            Run only the validators (may format with installed tools)\n  test-regression          Run only the regression tests\n  fix-permissions          Correct file modes from file(1) content\n  check-permissions        Report wrong file modes (read-only, rc != 0)\n  clean                    No-op clean target\n  help                     Show this help\n"
+	@printf "Usage: make [target]\n\nTargets:\n  all                      Install the OS-independent helpers (Perl and tests/format)\n  install-debian           Install Debian helper scripts into ${BINDIR}\n  install-openbsd          Install OpenBSD helper scripts into ${BINDIR}\n  install-secureblue       Install secureblue helper scripts into ${BINDIR}\n  install-shell            Install SecureBlue Bash shell helpers\n  install-shell-bash       Install shell aliases into ${BASH_CONF_DST_DIR} (with chattr -i/+i)\n  install-shell-openbsd    Guidance for installing shell helpers on OpenBSD\n  install-perl             Install perl helper scripts into ${BINDIR}\n  install-tests-format     Install tests-format helper scripts into ${BINDIR}\n  test                     Run validation tests (formatters may rewrite formatting)\n  test-validate            Run only the validators (may format with installed tools)\n  test-manpages            Run mandoc lint when mandoc is installed\n  test-regression          Run only the regression tests\n  fix-permissions          Correct file modes from file(1) content\n  check-permissions        Report wrong file modes (read-only, rc != 0)\n  clean                    No-op clean target\n  help                     Show this help\n"

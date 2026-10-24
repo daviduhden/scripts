@@ -7,7 +7,7 @@ checkout or an extracted copy; its paths are resolved relative to the installer.
 | --- | --- |
 | [install-windows.bat](install-windows.bat) | Installs public Perl programs, the PowerShell scripts in this directory, and `test-format/psfmt.ps1`; creates command launchers and optionally adds their directory to the user PATH. |
 | [update-aiclis.ps1](update-aiclis.ps1) | Installs or updates Codex, OpenCode, and Bun for the current user, maintains versioned copies and PATH entries, and adds PowerShell wrappers. |
-| [ai-purge-history.ps1](ai-purge-history.ps1) | Deletes Codex, Copilot, OpenCode, Crush, and project-local Swival history/state while retaining configuration and credentials. |
+| [ai-purge-history.ps1](ai-purge-history.ps1) | Deletes Codex, Copilot, OpenCode, and project-local Swival history/state. It removes the entire `%LOCALAPPDATA%\crush` directory, including any configuration stored there. Use `-DryRun` to preview. |
 | [launcher.cmd](launcher.cmd) | Internal template for installed Perl launchers. Uses the recorded Perl interpreter and forwards arguments and exit status. |
 | [powershell-launcher.cmd](powershell-launcher.cmd) | Internal template for PowerShell launchers. Prefers `pwsh`, falls back to Windows PowerShell, and forwards arguments and exit status. |
 | [test-format/psfmt.ps1](test-format/psfmt.ps1) | Formats and checks PowerShell files with PSScriptAnalyzer; requires PowerShell 7. See [its README](test-format/README.md). |
@@ -35,8 +35,9 @@ From PowerShell, check AI CLI versions without installing updates:
 
 Other updater parameters are `-Target All|Codex|OpenCode|Bun`,
 `-OpenCodeVersion`, `-CodexVersion`, `-Force`, `-Check`, and `-RemoveWinget`.
-The last option explicitly removes winget CLI packages after installation. Bun
-uses winget; Codex and OpenCode use upstream downloads.
+The last option removes the winget copies of OpenCode and Codex after
+installation; Bun is installed through winget and is left in place. Codex and
+OpenCode otherwise use upstream downloads.
 
 Run history cleanup in the intended user's session. `SWIVAL_PROJECT_HOME`
 selects the project whose `.swival` state is removed; it defaults to the working

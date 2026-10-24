@@ -62,8 +62,21 @@ user_uid() {
 
 # Homebrew stays out of root's PATH. Informational commands use brew-proxy as
 # the configured user; root delegates administrative maintenance to linuxbrew.
-HOMEBREW_PREFIX="/home/linuxbrew/.linuxbrew"
-BREW_PROXY_COMMAND="/usr/bin/brew-proxy"
+# Probe the same prefixes as the other SecureBlue helpers instead of assuming
+# a single host layout.
+HOMEBREW_PREFIX="${HOMEBREW_PREFIX:-}"
+if [[ -z $HOMEBREW_PREFIX ]]; then
+	for prefix in \
+		/var/home/linuxbrew/.linuxbrew \
+		/home/linuxbrew/.linuxbrew; do
+		if [[ -x "${prefix}/bin/brew" ]]; then
+			HOMEBREW_PREFIX="$prefix"
+			break
+		fi
+	done
+fi
+HOMEBREW_PREFIX="${HOMEBREW_PREFIX:-/home/linuxbrew/.linuxbrew}"
+BREW_PROXY_COMMAND="${BREW_PROXY_COMMAND:-/usr/bin/brew-proxy}"
 HOMEBREW_ORIGINAL="${HOMEBREW_PREFIX}/proxy/brew-original"
 HOMEBREW_USER_HOME=""
 HOMEBREW_USER_UID=""
@@ -766,13 +779,12 @@ collect_system_info() {
 		return 1
 	fi
 
-	local run_user
+	local -a run_user=()
 	if require_cmd --check runuser; then
-		run_user="runuser -u ${NONROOT_USER} --"
+		run_user=(runuser -u "$NONROOT_USER" --)
 		log "Running ujust/flatpak info as" \
 			"configured user: ${NONROOT_USER}"
 	else
-		run_user=""
 		warn "'runuser' not available; ujust/flatpak" \
 			"will run as root; Homebrew info will be skipped."
 	fi
@@ -799,8 +811,8 @@ collect_system_info() {
 
 		print_section "Flatpaks Installed"
 		if require_cmd --check flatpak; then
-			if [[ -n ${run_user:-} ]]; then
-				$run_user flatpak list \
+			if ((${#run_user[@]})); then
+				"${run_user[@]}" flatpak list \
 					--columns=app,version,options \
 					2>&1 || true
 			else
@@ -821,16 +833,16 @@ collect_system_info() {
 		fi
 
 		print_section "Audit Results"
-		if [[ -n ${run_user:-} ]]; then
-			$run_user ujust audit-secureblue \
+		if ((${#run_user[@]})); then
+			"${run_user[@]}" ujust audit-secureblue \
 				2>&1 || true
 		else
 			ujust audit-secureblue 2>&1 || true
 		fi
 
 		print_section "Listing Local Overrides"
-		if [[ -n ${run_user:-} ]]; then
-			$run_user ujust \
+		if ((${#run_user[@]})); then
+			"${run_user[@]}" ujust \
 				check-local-overrides \
 				2>&1 || true
 		else

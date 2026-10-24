@@ -7,8 +7,9 @@ set -eu
 # to run on first boot via rc.firsttime(8).
 #
 # Notes:
-# - Uses ksh93 if available, otherwise falls back to base ksh.
-# - Post-upgrade tasks (sysmerge/pkg_add/lynis/info dump)
+# - The generated /etc/rc.firsttime prefers ksh93 and falls back
+#   to the base ksh; the main script itself runs under /bin/ksh.
+# - Post-upgrade tasks (sysmerge/dbupdate/pkg_add/lynis/info dump)
 #   are wired through /upgrade.site -> /etc/rc.firsttime.
 # - Lynis is executed via ksh/ksh93 to match shell expectations.
 #
@@ -115,15 +116,14 @@ EOF_RCF
 append_firstboot_tasks() {
     # Idempotent: running sysupgrade-current twice before the
     # next boot must not append the tasks twice to rc.firsttime.
-    grep -q '^run_logged_cmd()' "$RCF" 2>/dev/null && return 0
-
-    cat <<'EOF_APPEND' >> "$RCF"
+    if ! grep -q '^run_logged_cmd()' "$RCF" 2>/dev/null; then
+        cat <<'EOF_APPEND' >> "$RCF"
 run_logged_cmd() {
     log_file="$1"
     shift
-    # Plain redirection instead of `| tee`: rc.firsttime runs
-    # without pipefail (OpenBSD ksh has none), and with a pipe
-    # the pipeline status would be tee's, hiding failures.
+    # Plain redirection instead of `| tee`: without pipefail the
+    # pipeline status would be tee's, hiding failures from the
+    # command being logged.
     if "$@" >>"$log_file" 2>&1; then
         return 0
     fi
@@ -147,6 +147,24 @@ run_sysmerge() {
     else
         print "sysmerge reported issues; review the output above"
         print "and /var/sysmerge/backups."
+    fi
+}
+
+run_dbupdate() {
+    print ""
+    print "---"
+    print "Updating system databases (dbupdate)..."
+    print "Updates /etc/ssl/cert.pem and /usr/share/zoneinfo."
+    print "---"
+    print ""
+    if [ ! -x /usr/sbin/dbupdate ]; then
+        print "dbupdate not found; skipping system database update."
+        return 0
+    fi
+    if /usr/sbin/dbupdate; then
+        print "dbupdate completed."
+    else
+        print "dbupdate reported errors; review the output above."
     fi
 }
 
@@ -177,7 +195,7 @@ run_lynis_audit() {
         audit_report="/tmp/lynis-report-${audit_ts}.dat"
         lynis_log="/tmp/lynis-terminal-${audit_ts}.log"
         # Redirection instead of `| tee` so that lynis's exit
-        # status decides the branch (no pipefail in ksh).
+        # status decides the branch without relying on pipefail.
         if "$shell_bin" /usr/local/bin/lynis \
             audit system --quiet \
             --logfile "$audit_log" \
@@ -205,7 +223,7 @@ run_lynis_audit() {
     fi
 }
 
-collect_system_info_and_upload() {
+collect_system_info() {
     print "Collecting system info..."
     out_log="/tmp/openbsd-info-$(date +%Y%m%d-%H%M%S).log"
     rcctl_ls_on_output=""
@@ -270,7 +288,7 @@ collect_system_info_and_upload() {
                 print "/var/log/Xorg.0.log not available."
             fi
         fi
-    } 2>&1 | tee "$out_log"
+    } >"$out_log" 2>&1
     chmod 0600 "$out_log" 2>/dev/null || true
     print ""
     print "---"
@@ -280,13 +298,46 @@ collect_system_info_and_upload() {
 
 main() {
     run_sysmerge
+    run_dbupdate
     upgrade_packages
     run_lynis_audit
-    collect_system_info_and_upload
+    collect_system_info
 }
 
 main "$@"
 EOF_APPEND
+        return 0
+    fi
+
+    # An rc.firsttime written by an older version already has the main
+    # managed block. Add only the dbupdate task, without rewriting
+    # unrelated tasks that the installer or the administrator appended.
+    if ! grep -q '^run_dbupdate()' "$RCF" 2>/dev/null ||
+        ! grep -q '^[[:space:]]*run_dbupdate$' "$RCF" 2>/dev/null; then
+        cat <<'EOF_DBUPDATE' >> "$RCF"
+
+# Keep this function in sync with the copy in the main block above.
+run_dbupdate() {
+    print ""
+    print "---"
+    print "Updating system databases (dbupdate)..."
+    print "Updates /etc/ssl/cert.pem and /usr/share/zoneinfo."
+    print "---"
+    print ""
+    if [ ! -x /usr/sbin/dbupdate ]; then
+        print "dbupdate not found; skipping system database update."
+        return 0
+    fi
+    if /usr/sbin/dbupdate; then
+        print "dbupdate completed."
+    else
+        print "dbupdate reported errors; review the output above."
+    fi
+}
+
+run_dbupdate
+EOF_DBUPDATE
+    fi
 }
 
 main() {

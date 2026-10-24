@@ -19,7 +19,7 @@ GITHUB_API="https://api.github.com/repos/${REPO_OWNER}"
 GITHUB_API="${GITHUB_API}/${REPO_NAME}/releases/latest"
 
 INSTALL_DIR="/usr/local/bin"
-TMPDIR="$(mktemp -d)"
+WORK_DIR=""
 ROOT_CMD=""
 
 log() { printf '%s [INFO] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
@@ -62,7 +62,7 @@ ensure_cmd() {
 }
 
 cleanup() {
-	rm -rf "$TMPDIR" 2>/dev/null || true
+	rm -rf "$WORK_DIR" 2>/dev/null || true
 }
 
 net_curl() {
@@ -134,7 +134,7 @@ get_release_asset_from_json() {
 install_msedit() {
 	local url="$1"
 
-	cd "$TMPDIR"
+	cd "$WORK_DIR"
 	log "Downloading $url"
 	curl -fLO "$url"
 
@@ -192,7 +192,7 @@ run_update() {
 	fi
 
 	install_msedit "$asset"
-	rm -rf "$TMPDIR"
+	rm -rf "$WORK_DIR"
 	log "edit successfully installed or updated to version $latest."
 }
 
@@ -203,8 +203,12 @@ check_prereqs() {
 }
 
 main() {
-	trap cleanup EXIT
 	check_prereqs
+	WORK_DIR="$(mktemp -d /tmp/msedit-XXXXXX)" || {
+		error "Cannot create temporary directory."
+		exit 1
+	}
+	trap cleanup EXIT
 	run_update
 }
 

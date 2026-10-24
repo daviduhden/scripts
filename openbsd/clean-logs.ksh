@@ -19,6 +19,10 @@ export PATH
 # what would be deleted, without actually removing files.
 typeset DRY_RUN
 DRY_RUN="${DRY_RUN:-0}"
+case "$DRY_RUN" in
+1 | true | TRUE | yes | YES | on | ON) DRY_RUN=1 ;;
+*) DRY_RUN=0 ;;
+esac
 
 log() {
 	print "$(date '+%Y-%m-%d %H:%M:%S') [INFO] $*"
@@ -91,6 +95,11 @@ clean_old_files() {
 
 main() {
 	parse_args "$@"
+
+	if [ "$DRY_RUN" -ne 1 ] && [ "$(id -u)" -ne 0 ]; then
+		error "This script must be run as root unless --dry-run is used."
+		exit 1
+	fi
 
 	log "----------------------------------------"
 	log "Log cleanup started"

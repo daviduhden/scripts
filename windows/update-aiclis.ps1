@@ -15,7 +15,8 @@
 # -CodexVersion <version>       Specific Codex version (default: latest).
 # -Force                        Reinstall even if already up to date.
 # -Check                        Show installed and available versions, change nothing.
-# -RemoveWinget                 Uninstall the winget CLI packages after installing.
+# -RemoveWinget                 Uninstall the winget copies of Codex and OpenCode;
+#                               Bun is installed through winget and is left in place.
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.

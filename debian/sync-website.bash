@@ -355,17 +355,47 @@ post_update_steps() {
 # Main #
 ########
 LOCKDIR=""
+acquire_lock() {
+	local lock_pid
+
+	LOCKDIR="$WWW_DIR/.sync.lock"
+	if mkdir "$LOCKDIR" 2>/dev/null; then
+		printf '%s\n' "$$" >"$LOCKDIR/pid" 2>/dev/null || true
+		return 0
+	fi
+
+	# An old lock without a PID is left alone (fail closed). A lock
+	# whose recorded process is gone is removed and reacquired.
+	lock_pid="$(cat "$LOCKDIR/pid" 2>/dev/null || true)"
+	if [[ -n $lock_pid ]] && ! kill -0 "$lock_pid" 2>/dev/null; then
+		warn "Removing stale sync lock from PID $lock_pid."
+		rm -f "$LOCKDIR/pid"
+		rmdir "$LOCKDIR" 2>/dev/null || true
+		if mkdir "$LOCKDIR" 2>/dev/null; then
+			printf '%s\n' "$$" >"$LOCKDIR/pid" 2>/dev/null || true
+			return 0
+		fi
+	fi
+
+	return 1
+}
+
 main() {
 	log "----------------------------------------"
 	log "Sync started (user: $GH_USER)"
+
+	if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
+		error "This script must be run as root." \
+			"Try: sudo $0"
+		exit 1
+	fi
 
 	[ -d "$WWW_DIR" ] || {
 		error "$WWW_DIR does not exist."
 		exit 1
 	}
 
-	LOCKDIR="$WWW_DIR/.sync.lock"
-	if ! mkdir "$LOCKDIR" 2>/dev/null; then
+	if ! acquire_lock; then
 		log "Another sync already running; exiting."
 		exit 0
 	fi

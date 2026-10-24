@@ -15,8 +15,11 @@ From this directory:
 .\psfmt.ps1 -w src tests
 .\psfmt.ps1 -d .
 .\psfmt.ps1 -l -exclude '*.generated.ps1' -exclude build .
-.\psfmt.ps1 -w -settings .\PSScriptAnalyzerSettings.psd1 .
+.\psfmt.ps1 -w -settings .\my-settings.psd1 .
 ```
+
+`my-settings.psd1` is user-supplied; the repository does not bundle a
+PSScriptAnalyzer settings file.
 
 If the module is missing, the script attempts to install it from PSGallery with
 `Install-Module PSScriptAnalyzer -Scope CurrentUser -Repository PSGallery
@@ -102,10 +105,11 @@ files after an error or normal pipeline interruption.
 Invoke-ScriptAnalyzer -Path .\psfmt.ps1
 ```
 
-The runner uses PowerShell and .NET without Pester or additional dependencies.
-Formatting cases use the actual installed module. Automatic installation
-branches are simulated to avoid installing or uninstalling modules during
-tests. Inputs are generated under `tests/work` and archived under
+The runner uses PowerShell and .NET without Pester. It requires an
+already-installed PSScriptAnalyzer module. Formatting cases use the actual
+installed module. Automatic installation branches are simulated to avoid
+installing or uninstalling modules during tests. Inputs are generated under
+`tests/work` and archived under
 `tests/vendor/work`, excluded by the wrapper and the root `.gitignore`.
 The runner writes `tests/results.json`; additional checks may be recorded in
 `tests/self-check.json`. Generated data and reports are ignored and are not
@@ -122,8 +126,8 @@ junctions and their cycles were tested. Cancellation was checked using
 keystroke. Automatic installation used controlled simulations without modifying
 the installed module.
 
-That validation reported **0 diagnostics** from analysis of both the formatter
-and runner. The sequence `-w .`, `-c .`, `-w .` returned **0, 0, 0** without
+That validation reported **0 diagnostics** from analysis of the formatter.
+The sequence `-w .`, `-c .`, `-w .` returned **0, 0, 0** without
 changing SHA-256 hashes or modification timestamps of already formatted scripts.
 These are historical results; their generated reports have been removed from
 the repository. This version was not tested on a second computer running

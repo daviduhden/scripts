@@ -81,7 +81,15 @@ REPO_SLUG="${REPO_SLUG:-daviduhden/cypherpunk-handbook}"
 if command -v getent >/dev/null 2>&1; then
 	GH_HOME="$(getent passwd "$GH_USER" | awk -F: '{print $6}')"
 else
-	GH_HOME="/home/$GH_USER"
+	# OpenBSD has no getent(1). Read the passwd database directly so
+	# root resolves to /root instead of the /home/root guess.
+	GH_HOME="$(awk -F: -v user="$GH_USER" \
+		'$1 == user { print $6; exit }' /etc/passwd)"
+	[ -n "$GH_HOME" ] || GH_HOME="/home/$GH_USER"
+fi
+if [ -z "$GH_HOME" ]; then
+	error "Cannot determine the home directory for user '$GH_USER'."
+	exit 1
 fi
 
 GH_CONFIG_DIR="${GH_HOME}/.config/gh"
@@ -90,9 +98,9 @@ run_as_gh_user() {
 	if command -v doas >/dev/null 2>&1; then
 		doas -u "$GH_USER" "$@"
 	else
-		# OpenBSD ksh's print builtin only supports -n/-e/-E
-		# (no -f and no %q), so build the su command string
-		# with portable sed-based single-quote escaping.
+		# OpenBSD ksh's print builtin has no printf-style %q,
+		# so build the su command string with portable sed-based
+		# single-quote escaping and print -r --.
 		typeset i cmdstr=""
 		for i in "$@"; do
 			cmdstr="${cmdstr} '$(print -r -- "$i" |
@@ -349,24 +357,60 @@ post_update_steps() {
 ########
 # Main #
 ########
+cleanup_lock() {
+	if [ -n "${LOCKDIR:-}" ]; then
+		rm -f "${LOCKDIR}/pid"
+		rmdir "${LOCKDIR}" 2>/dev/null || true
+	fi
+}
+
+acquire_lock() {
+	typeset lock_pid
+
+	LOCKDIR="$WWW_DIR/.sync.lock"
+	if mkdir "$LOCKDIR" 2>/dev/null; then
+		printf '%s\n' "$$" >"$LOCKDIR/pid" 2>/dev/null || true
+		return 0
+	fi
+
+	# An old lock without a PID is left alone (fail closed). A lock
+	# whose recorded process is gone is removed and reacquired.
+	lock_pid="$(cat "$LOCKDIR/pid" 2>/dev/null || true)"
+	if [ -n "$lock_pid" ] && ! kill -0 "$lock_pid" 2>/dev/null; then
+		warn "Removing stale sync lock from PID $lock_pid."
+		rm -f "$LOCKDIR/pid"
+		rmdir "$LOCKDIR" 2>/dev/null || true
+		if mkdir "$LOCKDIR" 2>/dev/null; then
+			printf '%s\n' "$$" >"$LOCKDIR/pid" 2>/dev/null || true
+			return 0
+		fi
+	fi
+
+	return 1
+}
+
 main() {
 	log "----------------------------------------"
 	log "Sync started (user: $GH_USER)"
+
+	if [ "$(id -u)" -ne 0 ]; then
+		error "This script must be run as root."
+		exit 1
+	fi
 
 	[ -d "$WWW_DIR" ] || {
 		error "$WWW_DIR does not exist"
 		exit 1
 	}
 
-	LOCKDIR="$WWW_DIR/.sync.lock"
-	if ! mkdir "$LOCKDIR" 2>/dev/null; then
+	if ! acquire_lock; then
 		log "Another sync running. Exiting."
 		exit 0
 	fi
 
-	trap 'if [ -n "${LOCKDIR:-}" ]; then \
-		rmdir "${LOCKDIR}" 2>/dev/null || true; fi' \
-		EXIT INT TERM
+	trap 'cleanup_lock' EXIT
+	trap 'cleanup_lock; exit 130' INT
+	trap 'cleanup_lock; exit 143' TERM
 
 	if ! sync_with_gh_cli && ! sync_with_git &&
 		! sync_with_github_zip; then

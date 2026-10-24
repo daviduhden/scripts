@@ -3,7 +3,11 @@ set -eu
 
 # Save original stdout/stderr, create per-run log in TMPDIR and redirect
 exec 3>&1 4>&2
-TMPLOG="${TMPDIR:-/tmp}/validate-shell-$$.log"
+TMPDIR_BASE="${TMPDIR:-/tmp}"
+TMPLOG=$(mktemp "$TMPDIR_BASE/validate-shell-XXXXXX")
+TMP_FAILS=
+UNFMT_SH=
+trap '[ -z "$TMP_FAILS" ] || rm -f "$TMP_FAILS"; [ -z "$UNFMT_SH" ] || rm -f "$UNFMT_SH"' EXIT HUP INT TERM
 printf '%s\n' "[INFO] Logging to: $TMPLOG" >&3
 exec >"$TMPLOG" 2>&1
 
@@ -52,15 +56,13 @@ run_validate_shell() {
 			" shellcheck and bash (if needed)"
 	fi
 
-	TMPDIR_BASE="${TMPDIR:-/tmp}"
-	TMP_FAILS="$TMPDIR_BASE/validate-shell-fails-$$.txt"
-	trap 'rm -f "$TMP_FAILS"' EXIT
+	TMP_FAILS=$(mktemp "$TMPDIR_BASE/validate-shell-fails-XXXXXX")
 
 	note_fail() { printf '%s\n' "$1" >>"$TMP_FAILS"; }
 
 	printf '%s\n' "[INFO] Formatting shell scripts with shfmt..."
 	if command -v shfmt >/dev/null 2>&1; then
-		UNFMT_SH="$TMPDIR_BASE/unformatted-sh-$$.txt"
+		UNFMT_SH=$(mktemp "$TMPDIR_BASE/unformatted-sh-XXXXXX")
 
 		find "$ROOT_DIR" \
 			\( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) \
@@ -231,6 +233,7 @@ main() {
 	require_cmd find
 	require_cmd sed
 	require_cmd grep
+	require_cmd mktemp
 	run_validate_shell "$@"
 }
 

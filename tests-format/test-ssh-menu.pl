@@ -132,6 +132,41 @@ if ( $kh_after !~ /^\|1\|hash-of-something\|key/m ) {
     fail_test("hashed entry was removed unexpectedly");
 }
 
+# Deleting through a symlink must update its target and keep the link.
+{
+    my $link_target = File::Spec->catfile( $tmp, 'known_hosts_target' );
+    open my $lt, '>', $link_target
+      or fail_test("cannot write $link_target");
+    print {$lt} "linkhost.example.com ssh-ed25519 AAAAC3link\n";
+    close $lt;
+
+    my $link = File::Spec->catfile( $tmp, 'known_hosts_link' );
+    if ( symlink( $link_target, $link ) ) {
+        local $ENV{SSH_MENU_KNOWN_HOSTS} = $link;
+
+        # One listable host: delete is menu item 2.
+        my ($link_out) = run_perl( "2\n1\ny\nq\n", $script );
+        if ( $link_out !~ /Removed 1 line/ ) {
+            fail_test("symlink known_hosts deletion did not remove the host");
+        }
+        if ( !-l $link ) {
+            fail_test("known_hosts symlink was replaced by a regular file");
+        }
+        my $target_after = do {
+            open my $fh, '<', $link_target
+              or fail_test("cannot read $link_target");
+            local $/ = undef;
+            <$fh>;
+        };
+        if ( $target_after =~ /^linkhost\.example\.com\b/m ) {
+            fail_test("deleted host still present in symlink target");
+        }
+    }
+    else {
+        print "[INFO] symlink creation not permitted; skipping symlink test\n";
+    }
+}
+
 # -G prints configuration without connecting. Exercise the real exec path,
 # including Windows installations under Program Files, for both port forms.
 my $driver = File::Spec->catfile( $tmp, 'ssh-config.pl' );

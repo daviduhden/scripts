@@ -823,10 +823,10 @@ run_update() {
 	log "Tarball to download: ${TARBALL}"
 	log "Download URL: ${DOWNLOAD_URL}"
 
-	TMPDIR="$(mktemp -d /tmp/monero-cli-XXXXXX)"
+	WORK_DIR="$(mktemp -d /tmp/monero-cli-XXXXXX)"
 	GPG_HOME="$(mktemp -d /tmp/monero-gpg-XXXXXX)"
 	cleanup() {
-		rm -rf "$TMPDIR" "$GPG_HOME" \
+		rm -rf "$WORK_DIR" "$GPG_HOME" \
 			"${LWS_TMP:-}" 2>/dev/null || true
 		# If this run stopped a running monerod and a later
 		# step failed before the restart below, bring the
@@ -841,14 +841,14 @@ run_update() {
 
 	log "Downloading Monero CLI ${LATEST_TAG}..."
 	if ! net_curl "${DOWNLOAD_URL}" \
-		-o "${TMPDIR}/${TARBALL}"; then
+		-o "${WORK_DIR}/${TARBALL}"; then
 		error "download failed from ${DOWNLOAD_URL}"
 	fi
 
 	log "Fetching reference hashes for verification..."
-	HASHES_ASC="${TMPDIR}/hashes.txt"
-	HASHES_PLAIN="${TMPDIR}/hashes-plain.txt"
-	BINARYFATE_KEY="${TMPDIR}/binaryfate.asc"
+	HASHES_ASC="${WORK_DIR}/hashes.txt"
+	HASHES_PLAIN="${WORK_DIR}/hashes-plain.txt"
+	BINARYFATE_KEY="${WORK_DIR}/binaryfate.asc"
 
 	if ! net_curl "${HASHES_URL}" \
 		-o "${HASHES_ASC}"; then
@@ -899,7 +899,7 @@ run_update() {
 	fi
 
 	ACTUAL_HASH="$(sha256sum \
-		"${TMPDIR}/${TARBALL}" | awk '{print $1}')"
+		"${WORK_DIR}/${TARBALL}" | awk '{print $1}')"
 	if [[ ${EXPECTED_HASH} != "${ACTUAL_HASH}" ]]; then
 		error "hash mismatch for ${TARBALL}" \
 			"(expected ${EXPECTED_HASH}," \
@@ -909,9 +909,9 @@ run_update() {
 	log "Hash verified for ${TARBALL}."
 
 	log "Extracting tarball..."
-	tar -xjf "${TMPDIR}/${TARBALL}" -C "$TMPDIR"
+	tar -xjf "${WORK_DIR}/${TARBALL}" -C "$WORK_DIR"
 
-	EXTRACTED_DIR="$(find "$TMPDIR" -maxdepth 1 \
+	EXTRACTED_DIR="$(find "$WORK_DIR" -maxdepth 1 \
 		-type d -name 'monero-*' | sed -n '1p')"
 	if [[ -z ${EXTRACTED_DIR} ]]; then
 		error "could not find extracted" \
@@ -1028,7 +1028,7 @@ EOF
 			"/etc/systemd/system/monerod.service..."
 		install -d /etc/systemd/system
 
-		UNIT_TMP="${TMPDIR}/monerod.service"
+		UNIT_TMP="${WORK_DIR}/monerod.service"
 		download_systemd_unit() {
 			local out_file="$1"
 

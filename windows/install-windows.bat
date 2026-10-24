@@ -126,6 +126,12 @@ if not exist "%REPO%windows\test-format\psfmt.ps1" (
     exit /b 2
 )
 call :collect_ps_program "psfmt.ps1"
+if "%INSTALL_FAIL%"=="1" (
+    echo [ERROR] invalid PowerShell script name; cannot continue.
+    exit /b 2
+)
+where pwsh.exe >nul 2>&1
+if errorlevel 1 echo [WARN] PowerShell 7 (pwsh.exe) not found; psfmt requires it.
 
 rem --------------------------------------------------------------------
 rem Find an already usable Perl before considering winget
@@ -141,14 +147,14 @@ echo Perl:
 if defined PERL_EXE echo   found: %PERL_EXE%
 if not defined PERL_EXE echo   would install via winget: %WINGET_ID%
 echo Install root:
-echo   %INSTALL_DIR%
+echo   "%INSTALL_DIR%"
 echo Scripts:
-for %%N in (%PROGRAMS%) do echo   %%N -^> %INSTALL_DIR%\perl\%%N
-for %%N in (%PS_PROGRAMS%) do echo   %%N -^> %INSTALL_DIR%\windows\%%N
+for %%N in (%PROGRAMS%) do echo   %%N -^> "%INSTALL_DIR%\perl\%%N"
+for %%N in (%PS_PROGRAMS%) do echo   %%N -^> "%INSTALL_DIR%\windows\%%N"
 echo Launchers:
-for %%N in (%PROGRAMS% %PS_PROGRAMS%) do echo   %%~nN.cmd -^> %INSTALL_DIR%\bin\%%~nN.cmd
+for %%N in (%PROGRAMS% %PS_PROGRAMS%) do echo   %%~nN.cmd -^> "%INSTALL_DIR%\bin\%%~nN.cmd"
 echo PATH:
-if "%OPT_PATH%"=="1" echo   add if missing: %INSTALL_DIR%\bin
+if "%OPT_PATH%"=="1" echo   add if missing: "%INSTALL_DIR%\bin"
 if "%OPT_PATH%"=="0" echo   not modified: --no-path
 echo.
 
@@ -222,10 +228,10 @@ rem --------------------------------------------------------------------
 rem Summary
 rem --------------------------------------------------------------------
 echo.
-echo [INFO] %PROJECT% %VERSION% installed to %INSTALL_DIR%
+echo [INFO] %PROJECT% %VERSION% installed to "%INSTALL_DIR%"
 echo [INFO] Programs installed: %PROGRAMS% %PS_PROGRAMS%
-if "%OPT_PATH%"=="1" echo [INFO] User PATH now includes: %INSTALL_DIR%\bin
-if "%OPT_PATH%"=="0" echo [INFO] PATH not modified. Add %INSTALL_DIR%\bin manually if wanted.
+if "%OPT_PATH%"=="1" echo [INFO] User PATH now includes: "%INSTALL_DIR%\bin"
+if "%OPT_PATH%"=="0" echo [INFO] PATH not modified. Add "%INSTALL_DIR%\bin" manually if wanted.
 echo.
 echo [NOTE] Open a new terminal so newly started applications pick up the
 echo        updated PATH. The launchers also work through their full path.
@@ -309,11 +315,40 @@ set "CHK=%NAME:\=%"
 if not "%CHK%"=="%NAME%" set "MANIFEST_BAD=1"
 set "CHK=%NAME: =%"
 if not "%CHK%"=="%NAME%" set "MANIFEST_BAD=1"
+set "CHK=%NAME:&=%"
+if not "%CHK%"=="%NAME%" set "MANIFEST_BAD=1"
+set "CHK=%NAME:|=%"
+if not "%CHK%"=="%NAME%" set "MANIFEST_BAD=1"
+set "CHK=%NAME:<=%"
+if not "%CHK%"=="%NAME%" set "MANIFEST_BAD=1"
+set "CHK=%NAME:>=%"
+if not "%CHK%"=="%NAME%" set "MANIFEST_BAD=1"
 set "PROGRAMS=%PROGRAMS% %NAME%"
 exit /b 0
 
 :collect_ps_program
-set "PS_PROGRAMS=%PS_PROGRAMS% %~1"
+set "NAME=%~1"
+if "%NAME%"=="" exit /b 0
+if not "%NAME:~-4%"==".ps1" (
+    echo [ERROR] PowerShell entry is not a .ps1 script: %NAME%
+    set "INSTALL_FAIL=1"
+    exit /b 0
+)
+set "CHK=%NAME: =%"
+if not "%CHK%"=="%NAME%" (
+    echo [ERROR] PowerShell script name contains a space: %NAME%
+    set "INSTALL_FAIL=1"
+    exit /b 0
+)
+set "CHK=%NAME:&=%"
+if not "%CHK%"=="%NAME%" set "INSTALL_FAIL=1"
+set "CHK=%NAME:|=%"
+if not "%CHK%"=="%NAME%" set "INSTALL_FAIL=1"
+set "CHK=%NAME:<=%"
+if not "%CHK%"=="%NAME%" set "INSTALL_FAIL=1"
+set "CHK=%NAME:>=%"
+if not "%CHK%"=="%NAME%" set "INSTALL_FAIL=1"
+set "PS_PROGRAMS=%PS_PROGRAMS% %NAME%"
 exit /b 0
 
 :try_perl
@@ -437,7 +472,7 @@ exit /b 0
 set "NF_BIN=%INSTALL_DIR%\bin"
 set "PSOUT=%TEMP%\nf_path_%RANDOM%%RANDOM%.txt"
 set "PATH_RESULT=error"
-powershell -NoProfile -Command "$b=$env:NF_BIN; $k=[Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment',$true); if($null -eq $k){$k=[Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment')}; $cur=$k.GetValue('Path',$null,[Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames); if($null -eq $cur){$cur='';$kind=[Microsoft.Win32.RegistryValueKind]::ExpandString}else{$kind=$k.GetValueKind('Path')}; $t=$b.TrimEnd('\').ToLower(); $found=$false; foreach($e in ($cur -split ';')){ if($e.Trim() -ne '' -and $e.TrimEnd('\').ToLower() -eq $t){$found=$true;break} }; if($found){'present'}else{$list=@(); foreach($e in ($cur -split ';')){if($e.Trim() -ne ''){$list+=$e}}; $list+=$b; $k.SetValue('Path',($list -join ';'),$kind); 'added'}; $k.Close()" >"%PSOUT%" 2>nul
+powershell -NoProfile -Command "$b=$env:NF_BIN; $k=[Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment',$true); if($null -eq $k){$k=[Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment')}; $cur=$k.GetValue('Path',$null,[Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames); if($null -eq $cur){$cur='';$kind=[Microsoft.Win32.RegistryValueKind]::ExpandString}else{$kind=$k.GetValueKind('Path')}; $t=$b.TrimEnd('\').ToLower(); $found=$false; foreach($e in ($cur -split ';')){ $v=$e.Trim(); if($v -ne '' -and ($v.TrimEnd('\').ToLower() -eq $t -or [Environment]::ExpandEnvironmentVariables($v).TrimEnd('\').ToLower() -eq $t)){$found=$true;break} }; if($found){'present'}else{$list=@(); foreach($e in ($cur -split ';')){if($e.Trim() -ne ''){$list+=$e}}; $list+=$b; $k.SetValue('Path',($list -join ';'),$kind); 'added'}; $k.Close()" >"%PSOUT%" 2>nul
 if exist "%PSOUT%" (
     set /p PATH_RESULT=<"%PSOUT%"
     del /f /q "%PSOUT%" >nul 2>&1

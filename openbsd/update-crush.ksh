@@ -155,6 +155,15 @@ CRUSHRC_EOF
 
 	# Drop any previously managed DeepSeek block, then re-add it.
 	if [ -f "$crushrc" ]; then
+		# Refuse to rewrite a file whose start marker lost its end
+		# marker: the awk filter would otherwise discard everything
+		# after the start marker.
+		if grep -q '^# --- DeepSeek provider ' "$crushrc" &&
+			! grep -q '^# --- End DeepSeek section ---$' "$crushrc"; then
+			error "Cannot update $crushrc:" \
+				"DeepSeek start marker has no end marker."
+			return 1
+		fi
 		awk '
 			/^# --- DeepSeek provider / { skip = 1; next }
 			/^# --- End DeepSeek section ---$/ { skip = 0; next }
@@ -243,6 +252,15 @@ install_crush() {
 		error "crush binary not found in $asset"
 		return 1
 	}
+
+	if [ -x "$BINDIR/crush" ]; then
+		backup="$BINDIR/crush.bak.$(date +%Y%m%d%H%M%S)"
+		if cp -p "$BINDIR/crush" "$backup"; then
+			log "Previous crush binary saved to $backup"
+		else
+			warn "Could not back up $BINDIR/crush to $backup"
+		fi
+	fi
 
 	log "Installing crush ${CRUSH_VERSION} to $BINDIR..."
 	install -m 0755 -o root -g wheel "$extracted/crush" \

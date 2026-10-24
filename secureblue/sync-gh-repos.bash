@@ -80,20 +80,21 @@ copy_from_backup_excluding_git() {
 }
 
 repo_has_content() {
-	local dir="$1"
+	local dir="$1" listing
 
 	[ -d "$dir" ] || return 1
 
-	if find "$dir" \
+	# Capture the listing instead of piping into grep -q: the consumer
+	# would exit early and the producer could die of SIGPIPE under
+	# pipefail, reporting 141 even when content exists.
+	listing="$(find "$dir" \
 		\( -path "$dir/.git" \
 		-o -path "$dir/.git/*" \
 		-o -path "$dir/.github" \
 		-o -path "$dir/.github/*" \) -prune \
-		-o -mindepth 1 -print -quit | grep -q .; then
-		return 0
-	fi
+		-o -mindepth 1 -print -quit)"
 
-	return 1
+	[ -n "$listing" ]
 }
 
 usage() {

@@ -62,10 +62,17 @@ set -eu
 # and license details.
 
 usage() {
-	printf '%s\n' \
-		"Usage: $0 [-n|--dry-run] [-v|--verbose] [-c|--check]" \
-		"        [DIR]" >&2
-	exit 2
+	status=${1:-2}
+	if [ "$status" -eq 0 ]; then
+		printf '%s\n' \
+			"Usage: $0 [-n|--dry-run] [-v|--verbose] [-c|--check]" \
+			"        [DIR]"
+	else
+		printf '%s\n' \
+			"Usage: $0 [-n|--dry-run] [-v|--verbose] [-c|--check]" \
+			"        [DIR]" >&2
+	fi
+	exit "$status"
 }
 
 require_cmd() {
@@ -326,7 +333,7 @@ main() {
 		-n | --dry-run) MODE=dry ;;
 		-c | --check) MODE=check ;;
 		-v | --verbose) VERBOSE=1 ;;
-		-h | --help) usage ;;
+		-h | --help) usage 0 ;;
 		--)
 			shift
 			break
@@ -388,10 +395,10 @@ main() {
 
 	# The worker self-invocation is driven by find's -exec + so
 	# that pathnames are passed through argv; no eval, no
-	# word-splitting, no NUL parsing required. .git directories
-	# are pruned; only regular files and directories are visited
-	# (symlinks and special files are skipped by construction).
-	find "$ROOT_DIR" \( -name .git -type d \) -prune -o \
+	# word-splitting, no NUL parsing required. .git directories and
+	# gitfiles are pruned; only regular files and directories are
+	# visited (symlinks and special files are skipped by construction).
+	find "$ROOT_DIR" \( -name .git \) -prune -o \
 		\( -type d -o -type f \) \
 		-exec "$SELF" --worker {} +
 

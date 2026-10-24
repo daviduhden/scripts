@@ -4,14 +4,38 @@
 # - Removes session history for Codex and GitHub Copilot.
 # - Removes OpenCode prompt history, database files and logs.
 # - Removes Crush data and project-local Swival history/state.
-# - Keeps configuration files and credentials intact.
+# - Keeps Codex/Copilot/OpenCode configuration and credentials intact.
+# - Removes the entire Crush data directory, including any configuration
+#   stored there.
+# - Use -DryRun to preview without deleting anything.
 #
 # Set SWIVAL_PROJECT_HOME to select the project whose .swival state is purged.
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
 
+[CmdletBinding()]
+param(
+    [switch]$DryRun,
+    [switch]$Help
+)
+
 $ErrorActionPreference = 'Stop'
+
+if ($Help) {
+    $helpText = @'
+Usage: ai-purge-history.ps1 [-DryRun] [-Help]
+
+Removes Codex, Copilot, OpenCode, Crush, and project-local Swival
+history/state for the current user. Codex/Copilot/OpenCode configuration is
+kept; the whole Crush data directory is removed.
+
+  -DryRun  Show the paths that would be removed, delete nothing
+  -Help    Show this help
+'@
+    Write-Host $helpText
+    exit 0
+}
 
 $codexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $HOME '.codex' }
 $copilotHome = if ($env:COPILOT_HOME) { $env:COPILOT_HOME } else { Join-Path $HOME '.copilot' }
@@ -40,11 +64,27 @@ $paths = @(
     (Join-Path $swivalProjectHome '.swival\audit')
 )
 
-foreach ($path in $paths) {
-    if (Test-Path -LiteralPath $path) {
-        Remove-Item -LiteralPath $path -Recurse -Force
-        Write-Host "[INFO] Removed: $path"
+function Remove-Target {
+    param([string]$Path)
+
+    if (Test-Path -LiteralPath $Path) {
+        if ($DryRun) {
+            Write-Host "[DRY-RUN] Would remove: $Path"
+        }
+        else {
+            Remove-Item -LiteralPath $Path -Recurse -Force
+            Write-Host "[INFO] Removed: $Path"
+        }
     }
 }
 
-Write-Host '[INFO] AI assistant history purged for Windows'
+foreach ($path in $paths) {
+    Remove-Target -Path $path
+}
+
+if ($DryRun) {
+    Write-Host '[INFO] Dry run complete; no files were removed.'
+}
+else {
+    Write-Host '[INFO] AI assistant history purged for Windows'
+}

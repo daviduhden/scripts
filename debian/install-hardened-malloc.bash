@@ -178,11 +178,18 @@ configure_preload() {
 
 	log "Configuring global preload ($variant variant) in $PRELOAD_CONF..."
 
-	# Remove any existing hardened_malloc entries
+	# Remove any existing hardened_malloc entries, keeping unrelated
+	# lines and blank lines intact. Back up the loader configuration
+	# before the first modification in this run.
 	if [ -f "$PRELOAD_CONF" ]; then
+		backup="${PRELOAD_CONF}.bak.$(date '+%Y%m%d%H%M%S')"
+		cp -a "$PRELOAD_CONF" "$backup" ||
+			error "Cannot back up $PRELOAD_CONF to $backup."
 		sed -i "\|hardened_malloc|d" "$PRELOAD_CONF"
-		# Remove empty lines and trailing newlines
-		sed -i '/^[[:space:]]*$/d' "$PRELOAD_CONF"
+		# Avoid concatenating the new entry with an unterminated line.
+		if [ -n "$(tail -c 1 "$PRELOAD_CONF")" ]; then
+			printf '\n' >>"$PRELOAD_CONF"
+		fi
 	fi
 
 	printf '%s\n' "$so_path" >>"$PRELOAD_CONF"

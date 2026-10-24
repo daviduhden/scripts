@@ -1950,6 +1950,8 @@ NormalizeFiles::run(@ARGV) unless caller;
 
 __END__
 
+=encoding UTF-8
+
 =head1 NAME
 
 normalize-files.pl - portable recursive normalizer for file names and text files
@@ -2186,8 +2188,8 @@ view in the helpers. Sandbox setup remains best-effort.
 
 Core modules only: L<Encode>, L<Unicode::Normalize>, L<File::Spec>,
 L<File::Basename>, L<File::Temp>, L<Getopt::Long>, L<Pod::Usage>,
-L<Digest::SHA>. L<Text::Unidecode> and L<Encode::Guess> are intentionally
-not required.
+L<Digest::SHA>, L<Cwd>, L<Fcntl>, L<Errno>. L<Text::Unidecode> and
+L<Encode::Guess> are intentionally not required.
 
 =head1 EXAMPLES
 
