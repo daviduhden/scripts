@@ -64,6 +64,8 @@ handle_visudo() {
 	exec run0 "$real_visudo" "$@"
 }
 
+# Prefer the distribution's visudo. If it is elsewhere in PATH, ignore a hit
+# that resolves to this wrapper itself, which would recurse through run0.
 resolve_real_visudo() {
 	local real_visudo="/usr/sbin/visudo"
 	if [[ ! -x $real_visudo ]]; then
@@ -100,6 +102,8 @@ handle_sudoedit() {
 	fi
 
 	if [[ -n $editor ]]; then
+		# Split on whitespace to allow values such as "vim -u NONE"; shell
+		# quoting inside the variable is not interpreted.
 		local -a editor_cmd
 		read -r -a editor_cmd <<<"$editor"
 		exec run0 "${editor_cmd[@]}" "$@"
@@ -114,6 +118,9 @@ handle_default_sudo() {
 	exec run0 "$@"
 }
 
+# The installed name selects the behavior, which is why the script is symlinked
+# as sudo, visudo, and sudoedit. Every handler ends in exec, so the first
+# match never returns.
 dispatch_by_prog_name() {
 	local prog_name="$1"
 	shift

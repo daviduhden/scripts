@@ -1,7 +1,8 @@
 #!/bin/sh
 set -eu
 
-# Save original stdout/stderr, create per-run log in TMPDIR and redirect
+# Announce the log path on descriptor 3, then send normal output to the log.
+# The failure list is created later, so the trap is installed after that point.
 exec 3>&1 4>&2
 TMPLOG="${TMPDIR:-/tmp}/validate-perl-$$.log"
 printf '%s\n' "[INFO] Logging to: $TMPLOG" >&3
@@ -35,6 +36,8 @@ require_cmd() {
 
 run_validate_perl() {
 
+	# One optional ROOT_DIR; reject option-looking paths and nonexistent
+	# directories before creating temporary files.
 	ROOT_DIR=${1:-.}
 	[ "$#" -le 1 ] || usage
 	[ "${ROOT_DIR#-}" = "$ROOT_DIR" ] || usage
@@ -55,13 +58,17 @@ run_validate_perl() {
 	TMP_FAILS="$TMPDIR_BASE/validate-perl-fails-$$.txt"
 	trap 'rm -f "$TMP_FAILS"' EXIT
 
+	# The loops below run in pipeline subshells, so record findings in a file
+	# instead of a parent-shell counter.
 	note_fail() { printf '%s\n' "$1" >>"$TMP_FAILS"; }
 
 	printf '%s\n' "[INFO] Formatting Perl files with perltidy..."
 	if command -v perltidy >/dev/null 2>&1; then
 		UNFMT="$TMPDIR_BASE/unformatted-perl-$$.txt"
 
-		# Detect files that would change formatting
+		# Detection rewrites nothing: -o /dev/null discards the formatted
+		# output and -ast (--assert-tidy) returns nonzero when the file
+		# would change.
 		find "$ROOT_DIR" \
 			\( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) \
 			-prune -o -type f \
@@ -79,6 +86,8 @@ run_validate_perl() {
 			printf '%s\n' "[INFO] perltidy will format the following files:"
 			sed -n '1,200p' "$UNFMT" | sed 's/^/  - /'
 
+			# Rewrite in place and still record the file: a successful rewrite
+			# is a validation failure so the resulting diff must be reviewed.
 			while IFS= read -r file; do
 				[ -n "$file" ] || continue
 				# Ignore user/global profiles so validation is
@@ -106,6 +115,9 @@ run_validate_perl() {
 	fi
 
 	printf '%s\n' "[INFO] Running Perl syntax checks..."
+	# perl -c loads modules; a missing module is reported as a warning rather
+	# than a syntax failure so the validator can run in a minimal install.
+	# The apostrophe is matched as . so quoting stays simple.
 	find "$ROOT_DIR" \
 		\( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) \
 		-prune -o -type f \
@@ -182,6 +194,8 @@ run_validate_perl() {
 		issues=$(sort -u "$TMP_FAILS" | wc -l | tr -d ' ')
 	fi
 
+	# Any rewrite, syntax error, or Perl::Critic finding is an issue (exit 2).
+	# Missing optional tools and unloadable modules were skipped instead.
 	if [ "${issues:-0}" -ne 0 ]; then
 		printf '%s\n' \
 			"[INFO] Completed with $issues issue(s)" \

@@ -11,6 +11,26 @@ set -euo pipefail
 # It is intended for Debian-based distributions (Debian/Devuan) only.
 # It supports only amd64 and arm64 architectures (as per repository).
 #
+# Requirements: root privileges, network access, dpkg, curl, and ps.
+# gnupg, apt-transport-https, and apt-transport-tor are installed when
+# missing. The script asks interactively whether to use the onion or
+# HTTPS repository; when no input is available, the default (onion)
+# is selected automatically.
+#
+# Side effects:
+#  - Writes /usr/share/keyrings/deb.torproject.org-keyring.gpg
+#  - Writes /etc/apt/sources.list.d/tor.sources
+#  - Removes the legacy /etc/apt/sources.list.d/tor.list
+#  - Runs apt update and installs tor, torsocks, obfs4proxy, and
+#    deb.torproject.org-keyring
+#  - Enables and starts tor through the detected service manager
+#
+# The source file also contains a disabled nightly stanza. Existing
+# key and source files are overwritten without a backup. Service setup
+# covers several init systems; on s6 it only prints instructions. If a
+# detected manager's commands fail, the script exits non-zero after Tor
+# has been installed.
+#
 # Supported (based on current published repositories):
 #   Debian: bookworm, trixie
 #   Ubuntu: jammy, noble
@@ -79,6 +99,8 @@ load_os_release() {
 	fi
 }
 
+# Normalize derivatives that advertise Ubuntu in ID_LIKE to "ubuntu"
+# so they use the Ubuntu suite names.
 normalize_os_id() {
 	OS_ID="${ID:-}"
 	if [[ $OS_ID != "debian" &&
@@ -110,6 +132,9 @@ log_detected_platform() {
 	log "Using native APT architecture: ${ARCH_FILTER}"
 }
 
+# Download the Tor Project signing key and dearmor it in one pipeline
+# into the APT keyring. pipefail makes a failed download or a failed
+# gpg run fail the pipeline; no temporary key file is kept.
 install_tor_key() {
 	log "Importing Tor Project signing key..."
 	install -d -m 0755 /usr/share/keyrings
@@ -121,6 +146,9 @@ install_tor_key() {
 			-o /usr/share/keyrings/deb.torproject.org-keyring.gpg
 }
 
+# Write the selected repository transport as a deb822 source. The
+# second stanza points at the nightly suite for the same codename and
+# is disabled with "Enabled: no". The legacy .list file is removed.
 write_tor_sources() {
 	log "Writing APT deb822 sources file for Tor..."
 	rm -f /etc/apt/sources.list.d/tor.list
@@ -171,6 +199,8 @@ run_setup() {
 		"(where supported) enabled and running."
 }
 
+# Determine the OS codename, translate Devuan codenames to the Debian
+# suites the Tor repository publishes, and validate the result.
 get_suite_codename() {
 	if [[ -n ${DEBIAN_CODENAME:-} ]]; then
 		OS_CODENAME="${DEBIAN_CODENAME}"
@@ -229,6 +259,8 @@ get_suite_codename() {
 	esac
 }
 
+# Restrict the source to the two architectures the Tor repository
+# publishes.
 detect_architecture() {
 	local native
 	native="$(dpkg --print-architecture 2>/dev/null || true)"
@@ -249,6 +281,10 @@ detect_architecture() {
 	esac
 }
 
+# Refresh the base index, then install gpg, apt-transport-https, and
+# apt-transport-tor only when they are missing. apt-transport-tor is
+# installed unconditionally, before the transport prompt, so the onion
+# option is available when it is selected.
 ensure_base_dependencies() {
 	log "Updating APT index for base repositories..."
 	"$APT_CMD" update
@@ -269,6 +305,10 @@ ensure_base_dependencies() {
 	fi
 }
 
+# Ask which repository transport to use. Option 1 (the default) uses
+# the project's onion address through apt-transport-tor; option 2 uses
+# the clearnet HTTPS endpoint. Invalid answers repeat the prompt. A
+# failed read (for example, no TTY) is treated as the default choice.
 choose_repo_transport() {
 	log "Select Tor repository transport:"
 	log "  1) Onion (tor+http, via apt-transport-tor)"
@@ -301,6 +341,8 @@ choose_repo_transport() {
 	done
 }
 
+# Run a service command, logging a warning and returning non-zero on
+# failure so callers can try an alternative action.
 service_action() {
 	local action_desc="$1"
 	shift
@@ -321,6 +363,8 @@ systemd_unit_exists() {
 	systemctl list-unit-files "$1" >/dev/null 2>&1
 }
 
+# Enable the unit, then restart it (falling back to start), and verify
+# that systemd reports it active. Returns non-zero if any step fails.
 ensure_systemd_unit_active() {
 	local unit="$1"
 
@@ -387,6 +431,8 @@ enable_tor_runit() {
 		sv start tor
 }
 
+# Prefer the standard tor.service unit and fall back to the templated
+# tor@default.service used by some packaging configurations.
 enable_tor_systemd() {
 	log "Detected systemd. Enabling and" \
 		"starting tor service..."
@@ -454,6 +500,11 @@ enable_tor_sysv() {
 	return "$failed"
 }
 
+# Identify the init system from PID 1 and dispatch to the matching
+# helper. If PID 1 is not recognized, probe for service-manager
+# commands in priority order. The s6 path only prints instructions;
+# the final fallback warns and returns non-zero when no manager is
+# found.
 enable_and_start_tor() {
 	local init_comm
 	init_comm="$(ps -p 1 -o comm= 2>/dev/null |

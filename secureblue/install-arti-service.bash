@@ -1,14 +1,22 @@
 #!/bin/bash
 set -euo pipefail
 
-# SecureBlue arti.service installation script
-# Automated script to install and enable arti.service for user systemd
-# - Installs arti.service systemd user unit from bundled template
-# - Downloads the example arti config matching the installed Arti version
-#   (release tag arti-vX.Y.Z), falling back to the main branch
-# - Creates necessary config/data/state directories under XDG paths
-# - Enables and starts arti.service under user systemd
-# - Optionally installs arti-socks-proxy.service if socat is available
+# SecureBlue arti.service installation helper.
+#
+# Installs Arti as a systemd *user* service for the account running this
+# script: it copies the bundled unit template, creates XDG config/data/state/
+# cache directories, fetches the upstream example configuration, and enables
+# and starts the unit with systemctl --user. No root or run0 is used, but a
+# working user systemd session is required.
+#
+# The configuration URL follows the installed Arti version (tag
+# arti-vX.Y.Z). If the version cannot be determined or the tag download
+# fails, it falls back to the main branch. The download is protected by TLS
+# but is not checked against a separate checksum or signature. An existing
+# configuration is retained as a timestamped backup before replacement.
+#
+# If socat is installed, the optional arti-socks-proxy.service bridge is
+# installed too; bridge failures are warnings and do not fail the main unit.
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
@@ -33,10 +41,14 @@ require_cmd() {
 	fi
 }
 
+# Fail on HTTP errors, follow redirects, and retry transient network failures.
+# TLS verification is left at curl's defaults.
 net_curl() {
 	curl -fLsS --retry 5 "$@"
 }
 
+# Templates are installed next to the scripts as a systemd/ subdirectory, so
+# resolve them relative to this file rather than the current directory.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SERVICE_SRC="${SCRIPT_DIR}/systemd/arti.service"
 BRIDGE_SRC="${SCRIPT_DIR}/systemd/arti-socks-proxy.service"
@@ -76,6 +88,8 @@ check_prereqs() {
 	fi
 }
 
+# Resolve every location once so the unit file and the directories created
+# below agree even when the user overrides XDG_*_HOME.
 setup_paths() {
 	SYSTEMD_USER_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 	CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/arti"
@@ -87,12 +101,14 @@ setup_paths() {
 
 install_arti_unit_and_config() {
 	log "Creating systemd user dir: $SYSTEMD_USER_DIR"
+	# 0750 keeps other local users out of the Tor configuration and state.
 	install -d -m 0750 "$SYSTEMD_USER_DIR"
 
 	log "Installing arti.service to user unit directory..."
 	install -m 0640 "$SERVICE_SRC" "$SYSTEMD_USER_DIR/arti.service"
 	# Substitute the resolved XDG paths so the unit matches the directories
-	# created below (which honor XDG_*_HOME overrides).
+	# created below (which honor XDG_*_HOME overrides). These patterns must
+	# stay in sync with the placeholders in systemd/arti.service.
 	sed -i \
 		-e "s#%h/.config/arti#${CONFIG_DIR}#g" \
 		-e "s#%h/.local/share/arti#${DATA_DIR}#g" \
@@ -103,6 +119,8 @@ install_arti_unit_and_config() {
 	log "Creating arti directories (config/data/state/cache)..."
 	install -d -m 0750 "$CONFIG_DIR" "$DATA_DIR" "$STATE_DIR" "$CACHE_DIR"
 
+	# curl -o truncates the destination, so keep a timestamped copy first.
+	# The backup is not removed automatically; operators can prune old ones.
 	if [[ -f $CONFIG_FILE ]]; then
 		BACKUP_FILE="${CONFIG_FILE}.bak.$(date +%Y%m%d%H%M%S)"
 		log "Config already exists; creating backup at $BACKUP_FILE"
@@ -141,6 +159,9 @@ enable_arti_service() {
 	fi
 }
 
+# The bridge exposes Arti's TCP SOCKS port through a user-local UNIX socket for
+# clients that prefer a socket path; skip it cleanly when socat or the optional
+# unit template is absent.
 maybe_install_bridge_service() {
 	if command -v socat >/dev/null 2>&1; then
 		BRIDGE_UNIT="${SYSTEMD_USER_DIR}/arti-socks-proxy.service"

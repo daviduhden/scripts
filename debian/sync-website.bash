@@ -4,13 +4,33 @@ set -euo pipefail
 
 # Debian website synchronization script
 # Synchronizes a deployed website directory with a GitHub repository:
-#  - Prefers GitHub CLI (gh repo sync) if available
-#  - Falls back to plain git fetch/reset if needed
+#  - Prefers GitHub CLI (gh repo clone) if available
+#  - Falls back to a plain git clone if needed
 #  - Falls back to downloading a GitHub ZIP if git-based methods fail
 #  - Applies safe file permissions and restarts
 #    the configured web service
 #  - Uses a simple lock directory to avoid
 #    concurrent runs (safe for cron)
+#
+# Requirements: root privileges, an existing destination directory,
+# and at least one working sync path. gh is preferred, then a plain git
+# clone, then a direct ZIP download. curl or wget, unzip, find, and a
+# running systemd service are needed for the fallback and post-update
+# steps.
+#
+# Side effects:
+#  - Replaces the contents of /var/www/daviduhden-website, except the
+#    lock directory, with the repository branch contents
+#  - Removes .git, .github, and .gitattributes from the destination
+#  - Sets ownership to www-data:www-data and modes 755/644
+#  - Restarts apache2 and, when certbot is installed, attempts
+#    certificate renewal
+#
+# The branch is fixed to main and the service to apache2; the GitHub
+# account, host, and repository slug can be overridden with GH_USER,
+# GH_HOST, and REPO_SLUG. The gh path runs as GH_USER (default admin)
+# through sudo or su, using that account's gh configuration; the git
+# and ZIP fallbacks run as the invoking user.
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
@@ -29,6 +49,8 @@ error() {
 		"$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2
 }
 
+# Treat the staged tree as usable only when it has at least one entry
+# outside the VCS metadata directories (.git, .github).
 has_repo_content() {
 	local dir="$1" listing
 	[ -d "$dir" ] || return 1
@@ -48,6 +70,8 @@ has_repo_content() {
 ##################
 # Git LFS helper #
 ##################
+# Pull Git LFS objects when both git and git-lfs are available. LFS
+# failures are warnings; the checkout may still contain pointer files.
 fetch_lfs_files() {
 	local dir="$1"
 	if ! command -v git >/dev/null 2>&1; then
@@ -73,6 +97,9 @@ GH_USER="${GH_USER:-admin}"
 GH_HOST="${GH_HOST:-github.com}"
 REPO_SLUG="${REPO_SLUG:-daviduhden/daviduhden-website}"
 
+# Resolve the deployment account's home directory. getent is preferred
+# because the home may differ from /home/<user>; the fallback is only
+# a guess when getent is unavailable.
 if command -v getent >/dev/null 2>&1; then
 	GH_HOME="$(getent passwd "$GH_USER" |
 		awk -F: '{print $6}')"
@@ -82,6 +109,9 @@ fi
 
 GH_CONFIG_DIR="${GH_HOME}/.config/gh"
 
+# Execute a command as the deployment account. sudo is used when
+# present; otherwise su -c receives a shell-quoted command string built
+# with printf %q.
 run_as_gh_user() {
 	if command -v sudo >/dev/null 2>&1; then
 		sudo -u "$GH_USER" "$@"
@@ -90,6 +120,11 @@ run_as_gh_user() {
 	fi
 }
 
+# Replace the deployed content with the staged checkout. With rsync,
+# --delete removes stale files; without it, the top level of the
+# destination is cleared first (except lock and metadata names) and
+# then repopulated with cp -a. The lock directory is always preserved,
+# and VCS metadata is removed from the destination at the end.
 stage_from_source() {
 	local srcdir="$1"
 	if [ -d "$WWW_DIR/.git" ]; then
@@ -150,6 +185,11 @@ ZIP_URL="${ZIP_URL}/archive/refs/heads/${BRANCH}.zip"
 ###################
 # GitHub CLI sync #
 ###################
+# Preferred path: clone the branch with the deployment account's gh
+# credentials, retrying up to five times. Returns non-zero when gh,
+# git, or the account configuration is missing, when authentication
+# fails, when the clone never succeeds, or when the checkout has no
+# content. The temporary tree is created by and owned by GH_USER.
 sync_with_gh_cli() {
 	local repo_slug="$REPO_SLUG" attempt=1
 	local tmpdir stagedir
@@ -206,6 +246,10 @@ sync_with_gh_cli() {
 ############
 # Git sync #
 ############
+# Fallback path: clone with plain git. Reuse the destination's existing
+# origin when it is a work tree, otherwise build an HTTPS URL from
+# REPO_SLUG and GH_HOST. Unlike the gh path, this clone does not use
+# GH_USER's gh configuration.
 sync_with_git() {
 	local origin_url="" tmpdir stagedir
 	if ! command -v git >/dev/null 2>&1; then
@@ -251,6 +295,9 @@ sync_with_git() {
 #######################
 # GitHub ZIP fallback #
 #######################
+# Last resort: download the branch archive from GitHub and unpack it.
+# curl is preferred over wget. GitHub archives contain one top-level
+# directory, which is used as the staging source.
 sync_with_github_zip() {
 	local tmpdir zipfile unpack_dir srcdir
 	tmpdir=$(mktemp -d "/tmp/site-sync.XXXXXX") || return 1
@@ -301,6 +348,10 @@ sync_with_github_zip() {
 #####################
 # Post-update steps #
 #####################
+# Normalize ownership and modes, restart the web service, then try
+# certificate renewal if certbot is installed. Ownership errors are
+# warnings, permission and restart errors are fatal. certbot failures
+# are ignored and do not fail the sync.
 post_update_steps() {
 	cd "$WWW_DIR" || return 1
 
@@ -355,6 +406,10 @@ post_update_steps() {
 # Main #
 ########
 LOCKDIR=""
+# Create the lock directory atomically and record the PID. A lock with
+# a recorded PID whose process no longer exists is treated as stale and
+# reacquired. A lock without a PID is left in place (fail closed) and
+# causes this run to skip syncing.
 acquire_lock() {
 	local lock_pid
 
@@ -399,8 +454,12 @@ main() {
 		log "Another sync already running; exiting."
 		exit 0
 	fi
+	# Always release the lock, including on interruption or failure.
 	trap 'rm -rf "$LOCKDIR"' EXIT INT TERM
 
+	# Try the methods in order and stop at the first success. A sync
+	# method stages content into WWW_DIR; post_update_steps then
+	# finalizes ownership, modes, and the service.
 	if ! sync_with_gh_cli &&
 		! sync_with_git &&
 		! sync_with_github_zip; then

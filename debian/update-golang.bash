@@ -10,6 +10,19 @@ set -euo pipefail
 # - Install into /usr/local/go
 # - Ensure /usr/local/go/bin is in system-wide PATH via /etc/profile
 #
+# Requirements: root privileges, network access, curl, tar, install,
+# uname, and mktemp. Only Linux is supported.
+#
+# Side effects:
+#  - Replaces /usr/local/go with the downloaded release
+#  - Appends an export to /etc/profile when /usr/local/go/bin is not
+#    already mentioned, after copying it to a timestamped backup
+#  - Writes the tarball to a temporary file that is removed on exit
+#
+# The download is not checked against a published checksum or
+# signature. A distribution Go package is left untouched; this script
+# only replaces the /usr/local/go tree.
+#
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
 
@@ -47,7 +60,9 @@ net_curl() {
 	curl -fLsS --retry 5 "$@"
 }
 
-# Get the latest stable Go version (e.g. go1.25.5) from go.dev
+# Get the latest stable Go version (e.g. go1.25.5) from go.dev.
+# The endpoint returns the version followed by a timestamp; everything
+# from the first whitespace character is discarded.
 get_latest_go_version() {
 	local ver
 	if ! ver="$(net_curl "$VERSION_URL" 2>/dev/null)"; then
@@ -58,6 +73,9 @@ get_latest_go_version() {
 	printf '%s\n' "$ver"
 }
 
+# Map the kernel machine type to the architecture component of the
+# official tarball name. armv7 is mapped to armv6l because that is the
+# 32-bit ARM tarball name upstream publishes.
 detect_go_arch() {
 	local arch
 	arch="$(uname -m)"
@@ -82,7 +100,9 @@ detect_go_arch() {
 	esac
 }
 
-# Ensure /usr/local/go/bin is in system-wide PATH via /etc/profile
+# Ensure /usr/local/go/bin is in system-wide PATH via /etc/profile.
+# A simple substring check makes this idempotent; the file is backed up
+# before the export is appended.
 ensure_go_path_in_etc_profile() {
 	local profile_file="/etc/profile"
 	local backup_suffix
@@ -146,6 +166,8 @@ run_golang_update() {
 	GO_ARCH="$(detect_go_arch)"
 	TAR_NAME="${LATEST_VERSION}.linux-${GO_ARCH}.tar.gz"
 	TAR_URL="${GO_BASE_URL}/${TAR_NAME}"
+	# The trap removes the downloaded archive on success and on every
+	# error path after this point.
 	TAR_FILE="$(mktemp /tmp/go-XXXXXX.tar.gz)"
 	trap 'rm -f "$TAR_FILE" 2>/dev/null || true' EXIT
 
@@ -155,6 +177,8 @@ run_golang_update() {
 	fi
 
 	log "Download complete: ${TAR_FILE}"
+	# The old tree is removed before extraction so files from a
+	# previous release do not remain in /usr/local/go.
 	log "Installing Go into ${GO_ROOT}..."
 	install -d -m 0755 "${INSTALL_DIR}"
 	if [[ -d $GO_ROOT ]]; then

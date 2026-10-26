@@ -1,10 +1,19 @@
 #!/bin/bash
 set -euo pipefail
 
-# SecureBlue ClamAV setup script
-# Configures ClamAV with self-healing updates, on-access scanning,
-# and periodic system scans. Also sets up SELinux contexts and
-# filesystem permissions to ensure proper operation.
+# SecureBlue ClamAV setup script. Must run as root.
+#
+# Layers the ClamAV packages with rpm-ostree, then configures freshclam, the
+# clamd scan instance, on-access scanning (clamonacc), log rotation, a daily
+# periodic scan, SELinux file contexts, and ownership/permissions for ClamAV's
+# state and log directories. It writes under /etc, /var/lib, /var/log,
+# /var/spool/quarantine, /run, /usr/local/sbin, and /etc/systemd/system, and
+# enables the corresponding services.
+#
+# rpm-ostree changes are staged into a new deployment: a newly layered package
+# (and its service account) may not be usable until after a reboot. Re-running
+# the script is intended to converge the configuration rather than duplicate
+# it.
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
@@ -36,8 +45,9 @@ require_cmd() {
 		error "Required command '$1' not found"
 }
 
-# Fedora's ClamAV account naming has varied across releases/packages.
-# Resolve a usable service account dynamically for Atomic 44+.
+# Fedora's ClamAV account naming has varied across releases/packages
+# (clamav vs. clamscan). Resolve a usable service account dynamically for
+# Atomic 44+ instead of hard-coding one name.
 CLAMAV_USER=""
 CLAMAV_GROUP=""
 
@@ -65,6 +75,9 @@ resolve_clamav_account() {
 # PACKAGE INSTALLATION #
 ########################
 
+# Lay missing packages one at a time so a single unavailable package does not
+# abort the rest. A failed layering is only a warning here; the later service
+# account and command checks surface an unusable environment.
 install_packages() {
 	log "Installing ClamAV packages"
 
@@ -87,11 +100,16 @@ install_packages() {
 fix_permissions() {
 	log "Fixing filesystem permissions"
 
+	# Group-writable state/log/socket directories let the clamd service
+	# account and helper processes share them. The quarantine is root-only so
+	# detected files cannot be tampered with by the scanner account.
 	install -d -m 0775 -o "$CLAMAV_USER" -g "$CLAMAV_GROUP" /var/lib/clamav
 	install -d -m 0775 -o "$CLAMAV_USER" -g "$CLAMAV_GROUP" /var/log/clamav
 	install -d -m 0775 -o "$CLAMAV_USER" -g "$CLAMAV_GROUP" /run/clamd.scan
 	install -d -m 0770 -o root -g root /var/spool/quarantine
 
+	# freshclam may run as the service account or as root; group-writable
+	# keeps logging possible in both cases.
 	touch /var/log/freshclam.log
 	chown "$CLAMAV_USER:$CLAMAV_GROUP" /var/log/freshclam.log
 	chmod 0664 /var/log/freshclam.log
@@ -104,6 +122,8 @@ fix_permissions() {
 fix_selinux() {
 	log "Configuring SELinux file contexts"
 
+	# Try to add each mapping; if it already exists, fall back to modifying
+	# the existing entry. restorecon then relabels the current files.
 	semanage fcontext -a -t antivirus_db_t \
 		"/var/lib/clamav(/.*)?" 2>/dev/null ||
 		semanage fcontext -m -t antivirus_db_t \
@@ -135,6 +155,9 @@ fix_selinux() {
 # FRESHCLAM CONFIGURATION #
 ###########################
 
+# Disable the shipped "Example" marker and point freshclam at the managed
+# database, log, and clamd notification socket. Only commented defaults are
+# rewritten, so an already customized active directive is left alone.
 configure_freshclam() {
 	log "Configuring freshclam"
 
@@ -185,6 +208,8 @@ set_config_directive() {
 	printf '%s %s\n' "$directive" "$value" >>"$file"
 }
 
+# Configure the scan instance to use a UNIX socket, on-access monitoring of
+# /var/home, and bounded log growth, then enable it at boot.
 configure_clamd() {
 	log "Configuring clamd (scan instance)"
 
@@ -317,6 +342,9 @@ EOF
 # PERIODIC SCANNING #
 #####################
 
+# Install a small wrapper plus oneshot service/timer. The wrapper runs as root
+# and streams file contents to clamd, which avoids SELinux descriptor-passing
+# failures while still reading files the clamd account cannot access directly.
 configure_periodic_scan() {
 	log "Configuring periodic ClamAV scan"
 
@@ -339,6 +367,9 @@ EOF
 
 	chmod 0755 /usr/local/sbin/clamav-target-scan.bash
 
+	# clamdscan exits 1 when it finds infected files, so the service lists 0,
+	# 1, and 2 as successful; otherwise every detection would mark the unit
+	# failed.
 	cat >/etc/systemd/system/clamav-target-scan.service <<'EOF'
 [Unit]
 Description=ClamAV periodic scan
@@ -356,6 +387,8 @@ LockPersonality=true
 RestrictSUIDSGID=true
 EOF
 
+	# Persistent=true runs a missed scan after the machine was off at the
+	# scheduled time.
 	cat >/etc/systemd/system/clamav-target-scan.timer <<'EOF'
 [Unit]
 Description=Daily ClamAV scan
@@ -381,6 +414,8 @@ check_prereqs() {
 	require_cmd restorecon
 }
 
+# Order matters: package layering creates the service account, and account
+# resolution must precede any chown/chmod and clamd configuration.
 run_setup() {
 	install_packages
 	resolve_clamav_account

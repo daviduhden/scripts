@@ -1,7 +1,10 @@
 #!/bin/sh
 set -eu
 
-# Save original stdout/stderr, create per-run log in TMPDIR and redirect
+# Keep the original streams on descriptors 3 and 4. Everything below is
+# redirected to a per-run log, so progress messages land in the log while
+# descriptor 3 can still bypass it (for example, to announce the log path).
+# The log is left in ${TMPDIR:-/tmp} for inspection after the run.
 exec 3>&1 4>&2
 TMPLOG="${TMPDIR:-/tmp}/clang-format-all-$$.log"
 printf '%s\n' "[INFO] Logging to: $TMPLOG" >&3
@@ -38,12 +41,18 @@ require_cmd() {
 	}
 }
 
-# Read metadata, never execute project build files. A nearer explicit standard
-# overrides an ancestor's. This is heuristic; use C_FORMAT_STANDARD for dynamic
-# build settings or conflicting per-target standards.
+# Print the effective C/C++ standard for the file in $1, or nothing when no
+# literal standard is found. Metadata from the file's own directory is
+# preferred over ancestors; the search stops at a .git entry or the filesystem
+# root. Only stable -std=, CMake CXX_STANDARD/C_STANDARD/cxx_std_*, and Meson
+# c_std= spellings are recognized. Build files are read, never executed, so
+# computed or per-target standards need C_FORMAT_STANDARD instead.
 detect_standard() {
 	standard_dir=${1%/*}
 	while :; do
+		# Concatenate every recognized metadata file in this directory so
+		# one awk pass can report the last literal match. Stripping #
+		# comments is a line-based heuristic, not a parser.
 		standard=$(
 			for metadata in Makefile.inc Makefile makefile GNUmakefile BSDmakefile \
 				CMakeLists.txt build/CMakeLists.txt meson.build compile_commands.json; do
@@ -91,6 +100,7 @@ detect_standard() {
 			printf '%s\n' "$standard"
 			return
 		fi
+		# Do not read metadata outside the project or above the root.
 		[ ! -e "$standard_dir/.git" ] || return 0
 		[ "$standard_dir" != / ] || return 0
 		standard_dir=${standard_dir%/*}
@@ -100,6 +110,9 @@ detect_standard() {
 
 run_clang_format_all() {
 
+	# Accept zero or one operand. Reject option-looking roots so a mistyped
+	# flag is not formatted as a directory name. Exit 2 is reserved for
+	# usage/path errors; exit 1 reports missing tools or configurations.
 	[ "$#" -le 1 ] || usage
 	ROOT_DIR=${1:-.}
 	[ "${ROOT_DIR#-}" = "$ROOT_DIR" ] || usage
@@ -108,8 +121,13 @@ run_clang_format_all() {
 		printf '%s\n' "[ERROR] ROOT_DIR is not a directory: $ROOT_DIR" >&2
 		exit 2
 	}
+	# Resolve symlinks and relative components once so find output and the
+	# .git pruning below use a stable absolute prefix.
 	ROOT_DIR=$(CDPATH='' cd "$ROOT_DIR" && pwd -P)
 	SCRIPT_DIR=$(CDPATH='' cd "$(dirname "$0")" && pwd -P)
+	# Prefer a project-local style. The in-tree script uses the repository
+	# copy (clang-format); the installed command uses the installed file
+	# (clang-format-all.yaml).
 	if [ -r "$ROOT_DIR/.clang-format" ]; then
 		STYLE_FILE="$ROOT_DIR/.clang-format"
 	else
@@ -119,6 +137,8 @@ run_clang_format_all() {
 		fi
 	fi
 	case ${C_FORMAT_STANDARD:-} in
+	# Empty means "detect per file"; anything else must be one of the
+	# spellings accepted by clang-format and knfmt.
 	'' | c89 | c90 | c99 | c11 | c1x | c17 | c18 | c23 | c2x | gnu89 | gnu90 | gnu99 | gnu11 | gnu1x | gnu17 | gnu18 | gnu23 | gnu2x | c++11 | c++14 | c++17 | c++20 | c++23 | cxx11 | cxx14 | cxx17 | cxx20 | cxx23 | gnu++11 | gnu++14 | gnu++17 | gnu++20 | gnu++23) ;;
 	*)
 		printf '%s\n' '[ERROR] Unsupported C_FORMAT_STANDARD' >&2
@@ -131,6 +151,10 @@ run_clang_format_all() {
 		printf '%s\n' "[INFO] OpenBSD detected: install clang-tools-extra"
 	fi
 
+	# A missing formatter is a skip, not a failure, so mixed toolchains can
+	# still run the rest of the test suite.
+	# knfmt is the project formatter when both tools exist; modern-language
+	# files below are still handed to clang-format when it is available.
 	if command -v knfmt >/dev/null 2>&1; then
 		FORMATTER="knfmt"
 	elif command -v clang-format >/dev/null 2>&1; then
@@ -149,6 +173,8 @@ run_clang_format_all() {
 		exit 0
 	fi
 
+	# Stop early when there is nothing to format. Reading one line through
+	# sed avoids SIGPIPE-prone early-exit consumers such as head.
 	if ! find "$ROOT_DIR" \
 		-name .git \
 		-prune -o -type f \
@@ -165,13 +191,16 @@ run_clang_format_all() {
 			printf '[ERROR] Missing bundled style: %s\n' "$STYLE_FILE" >&2
 			exit 1
 		}
-		# Validate before modifying any source files, including C and C++ modes.
+		# Validate the style for both languages before modifying any source
+		# files. -assume-filename selects the C or C++ language mapping.
 		clang-format "-style=file:$STYLE_FILE" -assume-filename=check.c \
 			-dump-config >/dev/null
 		clang-format "-style=file:$STYLE_FILE" -assume-filename=check.cpp \
 			-dump-config >/dev/null
 	fi
 	printf '%s\n' '[INFO] Applying C/C++ formatting (standard-aware selection)...'
+	# The pipeline runs in a subshell; formatting happens in place. A failing
+	# formatter exits that subshell and, under set -e, aborts the run.
 	find "$ROOT_DIR" \
 		-name .git \
 		-prune -o -type f \
@@ -199,6 +228,9 @@ run_clang_format_all() {
 				clang-format -i "-style=file:$STYLE_FILE" -fallback-style=none "$f"
 			fi
 		done
+	# Java is handled in a second pass because knfmt cannot format it and the
+	# detection loop above deliberately excludes .java. A missing clang-format
+	# is reported as an error but does not change the final exit status.
 	if find "$ROOT_DIR" \
 		-name .git \
 		-prune -o -type f -name "*.java" \

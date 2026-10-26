@@ -10,7 +10,10 @@ setlocal EnableExtensions DisableDelayedExpansion
 set "NF_ROOT=%~dp0.."
 set "PERL="
 for /f "usebackq delims=" %%P in ("%NF_ROOT%\perl-path.txt") do set "PERL=%%P"
+rem Fall back to bare "perl" when the recorded interpreter is empty or missing.
 if not defined PERL set "PERL=perl"
 if not exist "%PERL%" set "PERL=perl"
+rem A launcher named foo.cmd runs perl\foo.pl.
 "%PERL%" "%NF_ROOT%\perl\%~n0.pl" %*
+rem Return the Perl program's exit status unchanged.
 exit /b %ERRORLEVEL%

@@ -1,7 +1,9 @@
 #!/bin/sh
 set -eu
 
-# Save original stdout/stderr, create per-run log in TMPDIR and redirect
+# Announce the log path on descriptor 3, then send normal output to the log.
+# mandoc diagnostics also land there; only the initial log path is printed to
+# the terminal.
 exec 3>&1 4>&2
 TMPLOG="${TMPDIR:-/tmp}/validate-manpages-$$.log"
 printf '%s\n' "[INFO] Logging to: $TMPLOG" >&3
@@ -34,6 +36,8 @@ require_cmd() {
 
 run_validate_manpages() {
 
+	# One optional ROOT_DIR. Reject option-looking paths before probing for
+	# mandoc.
 	ROOT_DIR=${1:-.}
 	[ "$#" -le 1 ] || usage
 	[ "${ROOT_DIR#-}" = "$ROOT_DIR" ] || usage
@@ -51,16 +55,20 @@ run_validate_manpages() {
 	fi
 
 	if ! command -v mandoc >/dev/null 2>&1; then
+		# Optional dependency: absent mandoc is a skip with success status, so
+		# the aggregate test target works on systems without it.
 		printf '%s\n' "[INFO] mandoc not installed; skipping man page validation"
 		exit 0
 	fi
 
 	# Find man pages and run mandoc lint.
 	# - Prune .git to avoid scanning vendored stuff.
-	# - Use -exec ... {} + instead of xargs
-	#   (portable + safe with spaces/newlines).
+	# - Read paths with "while IFS= read -r" instead of xargs, which keeps
+	#   names with spaces intact and avoids xargs option differences.
 	# - Match common man section suffixes: .1 .. .9 and
 	#   variants like .1m, .3p, etc.
+	# - The first match check uses sed rather than head so the pipeline does
+	#   not depend on SIGPIPE handling.
 	if ! find "$ROOT_DIR" \
 		\( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o \
 		-type f \( \
@@ -75,6 +83,9 @@ run_validate_manpages() {
 	printf '%s\n' \
 		"[INFO] Running mandoc lint" \
 		" (treat warnings as errors)..."
+	# -Tlint selects lint mode; -Werror promotes warnings to errors. Because
+	# the loop is the last stage of a pipeline under set -e, the first page
+	# with a finding aborts the run with a nonzero status.
 	find "$ROOT_DIR" \
 		\( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) -prune -o \
 		-type f \( \

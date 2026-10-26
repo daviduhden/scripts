@@ -9,6 +9,17 @@ set -euo pipefail
 # Ubuntu (jammy or newer) and other Debian/Ubuntu-based systems
 # with apt.
 #
+# Requirements: root privileges, network access, dpkg, gpg, and
+# either curl or wget. apt-transport-https is installed when missing.
+#
+# Side effects:
+#  - Writes /etc/apt/keyrings/cisofy-lynis-archive-keyring.gpg
+#  - Writes /etc/apt/sources.list.d/cisofy-lynis.sources
+#  - Removes the legacy /etc/apt/sources.list.d/cisofy-lynis.list
+#  - Runs apt update and installs lynis
+#
+# An existing keyring or source file is overwritten without a backup.
+#
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
 
@@ -23,6 +34,9 @@ error() {
 	exit 1
 }
 
+# Download the CISOfy public key into $TMPKEY, preferring curl and
+# falling back to wget. Returns non-zero if no download tool works;
+# the caller owns the temporary file.
 fetch_key() {
 	if command -v curl >/dev/null 2>&1; then
 		curl -fLsS --retry 5 \
@@ -61,6 +75,9 @@ load_os_release() {
 	fi
 }
 
+# Normalize derivatives that advertise Ubuntu in ID_LIKE to "ubuntu".
+# Debian, Devuan, Raspbian, and Ubuntu IDs are kept as-is; anything
+# that is not Debian/Ubuntu-like is rejected.
 normalize_os_id() {
 	OS_ID="${ID:-}"
 	OS_LIKE="${ID_LIKE:-}"
@@ -84,6 +101,8 @@ normalize_os_id() {
 	fi
 }
 
+# Prefer the Debian codename, then the Ubuntu codename, then the
+# generic VERSION_CODENAME from /etc/os-release.
 detect_release_codename() {
 	if [[ -n ${DEBIAN_CODENAME:-} ]]; then
 		RELEASE="$DEBIAN_CODENAME"
@@ -97,6 +116,8 @@ detect_release_codename() {
 	fi
 }
 
+# Translate Devuan codenames to the Debian suite the CISOfy
+# repository expects (daedalus -> bookworm, excalibur -> trixie).
 map_devuan_release() {
 	if [[ $OS_ID == "devuan" ]]; then
 		case "$RELEASE" in
@@ -109,6 +130,7 @@ map_devuan_release() {
 	fi
 }
 
+# Restrict installation to releases the upstream repository serves.
 validate_release() {
 	case "$OS_ID" in
 	ubuntu)
@@ -139,6 +161,8 @@ detect_apt_cmd() {
 	fi
 }
 
+# Read the native dpkg architecture for the source's Architectures
+# field. Unlike the other repository scripts, no whitelist is applied.
 detect_arch() {
 	ARCH="$(dpkg --print-architecture 2>/dev/null || true)"
 	if [[ -z $ARCH ]]; then
@@ -146,6 +170,8 @@ detect_arch() {
 	fi
 }
 
+# Refresh the base index first so apt-transport-https can be resolved
+# from the distribution's own repositories if it is not installed.
 ensure_https_transport() {
 	log "Updating APT index for base repositories..."
 	"$APT_CMD" update
@@ -156,6 +182,9 @@ ensure_https_transport() {
 	fi
 }
 
+# Fetch the key, dearmor it into a second temporary file, and install
+# the binary keyring. Both temporary files are removed on success and
+# on the handled download and dearmor failure paths.
 install_keyring() {
 	mkdir -p /etc/apt/keyrings &&
 		chmod 0755 /etc/apt/keyrings
@@ -181,6 +210,9 @@ install_keyring() {
 	chmod go+r "$KEYRING"
 }
 
+# Write a deb822 source scoped to the native architecture and remove
+# the legacy one-line .list file so APT does not read both formats.
+# The suite is the fixed name "stable", not the host codename.
 write_repo_source() {
 	log "Writing APT deb822 source for Lynis..."
 	rm -f /etc/apt/sources.list.d/cisofy-lynis.list

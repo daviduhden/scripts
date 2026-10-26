@@ -1,22 +1,31 @@
 #!/bin/bash
 set -euo pipefail
 
-# SecureBlue arti and oniux update/install script
-# Automated script to install or update Rust-based Tor
-# software (arti and oniux)
-# - Ensures Rust and cargo are installed (via rustup or Homebrew)
-# - Clones the arti and oniux repositories from the Tor Project GitLab
-# - Determines the latest release tags for each project
-# - Installs or updates the crates via cargo with appropriate features
-# - Uses Secureblue's with-standard-malloc for Cargo and its children
-#   to avoid Rust compiler incompatibilities with hardened_malloc
-# - Ensures OpenSSL and patchelf are available: Homebrew's
-#   openssl/patchelf when Homebrew is present, otherwise the system
-#   OpenSSL and patchelf layered with rpm-ostree
-# - Patches the produced binaries with an rpath to the OpenSSL
-#   libraries (Homebrew openssl@4 when installed, system OpenSSL
-#   otherwise), which cargo does not set
-# - Installs the resulting binaries into /usr/local/bin (requires root)
+# SecureBlue Arti and oniux install/update helper.
+#
+# Installs or updates the Rust-based Tor client (arti) and the oniux wrapper:
+#   - Ensures Rust/cargo exist, using an existing toolchain, Homebrew rust, or
+#     the rustup installer as a last resort.
+#   - Resolves the newest release tag from the Tor Project GitLab with
+#     git ls-remote and runs `cargo install --locked` from that tagged source.
+#   - Copies the resulting binaries from CARGO_HOME/bin into /usr/local/bin,
+#     using run0 for the privileged install.
+#   - Runs Cargo through with-standard-malloc so hardened_malloc does not break
+#     rustc or build scripts.
+#
+# Network trust is Git/HTTPS only: cargo builds tagged upstream commits and no
+# separate checksum or tag signature is verified. The rustup fallback downloads
+# and executes https://sh.rustup.rs without an independent checksum. The
+# downloaded script is kept in a temporary file removed by the EXIT trap.
+#
+# OpenSSL handling: Homebrew's keg-only openssl@4/openssl is preferred and
+# patched into the binary's rpath with patchelf because cargo does not emit an
+# rpath. Without Homebrew, the system OpenSSL is used (already in the loader's
+# default path), and patchelf is layered with rpm-ostree if needed. Binaries
+# linked against a Homebrew OpenSSL depend on that prefix remaining present.
+#
+# oniux setup disables unconfined user namespaces through ujust; failure to do
+# so is ignored.
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
@@ -25,6 +34,8 @@ REPO_ARTI="https://gitlab.torproject.org/tpo/core/arti.git"
 REPO_ONIUX="https://gitlab.torproject.org/tpo/core/oniux.git"
 
 CARGO_BIN_DIR="${CARGO_HOME:-$HOME/.cargo}/bin"
+# ROOT_CMD is empty when already root; TMP_FILES holds temporary downloads
+# removed by the EXIT trap.
 ROOT_CMD=""
 TMP_FILES=()
 
@@ -79,6 +90,8 @@ run_root() {
 	fi
 }
 
+# Put a Homebrew-provided cargo on PATH when cargo is not already available.
+# Homebrew may be installed but absent from a non-login shell's PATH.
 ensure_brew_path() {
 	if command -v cargo >/dev/null 2>&1; then
 		return 0
@@ -116,6 +129,8 @@ ensure_brew_path() {
 	return 1
 }
 
+# Prefer an existing toolchain, then Homebrew, then rustup. The rustup path
+# installs into the user's home and is intentionally the last resort.
 ensure_rust() {
 	ensure_brew_path || true
 
@@ -156,6 +171,8 @@ ensure_rust() {
 		error "curl is required to install rustup but is not installed."
 		exit 1
 	fi
+	# Register the installer with the EXIT trap before downloading so an
+	# interrupted download is also cleaned up.
 	local rustup_script
 	rustup_script="$(mktemp "${TMPDIR:-/tmp}/rustup-init.XXXXXX.sh")"
 	TMP_FILES+=("$rustup_script")
@@ -327,6 +344,8 @@ link_openssl() {
 	fi
 }
 
+# Read the version that `cargo install --list` reports for a crate, stripping
+# the leading v and trailing colon that cargo prints.
 get_installed_cargo_version() {
 	local crate="$1"
 	cargo_np install --list 2>/dev/null |
@@ -346,6 +365,8 @@ cargo_np() {
 	fi
 }
 
+# Resolve the highest version-sorted tag matching pattern, stripping the ref
+# prefix and the ^{} suffix of annotated tags.
 latest_git_tag() {
 	local repo="$1"
 	local pattern="${2:-refs/tags/*}"
@@ -358,6 +379,9 @@ latest_git_tag() {
 		tail -n1
 }
 
+# Skip the rebuild only when both the installed cargo version matches the
+# newest tag and the system binary is present. If tag discovery fails, build
+# from the repository default branch instead of aborting.
 install_or_update_arti() {
 	local crate="arti"
 	local updated=0
@@ -413,6 +437,9 @@ install_or_update_arti() {
 }
 
 install_or_update_oniux() {
+	# oniux is intended to run without unconfined user namespaces. This is a
+	# host policy change performed even when the binary is already current,
+	# and a failure is deliberately ignored (for example when ujust is absent).
 	ujust set-unconfined-userns off >/dev/null 2>&1 || true
 	local crate="oniux"
 	local updated=0

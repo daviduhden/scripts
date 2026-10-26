@@ -44,6 +44,8 @@ $opencodeStateHome = if ($env:OPENCODE_STATE_HOME) { $env:OPENCODE_STATE_HOME } 
 $crushDataHome = if ($env:CRUSH_GLOBAL_DATA) { $env:CRUSH_GLOBAL_DATA } else { Join-Path $env:LOCALAPPDATA 'crush' }
 $swivalProjectHome = if ($env:SWIVAL_PROJECT_HOME) { $env:SWIVAL_PROJECT_HOME } else { (Get-Location).Path }
 
+# Missing targets are ignored, so an installation that never created one of
+# these paths is not an error.
 $paths = @(
     (Join-Path $codexHome 'sessions'),
     (Join-Path $codexHome 'archived_sessions'),
@@ -64,6 +66,16 @@ $paths = @(
     (Join-Path $swivalProjectHome '.swival\audit')
 )
 
+<#
+.SYNOPSIS
+    Removes one history or state path unless -DryRun is set.
+.PARAMETER Path
+    Literal file or directory path. A missing path is ignored.
+.NOTES
+    Directories are removed recursively with -Recurse -Force, so the whole tree
+    is deleted. $ErrorActionPreference is Stop, which makes a removal failure
+    terminate the script.
+#>
 function Remove-Target {
     param([string]$Path)
 

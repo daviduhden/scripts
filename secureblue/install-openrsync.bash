@@ -1,12 +1,20 @@
 #!/bin/bash
 set -euo pipefail
 
-# SecureBlue openrsync install/update script.
-# Builds openrsync from source and installs it to /usr/local.
-# Build dependencies are installed via Homebrew.
+# SecureBlue openrsync install/update helper.
 #
-# Upstream release tags are stale; this tracks the latest
-# master branch commit instead.
+# Builds openrsync from source using Homebrew's compiler and libraries, then
+# installs the binary and man pages under /usr/local. Run it as the normal
+# desktop user: only the final installation uses run0.
+#
+# Upstream release tags are stale, so this tracks the latest master commit.
+# The persistent checkout under ~/.local/src lets repeat runs fetch and compare
+# commits; a rebuild happens only when upstream moved or the installed binary
+# is missing.
+#
+# Build output is captured in a temporary log that is removed on success or via
+# the EXIT trap. Compiler invocations use the standard allocator because
+# SecureBlue's hardened allocator can break the toolchain.
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
@@ -14,7 +22,12 @@ set -euo pipefail
 REPO="https://github.com/kristapsdz/openrsync.git"
 PREFIX="/usr/local"
 INSTALL_PATH="/usr/local/bin/openrsync"
+# Persistent source checkout, not a temporary directory; it is reused between
+# runs to avoid a full clone each time.
 BUILD_DIR="${HOME}/.local/src/openrsync-build"
+# State shared between phases. ROOT_CMD is empty when already root;
+# SOURCE_CHANGED records whether the checkout moved; CONFIG_EXTRA carries the
+# optional zlib flags chosen by configure_zlib_flags.
 ROOT_CMD=""
 LATEST_COMMIT=""
 SOURCE_CHANGED=0
@@ -115,8 +128,8 @@ install_build_deps() {
 	local deps=()
 	local dep
 
-	# Configure invokes plain make internally.
-	# Install bmake (which is what actually builds openrsync).
+	# Install bmake even though the build is driven by bmake: openrsync's
+	# configure script invokes make internally.
 	for dep in git bmake llvm pkgconf zlib; do
 		if ! brew list --formula "$dep" >/dev/null 2>&1; then
 			deps+=("$dep")
@@ -188,6 +201,8 @@ prepare_source() {
 }
 
 build_and_install() {
+	# The log is kept out of the source tree so it cannot pollute the checkout;
+	# the EXIT trap removes it if a later step aborts.
 	BUILD_LOG="$(mktemp "${TMPDIR:-/tmp}/openrsync-build.XXXXXX.log")"
 	cd "$BUILD_DIR"
 
@@ -208,7 +223,8 @@ build_and_install() {
 
 	# Replicate the Makefile's "install" target with plain install(1):
 	# root cannot execute Homebrew binaries (run0 exits with 203),
-	# but install is a system binary.
+	# but install is a system binary. The delegated commands are chained with
+	# && so the first failure aborts the remaining installs.
 	log "Installing to $PREFIX"
 	# shellcheck disable=SC2016 # Expanded by the delegated shell.
 	run_root sh -c '
@@ -234,6 +250,8 @@ main() {
 	install_build_deps
 	configure_zlib_flags
 	prepare_source
+	# Rebuild when upstream advanced, and also when the binary was removed
+	# even though the checkout is already current.
 	if [ "$SOURCE_CHANGED" -eq 1 ] || [ ! -x "$INSTALL_PATH" ]; then
 		build_and_install
 		verify_install

@@ -8,6 +8,17 @@ set -euo pipefail
 # /etc/apt/keyrings. Supports Debian/Devuan (bookworm or newer)
 # and Ubuntu (jammy or newer).
 #
+# Requirements: root privileges, network access, dpkg, and either
+# curl or wget. apt-transport-https is installed when missing.
+#
+# Side effects:
+#  - Writes /etc/apt/keyrings/githubcli-archive-keyring.gpg
+#  - Writes /etc/apt/sources.list.d/github-cli.sources
+#  - Removes the legacy /etc/apt/sources.list.d/github-cli.list
+#  - Runs apt update and installs gh
+#
+# An existing keyring or source file is overwritten without a backup.
+#
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
 
@@ -22,6 +33,9 @@ error() {
 	exit 1
 }
 
+# Download the archive key into $TMPKEY, preferring curl and falling
+# back to wget. Returns non-zero if neither tool is available or the
+# download fails; the caller owns the temporary file.
 fetch_key() {
 	if command -v curl >/dev/null 2>&1; then
 		curl -fLsS --retry 5 \
@@ -60,6 +74,9 @@ load_os_release() {
 	fi
 }
 
+# Normalize derivatives that advertise Ubuntu in ID_LIKE to "ubuntu".
+# Debian, Devuan, Raspbian, and Ubuntu IDs are kept as-is; anything
+# that is not Debian/Ubuntu-like is rejected.
 normalize_os_id() {
 	OS_ID="${ID:-}"
 	OS_LIKE="${ID_LIKE:-}"
@@ -83,6 +100,8 @@ normalize_os_id() {
 	fi
 }
 
+# Prefer the Debian codename, then the Ubuntu codename, then the
+# generic VERSION_CODENAME from /etc/os-release.
 detect_release_codename() {
 	if [[ -n ${DEBIAN_CODENAME:-} ]]; then
 		RELEASE="$DEBIAN_CODENAME"
@@ -96,6 +115,8 @@ detect_release_codename() {
 	fi
 }
 
+# Translate Devuan codenames to the Debian suite the GitHub CLI
+# repository publishes (daedalus -> bookworm, excalibur -> trixie).
 map_devuan_release() {
 	if [[ $OS_ID == "devuan" ]]; then
 		case "$RELEASE" in
@@ -108,6 +129,7 @@ map_devuan_release() {
 	fi
 }
 
+# Restrict installation to releases the upstream repository serves.
 validate_release() {
 	case "$OS_ID" in
 	ubuntu)
@@ -138,6 +160,8 @@ detect_apt_cmd() {
 	fi
 }
 
+# Read the native dpkg architecture and reject ones the repository
+# does not publish.
 detect_arch() {
 	ARCH="$(dpkg --print-architecture 2>/dev/null || true)"
 	if [[ -z $ARCH ]]; then
@@ -151,6 +175,8 @@ detect_arch() {
 	esac
 }
 
+# Refresh the base index first so apt-transport-https can be resolved
+# from the distribution's own repositories if it is not installed.
 ensure_https_transport() {
 	log "Updating APT index for base repositories..."
 	"$APT_CMD" update
@@ -161,6 +187,9 @@ ensure_https_transport() {
 	fi
 }
 
+# Fetch the key into a temporary file and install it as the APT
+# keyring. The temporary download is removed after install or when the
+# download fails.
 install_keyring() {
 	mkdir -p /etc/apt/keyrings &&
 		chmod 0755 /etc/apt/keyrings
@@ -178,6 +207,9 @@ install_keyring() {
 	chmod go+r "$KEYRING"
 }
 
+# Write a deb822 source scoped to the native architecture. The old
+# one-line .list file is removed so APT does not read both formats.
+# The suite is the fixed name "stable", not the host release codename.
 write_repo_source() {
 	log "Writing APT deb822 source for GitHub CLI..."
 	rm -f /etc/apt/sources.list.d/github-cli.list
@@ -222,6 +254,8 @@ run_setup() {
 	install_gh
 }
 
+# Declare the variables shared by the helper functions before running
+# the prerequisite checks, platform detection, and setup sequence.
 main() {
 	local OS_ID OS_LIKE RELEASE APT_CMD ARCH KEYRING TMPKEY
 	check_prereqs

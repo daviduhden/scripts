@@ -9,6 +9,26 @@ set -euo pipefail
 #
 # Supports amd64 (x86_64) and arm64 (aarch64).
 #
+# Requirements: Debian 13 (ID=debian, VERSION_ID=13), root privileges,
+# network access, git, gmake, install, uname, and nproc. Missing build
+# dependencies (git, clang, make, build-essential) are installed through
+# apt.
+#
+# Side effects:
+#  - Clones or updates the source under $HOME/.local/src/hardened_malloc
+#    and checks out the latest version tag
+#  - Installs both variants into /usr/local/lib
+#  - Writes /etc/sysctl.d/80-hardened_malloc.conf and applies it
+#  - Runs ldconfig
+#  - Backs up /etc/ld.so.preload when present, then rewrites it to
+#    preload the default variant globally
+#  - Records the installed tag in /usr/local/lib/.hardened_malloc_version
+#
+# The preload applies to every dynamically linked program after a
+# reboot or new process start. When /etc/ld.so.preload already exists,
+# it is backed up as /etc/ld.so.preload.bak.<timestamp>. This is an
+# install or update script; it does not provide an uninstall path.
+#
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
 
@@ -46,6 +66,8 @@ have_cmd() {
 	command -v "$1" >/dev/null 2>&1
 }
 
+# Accept exactly Debian 13; derivative IDs and other releases are
+# rejected even if they provide the same toolchain.
 ensure_debian13() {
 	if [ -f /etc/os-release ]; then
 		# shellcheck source=/dev/null
@@ -58,6 +80,9 @@ ensure_debian13() {
 		"(ID=${ID:-} VERSION_ID=${VERSION_ID:-})"
 }
 
+# Validate the machine type and print its canonical name. The build
+# itself uses the native compiler, so this only acts as a guard and a
+# log value.
 detect_arch() {
 	local arch
 	arch="$(uname -m)"
@@ -70,6 +95,8 @@ detect_arch() {
 	esac
 }
 
+# Collect packages that are not installed (regardless of version) and
+# install only those. When all four are present, apt is not invoked.
 install_build_deps() {
 	local missing=()
 	for pkg in git clang make build-essential; do
@@ -87,6 +114,8 @@ install_build_deps() {
 	apt-get install -y -qq "${missing[@]}"
 }
 
+# Use a version-aware tag sort and take the last entry, after stripping
+# peeled-tag (^{}) suffixes. Prints nothing if the remote cannot be read.
 get_latest_tag() {
 	git ls-remote --tags \
 		--sort='version:refname' \
@@ -104,6 +133,8 @@ get_installed_version() {
 	fi
 }
 
+# Clone the repository on first use, then always fetch tags and check
+# out the requested tag, leaving the work tree in detached HEAD state.
 clone_or_update_repo() {
 	local latest_tag="$1"
 	mkdir -p "$(dirname "$BUILD_DIR")"
@@ -121,6 +152,9 @@ clone_or_update_repo() {
 	git checkout --quiet "tags/$latest_tag"
 }
 
+# Build one variant with upstream's gmake targets. "default" uses the
+# plain target and "light" passes VARIANT=light; each writes to a
+# distinct output directory and library name.
 build_variant() {
 	local variant="$1"
 	local so_name out_dir
@@ -164,6 +198,10 @@ install_variant() {
 	install -m 0755 "$out_dir/$so_name" "$INSTALL_DIR/"
 }
 
+# Set the global preload entry. Any existing line mentioning
+# hardened_malloc is removed first, so switching variants does not leave
+# two libraries loaded, and a missing final newline is repaired before
+# appending. When the file exists, it is backed up before the rewrite.
 configure_preload() {
 	local variant="${1:-$DEFAULT_PRELOAD_VARIANT}"
 	local so_name so_path
@@ -197,6 +235,8 @@ configure_preload() {
 	log "Preload configured: $so_path"
 }
 
+# Raise vm.max_map_count persistently and apply it immediately. The
+# configuration file is overwritten on each run.
 configure_sysctl() {
 	log "Configuring vm.max_map_count for hardened_malloc..."
 	cat >"$SYSCTL_CONF" <<'EOF'
@@ -269,6 +309,9 @@ check_prereqs() {
 	require_cmd nproc
 }
 
+# Skip the work when the recorded tag matches the latest tag and both
+# libraries are present. Otherwise rebuild both variants and refresh
+# the loader and sysctl configuration.
 main() {
 	local arch installed_version latest_tag
 

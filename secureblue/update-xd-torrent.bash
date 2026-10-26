@@ -1,22 +1,41 @@
 #!/bin/bash
 set -euo pipefail
 
-# SecureBlue XD update/install script
-# Automated script to install or update the XD Go-based project
-# - Ensures Go is installed (via Homebrew if available)
-# - Clones the XD repository from GitHub
-# - Builds the project with make
-# - Installs the project using make install (requires root)
-# - Installs/updates xd.service as a local user systemd unit
-# - Uses user-local XD data directory under XDG paths
+# SecureBlue XD install/update helper.
+#
+# Builds the Go-based XD project from GitHub and installs it under
+# /usr/local/bin, then installs and enables the bundled xd.service as a
+# systemd *user* unit for the account running the script. Run as the normal
+# desktop user: Go is installed through Homebrew when missing, the build runs
+# in ~/.local/src, and run0 is used only for `make install`.
+#
+# The persistent checkout is fetched and checked out at the newest tag
+# (by tagged commit date), or fast-forwarded on the default branch when no
+# tags exist. The build is skipped only when that checkout is current and
+# /usr/local/bin/XD exists. Source trust is Git-over-HTTPS only; no checksum or
+# signature is verified.
+#
+# Service setup creates the XDG data directory, copies systemd/xd.service,
+# substitutes the resolved data path, and enables the unit at login. After the
+# binary is installed, an already running service is stopped and restarted so
+# the new executable is used; an EXIT trap restarts it if a later step fails.
+# The script does not create xd.ini and warns when it is missing. Use
+# --skip-service-and-user-setup to install the binary without touching the
+# user service.
+#
+# Build commands use the standard allocator to avoid hardened_malloc issues.
 
 REPO_URL="https://github.com/majestrate/XD.git"
 BUILD_DIR="${HOME}/.local/src"
 BIN_NAME="XD"
+# ROOT_CMD is empty when already root. SKIP_BUILD is set when the checkout is
+# already at the newest tag, and WAS_ACTIVE records whether xd.service was
+# running before service setup.
 ROOT_CMD=""
 SKIP_BUILD=0
 WAS_ACTIVE=0
 SKIP_SERVICE_AND_USER_SETUP=0
+# The unit template is installed next to the scripts as systemd/xd.service.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SERVICE_SRC="${SCRIPT_DIR}/systemd/xd.service"
 
@@ -195,7 +214,8 @@ clone_or_update_repo() {
 	# Fetch tags and remote refs
 	git fetch --tags --prune origin || git fetch --tags --prune
 
-	# Determine latest tag (by tag creation date)
+	# Determine the latest tag by the date of its tagged commit. This is not
+	# semantic-version ordering, but it matches the upstream release flow.
 	latest_tag=$(git describe --tags \
 		"$(git rev-list --tags --max-count=1)" \
 		2>/dev/null || true)
@@ -253,6 +273,8 @@ install_user_service() {
 		-e "s#%h/.local/share/XD#${data_dir}#g" \
 		"$unit_dst"
 
+	# Record whether the unit was running so the EXIT trap and the restart
+	# below only act when the user had it running before this run.
 	log "Stopping xd.service if it is running..."
 	if systemctl --user is-active --quiet xd.service; then
 		WAS_ACTIVE=1
@@ -295,6 +317,8 @@ check_prereqs() {
 	ensure_go
 	require_cmd install
 
+	# systemctl and the unit template are needed only when service setup is
+	# enabled.
 	if [ "$SKIP_SERVICE_AND_USER_SETUP" -eq 0 ]; then
 		require_cmd systemctl
 		if [ ! -f "$SERVICE_SRC" ]; then

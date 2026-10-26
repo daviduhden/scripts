@@ -1,5 +1,8 @@
 #!/bin/sh
 
+# Deliberately no set -e: individual probes, grep tests, and tool invocations
+# are allowed to fail, and findings are collected for a single report. set -u
+# still catches unset-variable mistakes.
 set -u
 
 # validate-correctness.sh
@@ -88,6 +91,8 @@ require_cmd() {
 TAB=$(printf '\t')
 
 note() {
+	# Arguments: severity line file message reference fix. TAB keeps fields
+	# separate even when a message contains spaces; report() splits on it.
 	sev=$1
 	ln=$2
 	file=$3
@@ -112,7 +117,9 @@ detect_host() {
 		;;
 	Linux)
 		if [ -r /etc/os-release ]; then
-			# Read the file without sourcing shell code.
+			# Read the file without sourcing shell code. ID_LIKE is a
+			# space-separated list; padding both values lets the case
+			# patterns match whole tokens only.
 			os_id=$(sed -n 's/^ID=//p' /etc/os-release |
 				tr -d '"')
 			os_like=$(sed -n 's/^ID_LIKE=//p' /etc/os-release |
@@ -127,7 +134,8 @@ detect_host() {
 }
 
 # ------------------------------------------------------------------
-# Shell keywords and builtins that are never external commands.
+# Shell keywords and builtins that are never external commands. This is a
+# deliberately flat, conservative list used by the command probe below.
 # ------------------------------------------------------------------
 
 KEYWORDS='if then else elif fi for while until do done case esac in function select time local typeset declare readonly export unset set shift return exit break continue echo printf print read cd eval exec source . : true false test [ [[ command builtin env umask ulimit wait trap hash type pwd getopts let whence emulate autoload newgrp'
@@ -135,6 +143,9 @@ KEYWORDS='if then else elif fi for while until do done case esac in function sel
 # ------------------------------------------------------------------
 # Commands known to exist on each platform (used by the probe that
 # verifies command existence for scripts targeting the host system).
+# The allowlist prevents false "not found" errors on a minimal host where an
+# optional command is absent but legitimate; unknown names still require
+# command -v to succeed.
 # ------------------------------------------------------------------
 
 COMMON_CMDS='awk bash basename bmake bzip2 cat cc chgrp chmod chown chsh clang cmake cmp comm cp csh cut date dd df diff dirname du expr false fgrep file find fmt ftp getent git gh git-lfs gmake gpg grep gunzip gzip head hostname id install join jq kill ksh ksh93 ldconfig less ln ls make mandoc md5 mkdir mount mv netstat nice nl nohup od openssl passwd paste patch perl pgrep pkill printf ps pwd readlink reboot rm rmdir scp sed seq sh sha1 sha256 sha384 sha512 sleep sort ssh stat su sudo tail tar tee test touch tr true tty uname uniq unzip uptime vi wc wget who xargs xz zip curl rsync mktemp'
@@ -146,6 +157,8 @@ DEBIAN_CMDS='apt apt-get apt-cache dpkg dpkg-query lsb_release needrestart runus
 SECUREBLUE_CMDS='rpm rpm-ostree bootc ujust flatpak fwupdmgr fwupdtool fpaste run0 run0edit runuser journalctl systemctl ip ss lsblk blkid free uptime logname brew brew-proxy pipx task kpackagetool6 7z socat clamonacc clamdscan freshclam clamd semanage restorecon getenforce setenforce setsebool yt-dlp ffmpeg cargo rustc rustup go nproc dmesg sysctl lynis'
 
 is_allowed() {
+	# $1 = family (openbsd, debian, secureblue), $2 = command name. Common
+	# commands apply everywhere; an unknown family has no extra allowlist.
 	fam=$1
 	cmd=$2
 	case " $COMMON_CMDS " in
@@ -167,6 +180,8 @@ is_allowed() {
 # ------------------------------------------------------------------
 # awk programs. Written to temporary files at startup so that the
 # regexes can contain arbitrary characters (single quotes, etc.).
+# The heredoc delimiters are quoted, so the shell performs no expansion and
+# awk's $0, backslashes, and quotes reach the files verbatim.
 # ------------------------------------------------------------------
 
 write_awk_programs() {
@@ -181,6 +196,8 @@ function gsev(   s) {
     return s
 }
 function emit(sev, ln, msg, ref, fix) {
+    # One TAB-separated record per finding. report() recounts severities from
+    # the file; the n_* counters here are not used for the final report.
     printf "%s\t%s\t%d\t%s\t%s\t%s\n", sev, FILENAME, ln, msg, ref, fix
     if (sev == "ERROR") n_err++
     else if (sev == "WARNING") n_warn++
@@ -188,6 +205,8 @@ function emit(sev, ln, msg, ref, fix) {
     else if (sev == "UNVERIFIED") n_unver++
 }
 function rm_rf_line(line,    rmpart) {
+    # Recognize rm -rf even when -r and -f are separate flags or written as
+    # long options. A plain rm or rm -r without -f is not matched.
     if (line !~ /(^|[[:space:];|&()])rm[[:space:]]/)
         return 0
     rmpart = line
@@ -223,6 +242,10 @@ function hd_check(line, raw, ln) {
 }
 
 function check(line, raw) {
+    # "line" is the current physical line with leading space removed and
+    # quoted strings masked as QQ; "raw" is the same line before masking.
+    # Rules that inspect quoting use raw; command detection uses the masked
+    # form to avoid matching prose or string data.
     # ---- GNU-only options (severity depends on target) ----
     if (line ~ /(^|[[:space:];|&()])(grep|egrep)[[:space:]]+(-P|--perl-regexp)([[:space:]]|$)/)
         emit(gsev(), NR, "grep -P is a GNU extension", "GNU grep(1); OpenBSD grep(1)", "Use grep -E (extended regex) or awk")
@@ -247,7 +270,8 @@ function check(line, raw) {
     if (line ~ /(^|[;|&(])[[:space:]]*((sudo|doas|command)[[:space:]]+)*cp[[:space:]]+--[a-z-]+/)
         emit(gsev(), NR, "cp long options are GNU-only", "GNU cp(1); OpenBSD cp(1)", "Use short options (-a, -R, -p, ...)")
     # mktemp without a template is GNU-only. Handle the common
-    # case where the template sits on a continuation line.
+    # case where the template sits on a continuation line. mktemp_pending
+    # remembers the line number until the continuation is resolved.
     if (mktemp_pending != 0) {
         if (raw ~ /XXXX/) mktemp_pending = 0
         else {
@@ -438,6 +462,8 @@ AWK_SCAN
 # labels, assignments, quoted strings, redirect targets,
 # here-document bodies, multi-line quoted strings and line
 # continuations.
+# Output is one candidate per line, in file order; the caller sorts and
+# deduplicates. This is a heuristic lexer, not a shell parser.
 BEGIN { skip_hd = 0; str_cont = 0; code_cont = 0; in_sq = 0 }
 skip_hd == 1 {
     if ($0 ~ "^" hd_delim "[[:space:]]*$") {
@@ -563,6 +589,9 @@ AWK_EXTRACT
 # ------------------------------------------------------------------
 
 scan_one() {
+	# $1 = file. Family comes from the environment so worker invocations can
+	# be started by find without passing extra arguments; generic applies when
+	# no family is supplied.
 	f=$1
 	fam=${VCFAMILY:-generic}
 
@@ -610,7 +639,8 @@ scan_one() {
 		esac
 	fi
 
-	# Static rule engine.
+	# Static rule engine. The awk program emits tab-separated findings to the
+	# shared file; it never rewrites the source file.
 	awk -v fam="$fam" -v lang="$lang" \
 		-f "$VCSCANAWK" "$f" >>"$FINDINGS"
 
@@ -692,6 +722,9 @@ scan_one() {
 	esac
 	[ "${VCPROBE:-0}" = "1" ] || return
 
+	# Candidates are deduplicated first. Functions defined in the same file
+	# are excluded so a wrapper does not look like a missing command; the
+	# probe loop is a pipeline subshell, but note() appends to the shared file.
 	awk -f "$VCEXTAWK" "$f" 2>/dev/null | sort -u |
 		while IFS= read -r c; do
 			[ -n "$c" ] || continue
@@ -727,11 +760,15 @@ scan_files() {
 # Report
 # ------------------------------------------------------------------
 
+# Escape backslashes and double quotes for a JSON string. Other characters,
+# including control characters, are not escaped.
 jesc() {
 	printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
 }
 
 report() {
+	# Empty findings file: emit an empty JSON array or an informational text
+	# line. Both paths succeed.
 	if [ ! -s "$FINDINGS" ]; then
 		if [ "$FORMAT" = "json" ]; then
 			printf '[]\n'
@@ -751,6 +788,8 @@ report() {
 	n_unv=$(awk -F"$TAB" '$1 == "UNVERIFIED" {n++} END {print n + 0}' \
 		"$FINDINGS")
 
+	# In JSON mode the human summary goes to stderr so stdout remains a single
+	# parseable JSON document.
 	if [ "$FORMAT" = "json" ]; then
 		printf '%s\n' \
 			"[INFO] Correctness audit ($TARGET):" \
@@ -766,6 +805,8 @@ report() {
 	if [ "$FORMAT" = "json" ]; then
 		printf '[\n'
 		first=1
+		# Sort by file then numeric line for stable output. INFO is hidden
+		# unless --verbose; --quiet hides everything except ERROR.
 		sort -t"$TAB" -k2,2 -k3,3n "$FINDINGS" |
 			while IFS="$TAB" read -r sev file ln msg ref fix; do
 				[ "$sev" = "INFO" ] && [ "$VERBOSE" -eq 0 ] &&
@@ -800,6 +841,8 @@ report() {
 			done
 	fi
 
+	# Exit status: ERROR always fails. --strict additionally fails on WARNING
+	# and UNVERIFIED findings; INFO never changes the status.
 	if [ "$n_err" -gt 0 ]; then
 		exit 1
 	fi
@@ -822,6 +865,8 @@ main() {
 	FORMAT=text
 	ROOT_DIR=
 
+	# Parse options until the first non-option (the optional ROOT_DIR), or
+	# until --. Missing option values are usage errors.
 	while [ $# -gt 0 ]; do
 		case "$1" in
 		--target)
@@ -873,6 +918,8 @@ main() {
 	require_cmd mktemp
 
 	detect_host
+	# "host" expands to the detected family, or to "all" when the host is
+	# neither OpenBSD nor a recognized Linux distribution.
 	if [ "$TARGET" = "host" ]; then
 		if [ -n "$HOST_FAMILY" ]; then
 			TARGET=$HOST_FAMILY
@@ -883,7 +930,7 @@ main() {
 
 	# The script re-executes itself as a worker from find(1), so
 	# it must be reachable through an absolute path even after
-	# changing directory to ROOT_DIR.
+	# changing directory to ROOT_DIR. Resolve it before cd.
 	SELF=$(command -v "$0" 2>/dev/null || printf '%s' "$0")
 	case "$SELF" in
 	/*) : ;;
@@ -898,6 +945,8 @@ main() {
 		printf '%s\n' "[ERROR] cannot create temporary directory" >&2
 		exit 1
 	}
+	# Findings and generated awk programs live only for this run. The worker
+	# inherits these paths through the environment.
 	trap 'rm -rf "$TMPD"' EXIT HUP INT TERM
 	FINDINGS="$TMPD/findings.txt"
 	VCSCANAWK="$TMPD/scan.awk"
@@ -908,6 +957,10 @@ main() {
 	export FINDINGS VCSCANAWK VCEXTAWK
 
 	scan_dir() {
+		# $1 = family, $2 = directory. Command probing is enabled only for
+		# the host family: commands in trees for another OS cannot be checked
+		# from this machine. Missing directories are silently skipped so the
+		# same target works in partial checkouts.
 		family=$1
 		dir=$2
 		probe=0
@@ -935,7 +988,9 @@ main() {
 		;;
 	esac
 
-	# Generic/portable checks, independent of the target.
+	# Generic/portable checks, independent of the target. tests-format uses
+	# generic rules; perl gets its own language mode. The root Makefile is
+	# scanned explicitly because it is a file, not a directory.
 	scan_dir generic "tests-format"
 	scan_dir perl "perl"
 	if [ -f Makefile ]; then
@@ -945,6 +1000,9 @@ main() {
 	report
 }
 
+# Worker entry point invoked by find -exec ... {} + inside scan_dir. The family
+# and probe flag arrive through exported VCFAMILY/VCPROBE variables; scan_files
+# appends findings and always exits 0 so find continues with other batches.
 case "${1:-}" in
 --scan-file)
 	shift

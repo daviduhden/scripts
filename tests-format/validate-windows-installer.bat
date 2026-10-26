@@ -24,6 +24,8 @@ set "MAKEFILE=%ROOT_DIR%\Makefile"
 set "FAIL=0"
 
 rem Literal content checks. Keep patterns out of CALL's second expansion.
+rem Required installer fragments. :require searches literally and also fails
+rem when the target file is missing.
 set "CHECK_PATTERN=%%~dp0"
 set "CHECK_MESSAGE=install-windows.bat must resolve files relative to the batch directory"
 call :require "%INSTALLER%"
@@ -72,6 +74,8 @@ call :require "%INSTALLER%"
 set "CHECK_PATTERN=installed-files.txt"
 set "CHECK_MESSAGE=install-windows.bat must keep an installed-files manifest"
 call :require "%INSTALLER%"
+rem Forbidden installer fragments. :forbid fails when any appears; the
+rem ExecutionPolicy and HKLM checks keep the installer per-user and non-invasive.
 set "CHECK_PATTERN=setx"
 set "CHECK_MESSAGE=do not use setx to modify PATH"
 call :forbid "%INSTALLER%"
@@ -121,6 +125,7 @@ set "CHECK_PATTERN=--force"
 set "CHECK_MESSAGE=do not force winget reinstalls"
 call :forbid "%INSTALLER%"
 rem Forbid the "find <space>" separator-space search (find, quote, space, quote).
+rem This PowerShell probe reads the installer as text; it never runs it.
 powershell.exe -NoProfile -Command "$ErrorActionPreference='Stop'; try { $q=[string][char]34; $needle='find '+$q+' '+$q; if ([IO.File]::ReadAllText($env:INSTALLER).Contains($needle)) { [Console]::Error.WriteLine('[ERROR] do not use a pipe/echo space search; the separator space is matched'); exit 1 } } catch { [Console]::Error.WriteLine('[ERROR] '+$_.Exception.Message); exit 1 }"
 if errorlevel 1 set "FAIL=1"
 set "CHECK_PATTERN=%%~dp0"
@@ -185,7 +190,9 @@ call :require_crlf "%INSTALLER%"
 call :require_crlf "%LAUNCHER%"
 call :require_crlf "%PS_LAUNCHER%"
 
-rem Validate every manifest entry without executing it as shell input.
+rem Validate every manifest entry without executing it as shell input. Skip blank
+rem and comment lines, require bare .pl names, check that each file exists, and
+rem require at least one entry. The probe only reads files.
 powershell.exe -NoProfile -Command "$ErrorActionPreference='Stop'; try { $lines=[IO.File]::ReadAllLines($env:MANIFEST); $count=0; $bad=$false; foreach($line in $lines) { if($line -eq '' -or $line.StartsWith('#')) { continue }; $count++; if($line -cnotmatch '^[A-Za-z0-9._-]+\.pl$') { [Console]::Error.WriteLine('[ERROR] invalid manifest entry: '+$line); $bad=$true; continue }; if(-not [IO.File]::Exists([IO.Path]::Combine($env:ROOT_DIR,'perl',$line))) { [Console]::Error.WriteLine('[ERROR] manifest lists a missing program: perl/'+$line); $bad=$true } }; if($count -eq 0) { [Console]::Error.WriteLine('[ERROR] manifest must list at least one .pl program'); $bad=$true }; if($bad) { exit 1 } } catch { [Console]::Error.WriteLine('[ERROR] '+$_.Exception.Message); exit 1 }"
 if errorlevel 1 set "FAIL=1"
 if "%FAIL%"=="0" echo [INFO] Windows installer checks passed
@@ -195,6 +202,7 @@ exit /b %FAIL%
 echo Usage: %~nx0 [ROOT_DIR] 1>&2
 exit /b 2
 
+rem Succeed when the literal pattern is present. A missing file is a failure.
 :require
 if not exist "%~1" goto missing_file
 findstr /l /c:"%CHECK_PATTERN%" "%~1" >nul 2>&1
@@ -203,6 +211,7 @@ if errorlevel 1 (
 )
 exit /b 0
 
+rem Fail when the pattern is present; findstr exit code 2 means unreadable.
 :forbid
 if not exist "%~1" goto missing_file
 findstr /i /l /c:"%CHECK_PATTERN%" "%~1" >nul 2>&1
@@ -216,6 +225,8 @@ if not errorlevel 1 (
 )
 exit /b 0
 
+rem Use delayed expansion for this echo so the message is read at execution time.
+rem FAIL is set after endlocal so it survives the temporary scope.
 :check_failed
 setlocal EnableDelayedExpansion
 echo [ERROR] !CHECK_MESSAGE! 1>&2
@@ -223,11 +234,14 @@ endlocal
 set "FAIL=1"
 exit /b 0
 
+rem Record the missing file and continue with later checks.
 :missing_file
 echo [ERROR] missing file: "%~1" 1>&2
 set "FAIL=1"
 exit /b 0
 
+rem Require CRLF line endings: reject files with no CRLF or with bare LF or bare
+rem CR. The PowerShell probe only reads the file.
 :require_crlf
 if not exist "%~1" goto missing_file
 set "CHECK_FILE=%~1"

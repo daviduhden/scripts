@@ -23,19 +23,24 @@ use IPC::Open3;
 
 my $fail = 0;
 
+# Record a failed oracle but keep going so one run reports every problem.
+# Any failure makes the final exit status 1.
 sub fail_test {
     my ($msg) = @_;
     print STDERR "[FAIL] $msg\n";
     $fail = 1;
 }
 
-# Locate perl/ssh-menu.pl relative to this test (one level up).
+# Locate perl/ssh-menu.pl relative to this test (one level up). A missing
+# target is recorded as a failure rather than dying, so the summary still runs.
 my ( $vol, $dirs ) = File::Spec->splitpath( File::Spec->rel2abs($0) );
 my $script = File::Spec->catfile( File::Spec->catpath( $vol, $dirs, '' ),
     '..', 'perl', 'ssh-menu.pl' );
 -f $script or fail_test("cannot find perl/ssh-menu.pl relative to $0");
 
-# ssh is required by ssh-menu itself; skip when unavailable.
+# ssh is required by ssh-menu itself; skip when unavailable. PATH is searched
+# manually instead of through a shell so the same code works on Windows, where
+# the separator is ';' and executables may need .exe.
 {
     my $found;
     my $sep = $^O eq 'MSWin32' ? ';' : ':';
@@ -52,6 +57,9 @@ my $script = File::Spec->catfile( File::Spec->catpath( $vol, $dirs, '' ),
 
 my $tmp = tempdir( 'ssh-menu-test-XXXXXX', TMPDIR => 1, CLEANUP => 1 );
 
+# Minimal known_hosts fixture: a plain host, a comma-separated alias, a
+# cert-authority marker, a revoked marker, and a hashed entry. Backslashes
+# escape @ so Perl does not treat the markers as arrays.
 my $known_hosts = File::Spec->catfile( $tmp, 'known_hosts' );
 open my $kh, '>', $known_hosts or fail_test("cannot write $known_hosts");
 print {$kh} "host1.example.com ssh-ed25519 AAAAC3test\n";
@@ -64,6 +72,9 @@ close $kh;
 my $test_home = File::Spec->catfile( $tmp, 'home' );
 make_path($test_home);
 
+# local $ENV entries last for this file's scope and are inherited by child
+# processes. Every state file is redirected into $tmp so the real ~/.ssh and
+# cache are never read or written.
 local $ENV{HOME}                 = $test_home;
 local $ENV{SSH_MENU_KNOWN_HOSTS} = $known_hosts;
 local $ENV{SSH_MENU_FREQ_FILE}   = File::Spec->catfile( $tmp, 'frequencies' );
@@ -71,6 +82,9 @@ local $ENV{SSH_MENU_ALIAS_FILE}  = File::Spec->catfile( $tmp, 'aliases' );
 local $ENV{SSH_MENU_LAST_USER_FILE} = File::Spec->catfile( $tmp, 'last-user' );
 
 # Avoid shell-specific printf/pipelines so these tests also run on Windows.
+# Two temporary filehandles stand in for stdin and stdout; open3 dups them into
+# the child, and waitpid plus $? give the raw wait status. stdout and stderr
+# share one handle, so diagnostics are captured with the menu text.
 sub run_perl {
     my ( $input, @args ) = @_;
     my ($in)  = tempfile( DIR => $tmp, UNLINK => 1 );
@@ -94,6 +108,8 @@ sub run_perl {
 
 my ($out) = run_perl( '', $script );
 
+# With EOF on stdin the menu prints and quits. Plain and aliased hosts must
+# appear; marker and hashed entries must not be presented as hostnames.
 if ( $out !~ /host1\.example\.com/ ) {
     fail_test("plain host not listed in menu output");
 }
@@ -109,7 +125,8 @@ if ( $out =~ /host3\.example\.com/ ) {
 
 # Deleting a host through the "Manage known_hosts (delete)" menu entry must
 # work and must not disturb comments, marker lines or hashed entries.
-# Input: manage (3), entry 1, confirm (y), quit (q).
+# Input: manage (3), entry 1, confirm (y), quit (q). host1 is the first
+# listable host in the fixture, so entry 1 identifies it deterministically.
 my ($del_out)  = run_perl( "3\n1\ny\nq\n", $script );
 my ($kh_after) = do {
     open my $fh, '<', $known_hosts or fail_test("cannot read $known_hosts");
@@ -132,7 +149,9 @@ if ( $kh_after !~ /^\|1\|hash-of-something\|key/m ) {
     fail_test("hashed entry was removed unexpectedly");
 }
 
-# Deleting through a symlink must update its target and keep the link.
+# Deleting through a symlink must update its target and keep the link. When
+# the platform refuses to create a symlink (for example, Windows without the
+# privilege), report the skip and continue with the configuration check.
 {
     my $link_target = File::Spec->catfile( $tmp, 'known_hosts_target' );
     open my $lt, '>', $link_target
@@ -168,7 +187,13 @@ if ( $kh_after !~ /^\|1\|hash-of-something\|key/m ) {
 }
 
 # -G prints configuration without connecting. Exercise the real exec path,
-# including Windows installations under Program Files, for both port forms.
+# including Windows installations under Program Files, for both port forms:
+# an empty port exercises the default (22), and 2222 exercises an explicit
+# port. The driver is a separate Perl process: its first argument is
+# ssh-menu.pl (require runs it as a library), the second is the port to test.
+# The driver builds the normal command, inserts -G -F <null device> after
+# argv[0], and lets exec_ssh_command replace itself, so stdout is ssh's
+# configuration dump.
 my $driver = File::Spec->catfile( $tmp, 'ssh-config.pl' );
 open my $driver_fh, '>', $driver or die "write $driver: $!";
 print {$driver_fh} <<'DRIVER';
@@ -189,6 +214,7 @@ for my $port ( '', '2222' ) {
       || $config !~ /^port $expected_port\r?$/m;
 }
 
+# Report one line; failures go to stderr and set a nonzero exit status.
 if ($fail) {
     print STDERR "[INFO] test-ssh-menu.pl: FAILED\n";
     exit 1;

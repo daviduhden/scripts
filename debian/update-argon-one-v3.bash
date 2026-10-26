@@ -7,6 +7,21 @@ set -euo pipefail
 #  - Updates power button & fan control script (argon1.sh)
 #  - Can run interactively or from cron (non-interactive)
 #
+# Requirements: root privileges, network access, curl, bash, mktemp,
+# and reboot. The script verifies connectivity to download.argon40.com
+# with a HEAD request before downloading.
+#
+# Side effects:
+#  - Downloads both upstream scripts into temporary files and runs them
+#    with bash as root
+#  - May reboot the system, depending on the option or interactive
+#    answer
+#
+# The downloaded scripts are not verified with a checksum or signature;
+# they execute with the privileges of this script. Temporary files are
+# removed on exit. Use --no-reboot for cron, or --auto-reboot to reboot
+# without prompting.
+#
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
 
@@ -91,6 +106,9 @@ error() {
 
 trap 'error "Execution interrupted."; exit 1' INT
 
+# Remove every temporary script recorded in TMP_FILES. Missing entries
+# are ignored; the EXIT trap guarantees this runs on normal exit and
+# after an error-triggered exit.
 cleanup_tmp_files() {
 	local file
 	for file in "${TMP_FILES[@]}"; do
@@ -120,6 +138,8 @@ net_curl() {
 	curl -fLsS --retry 5 "$@"
 }
 
+# Fail early if the download host is unreachable. This is a HEAD
+# request, so no script content is fetched here.
 check_network() {
 	log "Checking network connectivity to download.argon40.com..."
 	if ! net_curl --head "$EEPROM_URL" >/dev/null 2>&1; then
@@ -137,6 +157,8 @@ download_remote_script() {
 	net_curl -o "$tmp_script" "$url"
 }
 
+# Download the upstream EEPROM script to a file in the current
+# directory and execute it with bash. mktemp supplies the unique name.
 run_eeprom_update() {
 	local script_path
 	log "Running EEPROM update script from Argon40..."
@@ -147,6 +169,7 @@ run_eeprom_update() {
 	log "EEPROM update script finished."
 }
 
+# Download and run the upstream fan/power-button installer.
 run_control_update() {
 	local script_path
 	log "Running Argon One V3 control script installer..."
@@ -157,6 +180,8 @@ run_control_update() {
 	log "Argon One V3 control script finished."
 }
 
+# Decide whether to reboot: explicit flags win, a non-interactive
+# session never prompts, and an interactive session asks (default no).
 ask_reboot() {
 	local answer
 	# Flags take precedence

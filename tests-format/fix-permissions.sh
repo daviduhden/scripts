@@ -90,7 +90,9 @@ require_cmd() {
 # ------------------------------------------------------------------
 
 classify_file() {
-	# $1 = path to a regular file
+	# $1 = path to a regular file. Sets the globals CLASS and DESC. The
+	# patterns below assume English file(1) output; they intentionally match
+	# short, stable substrings so both GNU file and OpenBSD file qualify.
 	ftype=""
 	ftype=$(file -b "$1" 2>/dev/null || true)
 	lower=$(printf '%s' "$ftype" | tr '[:upper:]' '[:lower:]')
@@ -189,7 +191,9 @@ classify_file() {
 }
 
 has_shebang() {
-	# $1 = path to a regular file
+	# $1 = path to a regular file. Reads only the first line (never the whole
+	# body) and returns 0 when it begins with "#!". A read failure is treated
+	# as "no shebang"; set -e is suppressed by the if compound.
 	first_line=
 	if IFS= read -r first_line <"$1" 2>/dev/null; then
 		:
@@ -210,6 +214,8 @@ has_shebang() {
 process_one() {
 	f="$1"
 
+	# Only directories and regular files are classified. Everything else
+	# (symlinks, sockets, FIFOs, devices) is left alone by returning here.
 	if [ -d "$f" ]; then
 		want=755
 		desc="directory"
@@ -220,6 +226,7 @@ process_one() {
 		else
 			want=644
 		fi
+		# A shebang is an extra signal when file(1) reported plain text.
 		if [ "$CLASS" = "data" ] && has_shebang "$f"; then
 			want=755
 			desc="script (shebang): ${DESC}"
@@ -285,6 +292,9 @@ process_one() {
 	4) newstr="$new" ;;
 	esac
 
+	# MODE is exported to the worker: check reports only, dry prints "would"
+	# and records a pending change, fix applies chmod and records success or
+	# an error. Every path appends one marker to STATE for the parent to sum.
 	case "$MODE" in
 	check)
 		printf '%s\n' "${oldstr} -> ${newstr} $f ($desc)"
@@ -359,6 +369,8 @@ main() {
 		exit 2
 	}
 
+	# Tool presence is checked only in the parent process. Worker batches rely
+	# on the same PATH and skip this check for speed.
 	require_cmd file
 	require_cmd find
 	require_cmd chmod
@@ -404,6 +416,8 @@ main() {
 
 	changed=$(grep -c '^c$' "$STATE" 2>/dev/null || true)
 	errors=$(grep -c '^e$' "$STATE" 2>/dev/null || true)
+	# grep -c prints 0 but exits 1 when nothing matches; normalize empty output
+	# as well so the numeric tests below cannot fail under set -e.
 	[ -n "$changed" ] || changed=0
 	[ -n "$errors" ] || errors=0
 
@@ -457,6 +471,9 @@ main() {
 	exit 0
 }
 
+# Worker entry point used by the find -exec ... {} + call in main. Handle it
+# before main so worker batches do not re-parse options or require the full
+# tool set.
 case "${1:-}" in
 --worker)
 	shift

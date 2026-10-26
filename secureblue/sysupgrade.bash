@@ -1,19 +1,32 @@
 #!/bin/bash
 set -euo pipefail
 
-# Secureblue maintenance script
+# SecureBlue maintenance script.
 #
-# This script performs a full, non-interactive maintenance run on a
-# Secureblue (rpm-ostree-based) system. It is designed to be safe to
-# run unattended (e.g. from cron or a systemd timer) and will attempt
-# to update all major layers of the system:
+# Performs a non-interactive maintenance run on an rpm-ostree-based SecureBlue
+# system. It is intended to be safe for cron or a systemd timer, so it never
+# prompts (commands receive -y or equivalent) and never reboots. A new system
+# image becomes active only after the operator reboots; firmware updates may
+# also be staged until reboot depending on the device.
 #
-#   1. System image (rpm-ostree)
+# Phases:
+#   1. System image (rpm-ostree upgrade and cleanup)
 #   2. Firmware (fwupdmgr)
-#   3. Homebrew packages (brew)
-#   4. Flatpak runtimes and applications (system + per-user)
-#   5. Storage maintenance (ext4/btrfs filesystems)
-#   6. Secureblue debug information collection
+#   3. Homebrew packages (through SecureBlue's brew-proxy)
+#   4. Flatpak runtimes/applications (system and per-user)
+#   5. Storage maintenance (btrfs scrub/balance/defrag, ext4 e4defrag)
+#   6. Optional Lynis audit and SecureBlue diagnostic collection
+#
+# The first five phases are mandatory: any failure is recorded and produces a
+# nonzero final status after the remaining phases have run. The optional phases
+# only warn. Filesystem maintenance can be long and I/O-heavy, especially
+# balance and defragmentation.
+#
+# Run as root, or as a normal user when run0 is available; the script re-execs
+# itself through run0. SYSUPGRADE_USER (or --user) must name the non-root
+# account that owns the Homebrew and Flatpak user installations; it is required
+# because there is no reliable auto-detection. Diagnostic logs are written under
+# /tmp with mode 0600 and are not uploaded by this script.
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
@@ -27,7 +40,8 @@ else
 	SCRIPT_PATH="${BASH_SOURCE[0]}"
 fi
 
-# Basic PATH (important when run from cron)
+# Reset PATH so cron/minimal environments still find system tools; Homebrew is
+# invoked separately with an explicit environment.
 PATH=/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
@@ -43,6 +57,8 @@ export LC_ALL=C.UTF-8
 #   - Env: SYSUPGRADE_USER=USERNAME
 NONROOT_USER="${SYSUPGRADE_USER:-}"
 
+# Print a recognizable banner around an external command so log readers can
+# tell the individual maintenance steps apart.
 run_phase_cmd() {
 	local label="$1"
 	shift
@@ -114,6 +130,8 @@ run_homebrew() {
 	local brew_home="$HOMEBREW_USER_HOME"
 	local brew_uid="$HOMEBREW_USER_UID"
 	local brew_command="$BREW_PROXY_COMMAND"
+	# Administrative maintenance bypasses the proxy and runs as the dedicated
+	# linuxbrew account against the real brew executable.
 	if [[ ${1:-} == "--admin" ]]; then
 		shift
 		brew_user="linuxbrew"
@@ -126,6 +144,9 @@ run_homebrew() {
 		fi
 	fi
 
+	# Rebuild the per-user environment from scratch. A D-Bus session is added
+	# only when the target user's runtime directory and bus socket exist, so
+	# cron runs without a logged-in session still work.
 	local runtime_dir="/run/user/${brew_uid}"
 	local bus_path="${runtime_dir}/bus"
 	local -a homebrew_env
@@ -152,6 +173,9 @@ run_homebrew() {
 		fi
 	fi
 
+	# Run the delegated shell with a clean environment. The EUID check is a
+	# last-resort guard against Homebrew writing root-owned files if the
+	# execution context is unexpectedly privileged.
 	# shellcheck disable=SC2016 # Expanded by the delegated shell.
 	runuser -u "$brew_user" -- env -i \
 		"${homebrew_env[@]}" /bin/sh -c '
@@ -164,6 +188,9 @@ run_homebrew() {
 	' sysupgrade-homebrew "$brew_command" "$@" </dev/null
 }
 
+# Run a system command as the configured user with enough session context for
+# Flatpak, ujust, and systemctl --user. Unlike run_homebrew this keeps the
+# caller's PATH and locale.
 run_as_user_env() {
 	local user="$1"
 	shift
@@ -210,6 +237,8 @@ error() {
 
 trap 'error "Execution interrupted."; exit 1' INT
 
+# Phase bookkeeping: insertion order is preserved separately because
+# associative-array iteration order is not stable.
 declare -a PHASE_ORDER=()
 declare -A PHASE_STATUS=()
 declare -A PHASE_KIND=()
@@ -223,6 +252,9 @@ record_phase_status() {
 	PHASE_STATUS["$phase"]="$status"
 }
 
+# Run one phase and record its result. Mandatory failures are errors in the
+# log but do not abort: later phases, including optional diagnostics, still run
+# and the final summary decides the exit status.
 run_phase() {
 	local phase="$1" kind="$2" label="$3" phase_fn="$4"
 	if "$phase_fn"; then
@@ -451,15 +483,19 @@ update_system_image() {
 	fi
 
 	log "Updating system via rpm-ostree (non-interactive)..."
-	# 'rpm-ostree update' is an alias for 'upgrade'; run it once.
+	# 'rpm-ostree update' is an alias for 'upgrade'; run it once. This stages a
+	# new deployment but does not reboot into it.
 	if ! rpm-ostree upgrade; then
 		warn "rpm-ostree upgrade failed."
 		phase_failed=1
 	fi
+	# Drop package layering requests that are no longer active in the booted
+	# deployment.
 	if ! cleanup_inactive_rpm_ostree_requests; then
 		warn "Inactive rpm-ostree request cleanup failed."
 		phase_failed=1
 	fi
+	# -b removes old base commits, -m removes cached repository metadata.
 	if ! rpm-ostree cleanup -bm; then
 		warn "rpm-ostree cleanup failed."
 		phase_failed=1
@@ -519,6 +555,7 @@ update_firmware() {
 		warn "fwupdmgr refresh failed."
 		phase_failed=1
 	fi
+	# fwupdmgr uses exit status 2 for "nothing to do", which is not a failure.
 	local rc=0
 	fwupdmgr get-updates || rc=$?
 	if [[ $rc -eq 2 ]]; then
@@ -598,7 +635,9 @@ update_flatpak() {
 		phase_failed=1
 	fi
 
-	# Per-user updates
+	# Per-user installations live in the user's home and are updated through
+	# runuser. A missing user installation is warned about and marks this
+	# mandatory phase as failed, matching the rest of the Flatpak phase.
 	if ! require_cmd --check runuser; then
 		warn "'runuser' not available; cannot" \
 			" run per-user Flatpak" \
@@ -637,6 +676,8 @@ update_flatpak() {
 	((phase_failed == 0))
 }
 
+# Maintain every mounted btrfs or ext4 device once. Unmounted filesystems are
+# skipped because every action here runs against a mountpoint while online.
 maintain_filesystems() {
 	local phase_failed=0
 	if ! require_cmd --check lsblk; then
@@ -748,6 +789,8 @@ maintain_filesystems() {
 	((phase_failed == 0))
 }
 
+# Lynis output is teed to a timestamped /tmp log that is made private after
+# creation. The log is local only; this script does not upload it.
 run_security_audit() {
 	local audit_ts audit_log
 
@@ -772,6 +815,9 @@ run_security_audit() {
 	fi
 }
 
+# Gather diagnostics into a local log. `fpaste --printonly` only prints system
+# information; nothing is submitted to a paste service. The log may still
+# contain hostnames, package lists, and unit names, so it is chmod 0600.
 collect_system_info() {
 	if ! require_cmd --check ujust fpaste; then
 		warn "ujust or fpaste not found; cannot" \
@@ -922,6 +968,8 @@ run_optional_phases() {
 	fi
 }
 
+# Validate configuration before any maintenance phase starts. Parsing happens
+# before the privilege check so --help works for an unprivileged caller.
 bootstrap() {
 	# Parse arguments first so --help works without root/run0.
 	parse_args "$@"
@@ -933,6 +981,7 @@ bootstrap() {
 # ---- Main ----
 main() {
 	log "Starting update process..."
+	# Reset the registries in case main is ever called twice in one shell.
 	PHASE_ORDER=()
 	PHASE_STATUS=()
 	PHASE_KIND=()

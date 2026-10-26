@@ -9,6 +9,22 @@ set -euo pipefail
 # - Installs build dependencies if missing
 # - Clones the repo at that tag, builds, and installs
 #
+# Requirements: root privileges, network access, git, make, cmake, and
+# nproc. Build dependencies (git, build-essential, cmake,
+# libncurses-dev) are requested through apt on every run, even when no
+# build is needed.
+#
+# Side effects:
+#  - Clones the source under $HOME/.local/src/btop
+#  - Builds with make and installs under /usr/local
+#  - Removes a previous btop checkout before fetching
+#
+# The build runs with LD_PRELOAD unset, so a globally preloaded
+# allocator such as hardened_malloc does not affect the build tools.
+# If the clone fails, a release tarball is downloaded instead. When the
+# installed version already matches the latest tag, the source fetch,
+# build, and install are skipped after the dependency step.
+#
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
 
@@ -39,6 +55,8 @@ require_cmd() {
 		error "Required command '$1' not found."
 }
 
+# Resolve the highest release tag with git. --refs drops peeled-tag
+# entries, and sort -Vr handles version ordering.
 get_latest_tag() {
 	# Use git only
 	local tag
@@ -50,6 +68,8 @@ get_latest_tag() {
 	[[ -n $tag ]] && printf '%s\n' "$tag"
 }
 
+# Extract the first semantic version from btop --version and strip a
+# leading "v". Prints nothing when btop is not installed.
 get_current_version() {
 	if command -v btop >/dev/null 2>&1; then
 		btop --version 2>/dev/null | awk \
@@ -61,6 +81,8 @@ get_current_version() {
 	fi
 }
 
+# Prefer apt-get, falling back to apt. This runs unconditionally, so an
+# up-to-date system still performs an apt update and install check.
 install_build_deps() {
 	local apt_cmd
 	if command -v apt-get >/dev/null 2>&1; then
@@ -77,6 +99,10 @@ install_build_deps() {
 	"$apt_cmd" install -y git build-essential cmake libncurses-dev
 }
 
+# Fetch a tagged source tree into $dest. A previous checkout at
+# $dest/btop is removed first because git clone refuses a non-empty
+# destination and the tarball fallback searches for btop* directories.
+# Prints the source directory on success.
 fetch_source() {
 	local tag="$1" dest="$2" src_dir=""
 	mkdir -p "$dest"
@@ -113,6 +139,9 @@ fetch_source() {
 	[[ -n $src_dir ]] && printf '%s\n' "$src_dir"
 }
 
+# Build with all available cores and install under /usr/local. The
+# build runs with LD_PRELOAD unset to keep a global preload out of the
+# compiler and build tooling.
 build_and_install() {
 	local tag="$1"
 	local src_dir
@@ -146,6 +175,9 @@ resolve_latest_tag() {
 	printf '%s\n' "$latest_tag"
 }
 
+# Compare the installed version with the tag, accepting either the raw
+# tag or the tag without its leading "v". Returns 0 when no build is
+# needed.
 is_up_to_date() {
 	local latest_tag="$1"
 	local latest_stripped current

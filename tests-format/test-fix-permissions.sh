@@ -18,6 +18,9 @@ set -u
 fail=0
 npass=0
 
+# The harness has no Test::More dependency: pass() counts a satisfied oracle
+# and fail_test() records and reports a mismatch. The final exit status is
+# derived from fail, so one failed oracle fails the whole run.
 pass() {
 	npass=$((npass + 1))
 }
@@ -38,6 +41,9 @@ assert_rc() {
 	fi
 }
 
+# Compare the symbolic mode reported by ls -ld against a substring. The
+# substring match ignores the leading file-type character; fixtures use
+# controlled names and modes without special bits.
 assert_mode() {
 	want=$1
 	file=$2
@@ -57,6 +63,9 @@ assert_mode() {
 }
 
 FIXPERM=
+# Resolve the sibling fixer relative to this test when it is invoked by a
+# path. A bare name falls back to the current directory, so run the test from
+# tests-format/ in that case. Fail early if the executable is missing.
 case "$0" in
 */*) FIXPERM=$(cd "$(dirname "$0")" && pwd)/fix-permissions.sh ;;
 *) FIXPERM=$(pwd)/fix-permissions.sh ;;
@@ -70,6 +79,8 @@ BASE=$(mktemp -d "${TMPDIR:-/tmp}/fixperm-test-XXXXXX") || {
 	printf '%s\n' "[ERROR] cannot create temp dir" >&2
 	exit 1
 }
+# Every fixture lives under BASE; the trap keeps the run self-contained and
+# removes the tree even when an assertion fails.
 trap 'rm -rf "$BASE"' EXIT HUP INT TERM
 
 T="$BASE/tree"
@@ -186,6 +197,9 @@ printf '%s' "$out" | grep -q 'Perl script' ||
 	fail_test "--verbose prints the classification"
 
 # ---- individual chmod failures do not abort the run ----
+# Put a wrapper named chmod first in PATH. It fails only for failme.sh and
+# delegates everything else to the real chmod. The unquoted here-document
+# expands $real_chmod now but leaves the wrapper's "$@" for runtime.
 T2="$BASE/tree2"
 mkdir -p "$T2/bin"
 printf '%s\n' '#!/bin/sh' 'echo hi' >"$T2/good.sh"

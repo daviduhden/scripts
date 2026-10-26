@@ -1,16 +1,32 @@
 #!/bin/bash
 set -uo pipefail
 
-# Secureblue post-install interactive runner for ujust commands
-# - Runs non-reboot steps first
-# - Queues reboot-likely steps to run at the end, then offers reboot
+# SecureBlue post-install interactive runner for ujust commands.
+#
+# Walks the operator through a curated set of post-install tasks, asking before
+# each one. Steps that do not need a reboot run first; reboot-likely steps are
+# queued and offered at the end, followed by an optional reboot. Some tasks
+# (ujust bios, LUKS setup, dns-selector, create-admin) are interactive or
+# reboot immediately on their own.
+#
+# The runner does not elevate ordinary ujust tasks; those prompt through their
+# own mechanisms. It uses run0 only for the final reboot when not already root.
+# It intentionally omits `set -e` (set -uo pipefail only): a failed step is
+# recorded and summarized, and only failures marked critical produce a nonzero
+# exit status.
+#
+# Each command runs in a login shell so ujust is found with its normal
+# environment, and combined stdout/stderr is appended to a timestamped log in
+# the user's home directory.
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
 
 LOG_FILE="${HOME}/postinstall_$(date +%F_%H%M%S).log"
 
-# Queues
+# Queue entries are encoded as "command||description||critical", where
+# critical=1 means a failure makes the script exit nonzero. FAILURES collects
+# every failed command; CRITICAL_FAILURES holds only the critical subset.
 declare -a QUEUE_NOW=()
 declare -a QUEUE_LATE=() # reboot-likely
 declare -a FAILURES=()
@@ -32,6 +48,9 @@ ok() { say "[OK]  $*"; }
 warn2() { say "[WARN]  $*"; }
 fail() { say "[ERROR]  $*"; }
 
+# Prompt until the answer is recognizable. If stdin is unavailable (for
+# example when run non-interactively), use the caller-provided default
+# instead of looping forever.
 confirm() {
 	local question="${1:-Continue?}"
 	local def="${2:-y}" # y/n
@@ -66,10 +85,13 @@ run_cmd() {
 
 	hr
 	say "[STEP] $desc"
-	# Join command array safely for logging
+	# Join the already-split array only for display; execution still uses the
+	# array so arguments with spaces stay intact.
 	local _cmdstr
 	_cmdstr=$(printf '%s ' "${cmd[@]}")
 	say "-> Running: ${_cmdstr% }"
+	# tee mirrors output to the terminal and the log. PIPESTATUS[0] captures
+	# the ujust exit status rather than tee's, which is normally zero.
 	{
 		"${cmd[@]}"
 	} 2>&1 | tee -a "$LOG_FILE"
@@ -106,6 +128,8 @@ run_ujust_string() {
 	run_cmd "$desc" bash -lc -- "$ucmd"
 }
 
+# Split a queued "command||description||critical" item and run it. The
+# critical flag only affects reporting; execution continues either way.
 run_selected_step() {
 	local item="$1"
 	local ucmd desc critical rest rc
@@ -288,7 +312,8 @@ enrollment."
 		exit 0
 	fi
 
-	# Run NOW queue
+	# Run non-reboot steps first; a failure here is recorded but does not
+	# prevent later steps from running.
 	for item in "${QUEUE_NOW[@]}"; do
 		run_selected_step "$item"
 	done

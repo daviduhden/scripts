@@ -232,6 +232,8 @@ sub version_string {
     return 'normalize-files ' . project_version();
 }
 
+# Search PATH for an executable, honoring PATHEXT on Windows.  Returns the full
+# path or undef when the command is not found.
 sub find_in_path {
     my ($cmd) = @_;
     return unless defined $cmd && length $cmd;
@@ -254,6 +256,8 @@ sub find_in_path {
     return;
 }
 
+# Stable device/inode key used to detect hard links and already-visited
+# directories across platforms; an empty string means the stat data is absent.
 sub _devino {
     my ( $dev, $ino ) = @_;
     return '' unless defined $dev && defined $ino;
@@ -269,6 +273,8 @@ sub byte_key {
     return $c;
 }
 
+# Case-folded byte key for collision detection.  Folding is deliberately done
+# before encoding so names that differ only by case compare equal.
 sub fold_key {
     my ($s) = @_;
     return '' unless defined $s;
@@ -290,6 +296,9 @@ sub disp {
     return $copy;
 }
 
+# Decode bytes as UTF-8, falling back to a warning decoder when the input is
+# not valid UTF-8.  Used for diagnostics and git output, never for rewriting
+# user data.
 sub safe_decode {
     my ($bytes) = @_;
     return '' unless defined $bytes;
@@ -302,6 +311,9 @@ sub safe_decode {
 # Names #
 #########
 
+# Decode one native path component into a character string.  The second return
+# value reports whether the bytes were valid UTF-8 (or ASCII on Windows); an
+# invalid name is still usable for traversal but must not be renamed.
 sub decode_fs_name {
     my ($name) = @_;
     return ( $name, 1 ) if utf8::is_utf8($name);
@@ -313,6 +325,9 @@ sub decode_fs_name {
     return ( $name,    0 );
 }
 
+# Convert a normalized character name back to native filesystem bytes.  Windows
+# accepts the Perl character string directly; Unix paths are UTF-8 byte
+# strings.
 sub encode_fs_name {
     my ($chars) = @_;
     return $chars if is_windows();
@@ -324,6 +339,9 @@ sub encode_fs_name {
 # Normalization  #
 ##################
 
+# Transliterate common Unicode punctuation and letters, then strip combining
+# marks.  The result is ASCII where the table covers the input; unknown
+# characters pass through unchanged.
 sub fold_to_ascii {
     my ($s) = @_;
     return '' unless defined $s;
@@ -333,6 +351,8 @@ sub fold_to_ascii {
     return $d;
 }
 
+# Split a basename into stem and extension.  A leading dot and a name without
+# a dot both produce an empty extension.
 sub split_extension {
     my ($name) = @_;
     return ( $name, '' ) unless defined $name;
@@ -341,6 +361,7 @@ sub split_extension {
     return ( substr( $name, 0, $i ), substr( $name, $i + 1 ) );
 }
 
+# Normalize an extension to lowercase ASCII alphanumerics only.
 sub normalize_extension {
     my ($ext) = @_;
     my $e = fold_to_ascii($ext);
@@ -349,6 +370,8 @@ sub normalize_extension {
     return $e;
 }
 
+# Normalize one path component to lowercase ASCII words separated by single
+# hyphens/dots.  The conservative character set keeps names portable.
 sub normalize_component {
     my ($s) = @_;
     my $t = fold_to_ascii($s);
@@ -362,6 +385,8 @@ sub normalize_component {
     return $t;
 }
 
+# Avoid Windows device names by prefixing a reserved stem with an underscore.
+# The check ignores any extension, matching Windows device-name rules.
 sub unreserve {
     my ($result) = @_;
     my $base = $result;
@@ -390,6 +415,8 @@ sub normalize_basename {
     return $result;
 }
 
+# Apply one normalization pass.  Dotfiles and the special . and .. names are
+# preserved; the outer normalize_basename() repeats the pass until stable.
 sub normalize_basename_once {
     my ($name) = @_;
     return $name unless defined $name;
@@ -410,6 +437,8 @@ sub normalize_basename_once {
     return unreserve($result);
 }
 
+# Return the lowercase extension for classification, or an empty string for
+# hidden names and names without a usable extension.
 sub extension_of {
     my ($name) = @_;
     return '' unless defined $name;
@@ -418,6 +447,9 @@ sub extension_of {
     return lc substr( $name, $i + 1 );
 }
 
+# Decide whether a directory entry is excluded from traversal.  .git is always
+# skipped; configured directories and regular expressions apply only as
+# documented by the CLI options.
 sub is_excluded {
     my ( $cfg, $char_name, $rel_char, $is_dir ) = @_;
     my $lc = lc $char_name;
@@ -442,6 +474,8 @@ sub is_excluded {
 # CLI      #
 ############
 
+# Initial configuration.  All transformations are selected, recursive scanning
+# is enabled, and --apply is off so the default is a non-destructive dry run.
 sub default_config {
     return {
         apply              => 0,
@@ -469,6 +503,9 @@ sub default_config {
     };
 }
 
+# Parse command-line options into a configuration hash.  Option errors are
+# recorded in usage_error instead of exiting, so run() can print the POD-based
+# usage text consistently.
 sub parse_args {
     my ($argv) = @_;
     my $cfg = default_config();
@@ -565,6 +602,8 @@ sub parse_args {
 # Output   #
 ############
 
+# Emit one normal output line, retaining it for the optional report.  Quiet mode
+# suppresses console output but still records the line.
 sub emit {
     my ($line) = @_;
     $line = '' unless defined $line;
@@ -573,12 +612,14 @@ sub emit {
     return;
 }
 
+# Emit a diagnostic only when verbose mode is enabled.
 sub emit_verbose {
     my ( $cfg, $line ) = @_;
     emit($line) if $cfg->{verbose};
     return;
 }
 
+# Record and print an error on stderr; errors also remain in the report log.
 sub emit_error {
     my ($line) = @_;
     $line = '' unless defined $line;
@@ -587,6 +628,8 @@ sub emit_error {
     return;
 }
 
+# Emit a block of related lines with indentation and a trailing blank line.
+# Used for rename and conversion reports.
 sub emit_block {
     my ( $header, @lines ) = @_;
     emit($header);
@@ -595,6 +638,7 @@ sub emit_block {
     return;
 }
 
+# Start a zeroed report used by the summary and the exit-status decision.
 sub reset_report {
     return {
         scanned_files    => 0,
@@ -618,6 +662,7 @@ sub reset_report {
     };
 }
 
+# Print the human-readable summary counters collected during the run.
 sub report_summary {
     my ($R) = @_;
     emit('');
@@ -652,12 +697,18 @@ sub report_summary {
 
 sub sortkey { my ($s) = @_; return byte_key($s) }
 
+# Return a stable identity key for a path, used to avoid following directory
+# cycles when symlink traversal is enabled.
 sub stat_key {
     my ($path) = @_;
     my @st = stat($path);
     return @st ? _devino( @st[ 0, 1 ] ) : '';
 }
 
+# Walk the target tree iteratively and build the node list used by rename and
+# content processing.  Entries are sorted bytewise for deterministic output;
+# symlinks are not followed unless explicitly requested, and visited
+# device/inode pairs prevent directory cycles.
 sub scan_tree {
     my ( $cfg, $root_raw ) = @_;
     my @nodes;
@@ -738,6 +789,10 @@ sub scan_tree {
 # Rename planning   #
 #####################
 
+# Compute rename operations per parent directory.  All names in one directory
+# are normalized first so case-folding collisions can be detected before any
+# filesystem change is made.  Operations are ordered deepest-first so child
+# paths remain valid while ancestors are renamed.
 sub plan_renames {
     my ( $cfg, $nodes, $occupied ) = @_;
     my @ops;
@@ -898,6 +953,8 @@ sub rename_op {
     return 1;
 }
 
+# Execute all planned renames, grouped by parent directory.  Grouping bounds a
+# rollback to the directory whose rename transaction failed.
 sub execute_renames {
     my ( $cfg, $ops, $R ) = @_;
     my %seen;
@@ -1016,6 +1073,8 @@ sub execute_rename_group {
     return;
 }
 
+# Hash a file in raw mode for the optional post-rename integrity check.
+# Returns undef if the file cannot be opened.
 sub sha256_file {
     my ($path) = @_;
     my $fh;
@@ -1031,6 +1090,9 @@ sub sha256_file {
 # Text/binary classification #
 #############################
 
+# Heuristic text/binary classifier over the first bytes of a file.  BOMs win
+# immediately; otherwise NUL bytes and a high proportion of control bytes mark
+# the file as binary.
 sub looks_text {
     my ($b) = @_;
     return 1 if $b =~ /^\xEF\xBB\xBF/;
@@ -1047,6 +1109,9 @@ sub looks_text {
     return 1;
 }
 
+# Detect the source encoding from BOMs or strict UTF-8 validation.  The second
+# return value is false for byte streams that could be Latin-1 or Windows-1252,
+# which are reported as ambiguous unless --assume-encoding was given.
 sub detect_encoding {
     my ( $bytes, $cfg ) = @_;
     if ( substr( $bytes, 0, 4 ) eq "\x00\x00\xFE\xFF" ) {
@@ -1072,6 +1137,8 @@ sub detect_encoding {
     return ( 'ambiguous-latin1', 0 );
 }
 
+# Decode bytes using the concrete encoding selected by detect_encoding(),
+# removing the BOM after it has served as the marker.
 sub decode_known {
     my ( $bytes, $enc, $cfg ) = @_;
     my $bytes_copy = $bytes;
@@ -1094,6 +1161,9 @@ sub decode_known {
     return decode( 'UTF-8', $bytes_copy, FB_CROAK | LEAVE_SRC );
 }
 
+# Encode transformed text back to bytes.  When a conversion is requested the
+# result is always UTF-8 without a BOM; otherwise the original encoding is
+# preserved.
 sub encode_result {
     my ( $text, $enc, $cfg, $want_utf8 ) = @_;
     return encode( 'UTF-8', $text )                  if $want_utf8;
@@ -1109,6 +1179,8 @@ sub encode_result {
 # EOL handling    #
 ###################
 
+# Count CRLF, bare LF and bare CR occurrences and classify the file as one
+# style, mixed, or having no line endings at all.
 sub detect_eol {
     my ($text) = @_;
     my $crlf   = () = $text =~ /\r\n/g;
@@ -1124,6 +1196,8 @@ sub detect_eol {
     return { type => $type, crlf => $crlf, lf => $lf, cr => $cr };
 }
 
+# Convert all line endings to LF first, then to the requested style.
+# Normalizing through LF avoids double-converting CRLF sequences.
 sub eol_normalize {
     my ( $text, $target ) = @_;
     my $n = $text;
@@ -1134,6 +1208,7 @@ sub eol_normalize {
     return $n;
 }
 
+# Verify that a string contains only the requested line-ending style.
 sub eol_ok {
     my ( $text, $target ) = @_;
     return 1 if $target eq 'lf' && $text !~ /\r/;
@@ -1143,6 +1218,9 @@ sub eol_ok {
     return 0;
 }
 
+# Resolve the effective EOL policy.  .editorconfig overrides defaults, and
+# .gitattributes overrides .editorconfig for matching paths.  Windows scripts
+# preserve their existing endings unless --windows-scripts-lf is set.
 sub eol_policy_for {
     my ( $cfg, $node, $attrs, $ec ) = @_;
     return 'binary' if $attrs->{binary};
@@ -1161,6 +1239,8 @@ sub eol_policy_for {
 # .gitattributes/.editorconfig
 ############################
 
+# Translate the glob subset used by .gitattributes/.editorconfig into a Perl
+# regular expression.  ** crosses directory separators; a single * and ? do not.
 sub glob_regex {
     my ($pat) = @_;
     my $re    = '';
@@ -1209,6 +1289,9 @@ sub glob_regex {
     return $re;
 }
 
+# Match a repository-relative path against a glob.  Patterns containing a slash
+# are anchored at the repository root; other patterns match a basename at any
+# depth, as specified by the gitattributes format.
 sub glob_match {
     my ( $pat, $path ) = @_;
     return 0 unless defined $pat && length $pat;
@@ -1227,6 +1310,8 @@ sub glob_match {
     return $matched ? 1 : 0;
 }
 
+# Return a path relative to a base directory using forward slashes and decoded
+# characters, suitable for matching attribute patterns.
 sub path_rel_posix {
     my ( $base_raw, $path_raw ) = @_;
     my $r = File::Spec->abs2rel( File::Spec->rel2abs($path_raw),
@@ -1236,6 +1321,8 @@ sub path_rel_posix {
     return $chars;
 }
 
+# Parse one .gitattributes file into ordered rules.  Each rule records set,
+# unset and valued attributes; later matching rules override earlier ones.
 sub read_attr_rules {
     my ( $file, $base ) = @_;
     my @rules;
@@ -1272,6 +1359,8 @@ sub read_attr_rules {
     return \@rules;
 }
 
+# Return the directory chain from a repository root down to a target directory.
+# The chain is used to apply nested attribute files in precedence order.
 sub chain_dirs {
     my ( $top_raw, $dir_raw ) = @_;
     my $rel = File::Spec->abs2rel( File::Spec->rel2abs($dir_raw),
@@ -1289,6 +1378,9 @@ sub chain_dirs {
     return @dirs;
 }
 
+# Collect .gitattributes rules from the repository root through the target
+# directory.  The cache is keyed by directory because a scan visits many files
+# in the same directories.
 sub gitattr_rules_for {
     my ( $repo_raw, $dir_raw ) = @_;
     return $GA_CACHE{$dir_raw} if exists $GA_CACHE{$dir_raw};
@@ -1302,6 +1394,8 @@ sub gitattr_rules_for {
     return $GA_CACHE{$dir_raw} = \@rules;
 }
 
+# Resolve effective gitattributes for one file.  `binary` marks the file as
+# skipped; `eol` carries the requested line-ending policy when present.
 sub gitattr_for {
     my ( $repo_raw, $path_raw ) = @_;
     my $dir   = dirname($path_raw);
@@ -1320,6 +1414,8 @@ sub gitattr_for {
     return \%eff;
 }
 
+# Collect .editorconfig sections from the root through the target directory.
+# Only the properties this tool understands are consumed later.
 sub editorconfig_rules_for {
     my ( $top_raw, $dir_raw ) = @_;
     return $EC_CACHE{$dir_raw} if exists $EC_CACHE{$dir_raw};
@@ -1354,6 +1450,8 @@ sub editorconfig_rules_for {
     return $EC_CACHE{$dir_raw} = \@rules;
 }
 
+# Resolve effective .editorconfig properties for one file.  Later sections in
+# the same file and deeper files override earlier matches.
 sub editorconfig_for {
     my ( $top_raw, $path_raw ) = @_;
     my $dir   = dirname($path_raw);
@@ -1373,6 +1471,9 @@ sub editorconfig_for {
 # Atomic file writing  #
 ########################
 
+# Replace a target atomically.  Unix uses rename(2); Windows renames the old
+# file aside first because its rename(2) does not replace an existing path.
+# The helper restores the old name if the second rename fails.
 sub safe_replace {
     my ( $tmp, $target ) = @_;
     if ( rename( $tmp, $target ) ) { return 1 }
@@ -1391,6 +1492,10 @@ sub safe_replace {
     return 0;
 }
 
+# Write transformed content through a temporary file and atomically replace the
+# original.  The original mode (and optionally timestamps) is preserved, and a
+# pre-write device/inode check detects files changed by another process during
+# processing.
 sub atomic_write {
     my ( $cfg, $path_raw, $bytes, $R ) = @_;
     my @before     = stat($path_raw);
@@ -1460,6 +1565,8 @@ sub atomic_write {
 # Content processing   #
 ########################
 
+# Read at most `n` bytes for content classification.  Returns undef when the
+# file cannot be opened.
 sub read_sniff {
     my ( $path, $n ) = @_;
     my $fh;
@@ -1470,6 +1577,8 @@ sub read_sniff {
     return $buf;
 }
 
+# Read a file completely in raw mode.  An empty file and a failed read are
+# distinguished by the caller's undef check.
 sub read_all {
     my ($path) = @_;
     my $fh;
@@ -1480,6 +1589,10 @@ sub read_all {
     return defined $data ? $data : '';
 }
 
+# Apply encoding and line-ending policy to regular files.  The function skips
+# directories, symlinks, binary extensions, binary-looking content, oversized
+# files, configuration files, and ambiguous encodings.  A dry run only records
+# pending changes; --apply writes through atomic_write().
 sub process_content {
     my ( $cfg, $nodes, $target_raw, $repo_raw, $R ) = @_;
 
@@ -1741,6 +1854,8 @@ sub process_content {
 # Git       #
 #############
 
+# Search upward from a directory for a `.git` entry and return the containing
+# repository root, or undef when the directory is not in a repository.
 sub repo_root_for {
     my ($dir_raw) = @_;
     my $dir = abs_path($dir_raw);
@@ -1755,6 +1870,8 @@ sub repo_root_for {
     }
 }
 
+# Run git with list-form argv and capture stdout.  Returns (output, error);
+# output is undef when git is missing or cannot be started.
 sub git_capture {
     my (@args) = @_;
     my $git = find_in_path('git');
@@ -1767,6 +1884,8 @@ sub git_capture {
     return ( defined $out ? $out : '', undef );
 }
 
+# Report pre-existing repository changes before applying anything.  The tool
+# never reverts them; the report makes clear which changes it did not create.
 sub git_report_before {
     my ( $cfg, $repo_raw, $R ) = @_;
     return if $cfg->{quiet};
@@ -1790,6 +1909,8 @@ sub git_report_before {
     return;
 }
 
+# Show git status, whitespace problems and a diff summary after applying
+# changes.  This is diagnostic output only; it performs no cleanup.
 sub git_report_after {
     my ( $cfg, $repo_raw ) = @_;
     return if $cfg->{quiet};
@@ -1819,6 +1940,8 @@ sub git_report_after {
 # Report   #
 ############
 
+# Write the collected log to --report as UTF-8.  A report failure is counted as
+# an error but does not prevent the remaining summary output.
 sub write_report {
     my ( $cfg, $R ) = @_;
     return unless defined $cfg->{report};
@@ -1838,6 +1961,9 @@ sub write_report {
 # Main #
 ########
 
+# Main driver: parse options, set up the optional OpenBSD sandbox, scan the
+# tree, process content, plan/execute renames, and choose an exit status that
+# distinguishes success, pending dry-run work, and errors/interventions.
 sub run {
     my (@argv) = @_;
     srand();

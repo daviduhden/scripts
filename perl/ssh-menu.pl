@@ -25,6 +25,7 @@ use File::Temp qw(tempfile);
 sub is_windows { return $^O eq 'MSWin32'; }
 sub is_openbsd { return $^O eq 'openbsd'; }
 
+# Emit an informational message to stdout.
 sub logi { print "[INFO] $_[0]\n"; }
 sub logw { print STDERR "[WARN] $_[0]\n"; }
 sub loge { print STDERR "[ERROR] $_[0]\n"; }
@@ -41,6 +42,8 @@ sub require_cmd {
     die_tool("Required command '$cmd' not found in PATH.");
 }
 
+# Return the user's home directory.  HOME wins on Unix; USERPROFILE is the
+# Windows fallback used by native Perl.
 sub home_dir {
     return $ENV{HOME} if defined $ENV{HOME} && length $ENV{HOME};
     return $ENV{USERPROFILE}
@@ -69,6 +72,8 @@ my %last_user;
 # 0. Small helper bits #
 ########################
 
+# Return the parent directory of a path without resolving symlinks.  Returns
+# undef for an empty path or a path with no file component.
 sub parent_dir {
     my ($path) = @_;
     return unless defined $path && length $path;
@@ -78,6 +83,8 @@ sub parent_dir {
     return File::Spec->catpath( $vol, $dirs );
 }
 
+# Build the stable state key for a host.  The literal "default" distinguishes
+# the standard SSH port from an explicitly configured port.
 sub entry_key {
     my ( $host, $port ) = @_;
     return join ':', $host, ( $port || 'default' );
@@ -109,6 +116,8 @@ sub ensure_known_hosts_exists {
     }
 }
 
+# Point SSH_ASKPASS at ksshaskpass when available so ssh can use a graphical
+# passphrase prompt.  Missing ksshaskpass is non-fatal.
 sub setup_ssh_askpass {
     my $ksshaskpass = find_in_path('ksshaskpass');
 
@@ -194,6 +203,8 @@ sub setup_openbsd_sandbox {
 # 2. State persistence #
 ########################
 
+# Replace a state file atomically.  Windows cannot rename over an existing file,
+# so it moves the old file aside and restores it if the new install fails.
 sub replace_state_file {
     my ( $path, $tmp ) = @_;
 
@@ -217,6 +228,8 @@ sub replace_state_file {
     return 0;
 }
 
+# Write lines to a state file through a same-directory temporary file.  The
+# original mode is preserved; write failures are warnings, not fatal errors.
 sub write_state_file {
     my ( $path, $lines_ref ) = @_;
     my $dir = parent_dir($path);
@@ -244,6 +257,7 @@ sub write_state_file {
     }
 }
 
+# Persist aliases as sorted "host:port alias" lines.
 sub write_alias_file {
     my ($aliases_ref) = @_;
     my @lines = map { sprintf "%s %s\n", $_, $aliases_ref->{$_} }
@@ -251,6 +265,7 @@ sub write_alias_file {
     write_state_file( $alias_file, \@lines );
 }
 
+# Persist host usage counts as sorted "host:port count" lines.
 sub write_freq_file {
     my ($freq_ref) = @_;
     my @lines = map { sprintf "%s %d\n", $_, $freq_ref->{$_} }
@@ -258,6 +273,7 @@ sub write_freq_file {
     write_state_file( $freq_file, \@lines );
 }
 
+# Persist the last SSH user chosen for each host.
 sub write_last_user_file {
     my ($last_ref) = @_;
     return unless defined $last_ref;
@@ -267,6 +283,8 @@ sub write_last_user_file {
     write_state_file( $last_user_file, \@lines );
 }
 
+# Clear in-memory state and note which optional state files exist.  Loading is
+# separate so callers can refresh after a mutating menu action.
 sub reset_state {
     @entries           = ();
     %seen              = ();
@@ -278,6 +296,7 @@ sub reset_state {
     $alias_file_exists = -f $alias_file ? 1 : 0;
 }
 
+# Load host usage counts, ignoring malformed lines and nonnumeric values.
 sub load_freq_file {
     return unless $freq_file_exists;
 
@@ -297,6 +316,7 @@ sub load_freq_file {
     }
 }
 
+# Load custom aliases, ignoring malformed lines.
 sub load_alias_file {
     return unless $alias_file_exists;
 
@@ -315,6 +335,7 @@ sub load_alias_file {
     }
 }
 
+# Load the remembered SSH user for each host.
 sub load_last_user_file {
     return unless -f $last_user_file;
 
@@ -333,6 +354,7 @@ sub load_last_user_file {
     }
 }
 
+# Reset and reload every optional state file before rebuilding the host list.
 sub load_state_from_disk {
     reset_state();
     load_freq_file();
@@ -344,6 +366,8 @@ sub load_state_from_disk {
 # 3. known_hosts handling #
 ###########################
 
+# Build the menu label, including nonprimary names, a custom port and an
+# optional user-defined alias.
 sub build_display {
     my ( $host, $port, $parts_ref, $alias_name ) = @_;
 
@@ -374,6 +398,9 @@ sub build_display {
     return $display;
 }
 
+# Parse plain known_hosts entries into connectable hosts.  Comments, hashed
+# lines, trust markers, wildcards and negations are ignored because they do not
+# name a single host that can be selected unambiguously.
 sub parse_known_hosts {
     open my $fh, '<', $known_hosts
       or die_tool("cannot open $known_hosts: $!");
@@ -435,6 +462,8 @@ sub parse_known_hosts {
     close $fh;
 }
 
+# Drop frequency, alias and last-user entries whose host no longer appears in
+# known_hosts, then rewrite only the files that changed.
 sub prune_stale_data {
 
     # Keep freq/alias data consistent with current host list.
@@ -470,6 +499,8 @@ sub prune_stale_data {
     write_last_user_file( \%last_user ) if $pruned_last_user;
 }
 
+# Fail with a specific explanation when known_hosts contains no connectable
+# hosts, including the common hashed-only case.
 sub ensure_entries_present {
     if ( !@entries ) {
         if ( $hashed_count > 0 ) {
@@ -485,6 +516,8 @@ sub ensure_entries_present {
     }
 }
 
+# Sort menu entries by descending usage when frequency data exists, otherwise
+# alphabetically by their displayed label.
 sub sort_entries {
     if ($freq_file_exists) {
         @entries = sort {
@@ -512,6 +545,8 @@ sub refresh_entries {
 # 4. Menu actions #
 ###################
 
+# Prompt for a host and a custom alias, then persist the alias.  The host list
+# is unchanged; the caller refreshes labels after this returns.
 sub add_alias_menu {
     if ( !@entries ) {
         logw('No entries available to alias.');
@@ -558,6 +593,9 @@ sub add_alias_menu {
     }
 }
 
+# Remove one host from known_hosts while preserving comments, markers, hashed
+# lines and unrelated names on the same line.  The file is replaced atomically,
+# preserving permissions and writing through a symlink to its target.
 sub remove_known_host_entry {
     my ( $host, $port ) = @_;
     return 0   unless defined $host && length $host;
@@ -637,6 +675,8 @@ sub remove_known_host_entry {
     return $removed;
 }
 
+# Menu wrapper for deleting a host: select, confirm, remove, then let the caller
+# refresh the list.
 sub manage_known_hosts_menu {
     if ( !@entries ) {
         logw('No entries available to delete.');
@@ -686,6 +726,7 @@ sub manage_known_hosts_menu {
     }
 }
 
+# Print the numbered host list and the management actions below it.
 sub print_entry_menu {
     logi("Select a server to connect to:");
     print "\n";
@@ -697,6 +738,9 @@ sub print_entry_menu {
     printf "  %2d) Quit\n\n",                      scalar(@entries) + 3;
 }
 
+# Repeatedly prompt until a host is selected or the user quits.  Management
+# actions return here through refresh_entries() so the menu never shows stale
+# host data.
 sub select_entry_menu {
 
     # Returns the selected entry index after handling menu actions.
@@ -751,6 +795,9 @@ sub select_entry_menu {
 # 5. SSH connection #
 #####################
 
+# Ask for the SSH user, defaulting to the remembered per-host value, then
+# SSH_MENU_USER, then the platform account name.  A blank answer accepts the
+# default; there is no silent fallback when no default exists.
 sub question_ssh_user {
     my ($selected_key) = @_;
     my $per_host_user =
@@ -788,6 +835,8 @@ sub question_ssh_user {
     return $ssh_user;
 }
 
+# Build the ssh argv for the selected host.  The user name is restricted to a
+# conservative character set so it cannot be interpreted as an ssh option.
 sub build_ssh_command {
     my ( $ssh_path, $ssh_user, $selected_host, $selected_port ) = @_;
     my @cmd;
@@ -811,6 +860,8 @@ sub build_ssh_command {
     return @cmd;
 }
 
+# Increment and persist the usage count for a host.  Persistence failure is only
+# a warning; the connection itself must still proceed.
 sub update_frequency {
     my ($selected_key) = @_;
     $freq{$selected_key} = ( $freq{$selected_key} // 0 ) + 1;
@@ -818,6 +869,9 @@ sub update_frequency {
     if ($@) { logw("Could not persist frequency file: $@"); }
 }
 
+# Replace the launcher with ssh on Unix.  Windows Perl does not wait for exec,
+# so the Windows branch quotes argv[0], runs the child synchronously and
+# forwards its exit status.
 sub exec_ssh_command {
     my @cmd     = @_;
     my $program = $cmd[0];
@@ -837,6 +891,9 @@ sub exec_ssh_command {
     exec {$program} @cmd or die_tool("Failed to exec ssh: $!");
 }
 
+# Program entry point: validate dependencies, configure askpass and the
+# optional OpenBSD sandbox, load/refresh state, let the user select a host, ask
+# for the SSH user, record usage, and replace the process with ssh.
 sub main {
 
     require_cmd('ssh');

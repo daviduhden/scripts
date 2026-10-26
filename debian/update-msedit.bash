@@ -2,9 +2,24 @@
 set -euo pipefail
 
 # Debian msedit update/install script (precompiled binaries)
-# - Reads installed version via `edit -v`
+# - Reads the installed version with `edit --version` or `edit -v`
 # - Compares against latest GitHub release
 # - Downloads and installs if an update is needed
+#
+# Requirements: curl, tar, grep, awk, sort, uname, find, mktemp, head,
+# sed, and install. Root is not required if sudo is available; the
+# installation step is elevated through sudo when needed.
+#
+# Side effects:
+#  - Downloads the matching Linux release tarball into a temporary
+#    directory under /tmp
+#  - Installs the edit binary as /usr/local/bin/edit
+#  - Removes the temporary directory on exit
+#
+# The download is not checked against a published checksum or
+# signature. Only x86_64 and aarch64 are supported. The installed
+# version is compared with the release tag as versions, so a newer
+# installed build is left in place.
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
@@ -29,6 +44,8 @@ error() {
 		"$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2
 }
 
+# Choose between direct execution as root and sudo. Lack of both is
+# fatal because installation writes to /usr/local/bin.
 detect_root_cmd() {
 	if [ "${EUID:-$(id -u)}" -eq 0 ]; then
 		ROOT_CMD=""
@@ -80,6 +97,9 @@ detect_arch() {
 	esac
 }
 
+# Read the installed version. Both --version and -v are tried; returns
+# non-zero when the binary is absent or no semantic version can be
+# extracted.
 get_installed_version() {
 	local version
 
@@ -111,6 +131,8 @@ get_latest_version_from_json() {
 	awk -F'"' '/"tag_name":/ {print $4; exit}' <<<"$json" | sed 's/^v//'
 }
 
+# Compare versions with sort -V and test whether the installed version
+# sorts at or above the latest one.
 version_is_up_to_date() {
 	local installed="$1"
 	local latest="$2"
@@ -120,6 +142,8 @@ version_is_up_to_date() {
 		sort -V | tail -n1)" == "$installed" ]]
 }
 
+# Select the first browser_download_url that contains "linux", the
+# architecture string, and a .tar.gz suffix.
 get_release_asset_from_json() {
 	local json="$1"
 	local arch="$2"
@@ -131,6 +155,9 @@ get_release_asset_from_json() {
 		sed -n '1p'
 }
 
+# Download the release archive with curl -O in WORK_DIR, extract it,
+# find the first executable named edit, and install it. curl here does
+# not use the net_curl retry wrapper.
 install_msedit() {
 	local url="$1"
 
@@ -204,6 +231,8 @@ check_prereqs() {
 
 main() {
 	check_prereqs
+	# The EXIT trap removes the work directory on every later failure
+	# path as well as on success.
 	WORK_DIR="$(mktemp -d /tmp/msedit-XXXXXX)" || {
 		error "Cannot create temporary directory."
 		exit 1

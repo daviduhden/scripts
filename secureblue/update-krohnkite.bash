@@ -1,13 +1,21 @@
 #!/bin/bash
 set -euo pipefail
 
-# Secureblue Krohnkite build & install script
-# Automated script to build and install the latest Krohnkite KWin script
+# SecureBlue Krohnkite build and install helper.
 #
-# - Clones or updates the Krohnkite repository into ~/.local/src
-# - Builds the .kwinscript package using go-task if the
-#   repository has changed
-# - Installs or upgrades the script via kpackagetool6
+# Builds the latest Krohnkite KWin script from a user-local checkout and
+# installs it into the current user's KDE configuration. It does not need root:
+# kpackagetool6 writes to the user's package directory.
+#
+# The checkout lives in ~/.local/src/Krohnkite. On each run it is fetched and
+# hard-reset to origin/HEAD, so local modifications in that checkout are
+# discarded. If the checkout is already current and the package is installed,
+# nothing is rebuilt. Otherwise the script runs `task package` (go-task) and
+# installs or upgrades builds/*.kwinscript with kpackagetool6.
+#
+# Requires git, 7z, go-task, and kpackagetool6. Build commands use the standard
+# allocator to avoid hardened_malloc issues. KWin must be restarted or the
+# session restarted before a new version is loaded.
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
@@ -103,6 +111,8 @@ prepare_repo() {
 		fi
 
 		log "Repository updated upstream; syncing..."
+		# This is intentionally destructive: the build tree is treated as a
+		# disposable checkout, not a development working copy.
 		git -C "$SRC_DIR" reset --hard origin/HEAD
 	else
 		log "Cloning Krohnkite repository into $SRC_DIR..."
@@ -110,6 +120,8 @@ prepare_repo() {
 	fi
 }
 
+# go-task is the upstream build entry point; its `package` task writes the
+# installable archive under the repository's builds/ directory.
 build_krohnkite() {
 	log "Building Krohnkite using task..."
 
@@ -139,6 +151,7 @@ install_krohnkite() {
 		exit 1
 	fi
 
+	# -s queries the installed package; use -u only when it already exists.
 	if kpackagetool6 -t KWin/Script -s krohnkite >/dev/null 2>&1; then
 		log "Upgrading Krohnkite..."
 		kpackagetool6 -t KWin/Script -u "$pkg"

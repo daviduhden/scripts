@@ -1,4 +1,8 @@
 #requires -Version 7.0
+# Regression runner for psfmt. It generates fixtures under tests\work, invokes
+# psfmt.ps1 in child pwsh processes, and writes results.json. PSScriptAnalyzer
+# must already be installed; the runner never installs it because the automatic
+# installation branches are simulated with mock functions.
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 Import-Module PSScriptAnalyzer -ErrorAction Stop
@@ -20,6 +24,17 @@ function Assert-True {
     if (-not $Condition) { throw $Message }
 }
 
+<#
+.SYNOPSIS
+    Runs one test body and records PASS, FAIL, or SKIP.
+.PARAMETER Name
+    Case name reported in the output and results file.
+.PARAMETER Body
+    Script block implementing the case.
+.NOTES
+    A body records a skip by adding to $skipped. Exceptions are captured per case
+    so later cases still run.
+#>
 function Invoke-Case {
     param([string] $Name, [scriptblock] $Body)
     try {
@@ -35,6 +50,18 @@ function Invoke-Case {
     }
 }
 
+<#
+.SYNOPSIS
+    Writes a generated fixture below the current work directory.
+.PARAMETER RelativePath
+    Path below the work directory; parent directories are created.
+.PARAMETER Text
+    File content, defaulting to the shared sample script.
+.PARAMETER Encoding
+    Encoding used to write the content, including its preamble (BOM).
+.OUTPUTS
+    The absolute fixture path.
+#>
 function New-Source {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Test fixture creation is limited to the generated test directory.')]
     param([string] $RelativePath, [string] $Text = $sample, [Text.Encoding] $Encoding = $utf8)
@@ -44,6 +71,21 @@ function New-Source {
     return $path
 }
 
+<#
+.SYNOPSIS
+    Runs psfmt.ps1 in a child PowerShell process and captures both streams.
+.PARAMETER Arguments
+    Arguments for psfmt.
+.PARAMETER Entry
+    Script to run, defaulting to the psfmt wrapper.
+.PARAMETER Directory
+    Working directory for the child process.
+.OUTPUTS
+    An object with Code, Out, and Err.
+.NOTES
+    Starts the current pwsh host with -NoLogo -NoProfile -NonInteractive -File.
+    Waits up to 60 seconds, then kills the process tree and throws on timeout.
+#>
 function Invoke-Tool {
     param([string[]] $Arguments, [string] $Entry = $wrapper, [string] $Directory = $work)
     $start = [Diagnostics.ProcessStartInfo]::new()
@@ -111,6 +153,9 @@ Invoke-Case 'PowerShell script redirection creates formatted code' {
     Assert-True ([IO.File]::ReadAllText($output) -ceq ($formatted + [Environment]::NewLine)) 'Bad redirected code'
 }
 
+# Cover each supported encoding, both newline styles, and no, one, or two trailing
+# newlines. Every case checks -c (2), -w (0), byte identity, and that a second -w
+# leaves the timestamp unchanged.
 foreach ($encodingName in 'utf8', 'utf8-bom', 'utf16le', 'utf16be') {
     $encoding = switch ($encodingName) {
         'utf8' { [Text.UTF8Encoding]::new($false, $true) }
@@ -380,6 +425,8 @@ Invoke-Case 'symbolic links are skipped when the OS permits their creation' {
     catch { $skipped.Add('Symbolic-link creation is not permitted: ' + $_.Exception.Message); return }
     try { Assert-Code (Invoke-Tool @('-c', $root)) 0 } finally { [IO.File]::Delete($link) }
 }
+# The entry script shadows Get-Module and Install-Module before invoking psfmt so
+# the automatic installation path can be exercised without installing a module.
 Invoke-Case 'automatic installation is scoped and failures are clear (mocked, no install)' {
     $entry = New-Source 'dependency/run.ps1' @'
 function Get-Module { param([switch] $ListAvailable, [string] $Name); return @() }

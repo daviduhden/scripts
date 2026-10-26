@@ -1,16 +1,31 @@
 #!/bin/bash
 set -euo pipefail
 
-# SecureBlue signify install/update script.
-# Builds OpenBSD signify from source and installs it to /usr/local/bin.
-# Build dependencies are installed via Homebrew.
+# SecureBlue signify install/update helper.
+#
+# Builds the portable OpenBSD signify implementation from source and installs
+# the binary as /usr/local/bin/signify. Run it as the normal desktop user:
+# Homebrew supplies the build dependencies, and run0 is used only for the
+# final installation.
+#
+# The script follows the newest v* release tag in the upstream repository and
+# checks out a detached HEAD. It builds with the bundled libbsd
+# (BUNDLED_LIBBSD=1), so the installed binary does not depend on a Homebrew
+# libbsd path. Source authenticity relies on Git's TLS transport; no separate
+# tag signature or binary checksum is verified.
+#
+# Repeat runs are cheap: the checkout under ~/.local/src is reused, and the
+# build is skipped when the tag and installed binary are already current.
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
 
 REPO="https://codeberg.org/aperezdc/signify.git"
 INSTALL_PATH="/usr/local/bin/signify"
+# Persistent checkout reused between runs.
 BUILD_DIR="${HOME}/.local/src/signify-build"
+# State shared between phases. ROOT_CMD is empty when already root, and
+# SOURCE_CHANGED records whether the checkout moved to a new tag.
 ROOT_CMD=""
 LATEST_TAG=""
 SOURCE_CHANGED=0
@@ -124,6 +139,8 @@ install_build_deps() {
 	brew install --quiet "${deps[@]}" >/dev/null
 }
 
+# Ask the remote for version-sorted v* tags, strip the ref prefix and the
+# ^{} suffix of peeled annotated tags, then keep the last unique tag name.
 get_latest_tag() {
 	git ls-remote --tags --sort='version:refname' \
 		"$REPO" 'refs/tags/v*' 2>/dev/null |
@@ -142,6 +159,8 @@ prepare_source() {
 	fi
 
 	cd "$BUILD_DIR"
+	# Tags are fetched explicitly because a detached checkout at a release tag
+	# does not advance with a normal branch fetch.
 	log "Fetching latest tags"
 	git fetch --quiet --tags --prune origin
 
@@ -166,6 +185,8 @@ prepare_source() {
 
 build_and_install() {
 	log "Building signify from source"
+	# Keep build output out of the checkout; the EXIT trap removes this file
+	# if a later step aborts.
 	BUILD_LOG="$(mktemp "${TMPDIR:-/tmp}/signify-build.XXXXXX.log")"
 	if ! run_build make -s -C "$BUILD_DIR" \
 		CC=clang BUNDLED_LIBBSD=1 >"$BUILD_LOG" 2>&1; then
@@ -176,6 +197,8 @@ build_and_install() {
 	BUILD_LOG=""
 
 	log "Installing to $INSTALL_PATH"
+	# install(1) preserves the executable mode without invoking a Homebrew
+	# binary as root.
 	run_root install -m 0755 "$BUILD_DIR/signify" "$INSTALL_PATH"
 }
 

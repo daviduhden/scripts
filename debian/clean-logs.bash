@@ -8,6 +8,15 @@ set -euo pipefail
 # - Supports a dry-run mode via DRY_RUN=1 or the
 #   --dry-run / -n option to only list files.
 #
+# Requirements: find; root privileges for a real run (dry-run works as
+# any user).
+#
+# Deletion is immediate and does not create backups. The -xdev find
+# option keeps each search on the filesystem containing the starting
+# path, so neither scan descends into separate mounts. A failure in
+# either cleanup pass is reported and makes the script exit non-zero
+# after both passes have been attempted.
+#
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
 
@@ -23,6 +32,7 @@ warn() {
 	printf '%s [WARN] %s\n' \
 		"$(date '+%Y-%m-%d %H:%M:%S')" "$*"
 }
+# Log an error without exiting; callers decide whether to fail.
 error() {
 	printf '%s [ERROR] %s\n' \
 		"$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2
@@ -62,6 +72,9 @@ parse_args() {
 	done
 }
 
+# Print or delete compressed logs below /var/log. -xdev stops find at
+# filesystem boundaries, so logs on separately mounted filesystems
+# are not touched.
 cleanup_gz_logs() {
 	if [ "$DRY_RUN" -eq 1 ]; then
 		log "DRY RUN: listing *.gz files" \
@@ -83,6 +96,9 @@ cleanup_gz_logs() {
 	fi
 }
 
+# Print or delete *.old files on the root filesystem. -xdev prevents
+# this scan from crossing into other mounts; without it, a full-root
+# search would be considerably broader.
 cleanup_old_files() {
 	if [ "$DRY_RUN" -eq 1 ]; then
 		log "DRY RUN: listing *.old files" \
@@ -109,6 +125,7 @@ main() {
 	parse_args "$@"
 	require_cmd find
 
+	# Dry-run only lists paths, so it is allowed without elevation.
 	if [[ $DRY_RUN -ne 1 && ${EUID:-$(id -u)} -ne 0 ]]; then
 		error "This script must be run as root unless --dry-run is used." \
 			"Try: sudo $0"
@@ -118,6 +135,8 @@ main() {
 	log "----------------------------------------"
 	log "Log cleanup started"
 	failed=0
+	# Run both passes even if the first fails, then report the overall
+	# result.
 	cleanup_gz_logs || failed=1
 	cleanup_old_files || failed=1
 	if [ "$failed" -ne 0 ]; then
@@ -129,6 +148,6 @@ main() {
 }
 
 #######################################
-# Delete all .gz files under /var/log #
+# Run log cleanup; honors dry-run.    #
 #######################################
 main "$@"

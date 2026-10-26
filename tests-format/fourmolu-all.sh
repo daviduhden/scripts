@@ -1,7 +1,8 @@
 #!/bin/sh
 set -eu
 
-# Save original stdout/stderr, create per-run log in TMPDIR and redirect
+# Announce the log path on descriptor 3, then send all normal output there.
+# The log stays under ${TMPDIR:-/tmp} for post-mortem inspection.
 exec 3>&1 4>&2
 TMPLOG="${TMPDIR:-/tmp}/fourmolu-all-$$.log"
 printf '%s\n' "[INFO] Logging to: $TMPLOG" >&3
@@ -34,6 +35,11 @@ require_cmd() {
 
 run_fourmolu_all() {
 
+	# One optional ROOT_DIR, defaulting to the current directory. A leading
+	# dash is rejected so an unknown option is not treated as a path. Exit 0
+	# means success or an optional-tool skip; 1 means a missing style or
+	# required command; 2 means a usage or path error. A failing fourmolu run
+	# propagates its own status.
 	[ "$#" -le 1 ] || usage
 	ROOT_DIR=${1:-.}
 	[ "${ROOT_DIR#-}" = "$ROOT_DIR" ] || usage
@@ -47,6 +53,7 @@ run_fourmolu_all() {
 	STYLE_FILE="$SCRIPT_DIR/fourmolu-all.yaml"
 
 	if ! command -v fourmolu >/dev/null 2>&1; then
+		# Optional tool: a missing formatter is a skip, not a failure.
 		printf '%s\n' \
 			"[INFO] fourmolu not found in PATH;" \
 			" skipping Haskell formatting"
@@ -66,13 +73,18 @@ run_fourmolu_all() {
 		printf '[ERROR] Missing bundled style: %s\n' "$STYLE_FILE" >&2
 		exit 1
 	}
-	# Validate the bundled style before modifying any source files.
+	# Validate the bundled style before modifying any source files. Feeding a
+	# tiny module through stdin exercises the parser and configuration without
+	# touching the tree; --stdin-input-file supplies the .hs name fourmolu
+	# would otherwise derive from a real path.
 	printf 'module FourmoluAllConfigCheck where\n' |
 		fourmolu --config "$STYLE_FILE" \
 			--stdin-input-file FourmoluAllConfigCheck.hs >/dev/null
 
 	printf '%s\n' \
 		'[INFO] Applying Haskell formatting with the bundled fourmolu style...'
+	# Format in place. The pipeline subshell means failures abort through
+	# set -e rather than being tallied in the parent shell.
 	find "$ROOT_DIR" \
 		-name .git \
 		-prune -o -type f \

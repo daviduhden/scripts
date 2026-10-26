@@ -1,6 +1,9 @@
 #!/bin/ksh
 
 set -eu
+# pipefail makes any failing stage of a pipeline determine the pipeline
+# status. Probe first: not every ksh version supports the option, and a
+# failed `set -o` must not abort the script.
 if (set -o pipefail) >/dev/null 2>&1; then
 	set -o pipefail
 fi
@@ -21,9 +24,13 @@ fi
 ###################
 # PATH and colors #
 ###################
+# Reset PATH for unattended runs (cron, rc.d) where the inherited
+# environment may be minimal. /usr/local entries cover gh, git, and rsync.
 PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin
 export PATH
 
+# Timestamped message helpers built on ksh's print. Progress goes to stdout;
+# warnings and errors go to stderr.
 log() {
 	print "$(date '+%Y-%m-%d %H:%M:%S') [INFO] $*"
 }
@@ -34,6 +41,10 @@ error() {
 	print "$(date '+%Y-%m-%d %H:%M:%S') [ERROR] $*" >&2
 }
 
+# Decide whether a cloned tree has anything worth deploying. .git and
+# .github are pruned, but any other entry at any depth counts, including
+# dotfiles, so a repo whose only entries are those metadata directories is
+# rejected.
 has_repo_content() {
 	typeset dir="$1" listing
 	[ -d "$dir" ] || return 1
@@ -53,6 +64,8 @@ has_repo_content() {
 ##################
 # Git LFS helper #
 ##################
+# Best-effort LFS support: without git, git-lfs, or a .git directory the
+# checkout is still staged, and a failed pull only produces a warning.
 fetch_lfs_files() {
 	typeset dir="$1"
 	if ! command -v git >/dev/null 2>&1; then
@@ -73,6 +86,9 @@ fetch_lfs_files() {
 ##########################
 # GitHub CLI user/config #
 ##########################
+# Deploy account and repository. gh runs as GH_USER (root by default)
+# because that account owns the GitHub credentials in GH_CONFIG_DIR. The
+# home directory is resolved from the password database when possible.
 typeset GH_USER GH_HOST REPO_SLUG GH_HOME GH_CONFIG_DIR
 GH_USER="${GH_USER:-root}"
 GH_HOST="${GH_HOST:-github.com}"
@@ -85,6 +101,8 @@ else
 	# root resolves to /root instead of the /home/root guess.
 	GH_HOME="$(awk -F: -v user="$GH_USER" \
 		'$1 == user { print $6; exit }' /etc/passwd)"
+	# If the lookup returns nothing, use the conventional /home/<user>
+	# path.
 	[ -n "$GH_HOME" ] || GH_HOME="/home/$GH_USER"
 fi
 if [ -z "$GH_HOME" ]; then
@@ -92,8 +110,14 @@ if [ -z "$GH_HOME" ]; then
 	exit 1
 fi
 
+# gh reads its hosts.yml and token from here; the path is passed explicitly
+# to every gh invocation instead of relying on the elevated user's default
+# HOME.
 GH_CONFIG_DIR="${GH_HOME}/.config/gh"
 
+# Run a command as the account that owns the gh credentials. doas -u is
+# preferred; without doas, su - gives a login shell and the command string is
+# assembled with each argument single-quoted.
 run_as_gh_user() {
 	if command -v doas >/dev/null 2>&1; then
 		doas -u "$GH_USER" "$@"
@@ -110,6 +134,10 @@ run_as_gh_user() {
 	fi
 }
 
+# Replace the deployed tree with srcdir. Metadata left by an earlier sync is
+# removed first; rsync -a --delete mirrors the source, and the fallback empties
+# WWW_DIR before copying. The exclusions preserve the lock directory and keep
+# VCS metadata out of the deployed tree.
 stage_from_source() {
 	typeset srcdir="$1"
 	if [ -d "$WWW_DIR/.git" ]; then rm -rf "$WWW_DIR/.git"; fi
@@ -152,6 +180,9 @@ stage_from_source() {
 ######################
 # Main configuration #
 ######################
+# Deployment target. The script takes no arguments, so change these values
+# here (or override GH_USER, GH_HOST, and REPO_SLUG in the environment) to
+# deploy a different site or service.
 typeset WWW_DIR BRANCH SERVICE_NAME OWNER_USER
 typeset OWNER_GROUP WWW_HOST ZIP_URL LOCKDIR
 WWW_DIR="/var/www/htdocs/cypherpunk-handbook"
@@ -167,6 +198,9 @@ ZIP_URL="https://${GH_HOST}/${REPO_SLUG}""\
 ###################
 # GitHub CLI sync #
 ###################
+# Preferred method: clone the branch into a temporary directory with gh.
+# Return 1 when gh, git, saved credentials, or usable content are missing, so
+# main can fall back to the next method.
 sync_with_gh_cli() {
 	typeset repo_slug="$REPO_SLUG" attempt=1 tmpdir stagedir
 
@@ -182,6 +216,7 @@ sync_with_gh_cli() {
 		"/tmp/site-sync.XXXXXX")" || return 1
 	stagedir="$tmpdir/src"
 
+	# Retry a failed clone up to five times before giving up.
 	while [ "$attempt" -le 5 ]; do
 		if run_as_gh_user env \
 			GH_CONFIG_DIR="$GH_CONFIG_DIR" \
@@ -220,6 +255,8 @@ sync_with_gh_cli() {
 ############
 # Git sync #
 ############
+# Plain git fallback: reuse the origin of an existing checkout when there is
+# one, otherwise derive the URL from REPO_SLUG and GH_HOST.
 sync_with_git() {
 	typeset origin_url="" tmpdir stagedir
 	if ! command -v git >/dev/null 2>&1; then return 1; fi
@@ -261,6 +298,9 @@ sync_with_git() {
 #######################
 # GitHub ZIP fallback #
 #######################
+# Last resort: download the branch archive and unpack it. GitHub puts the
+# tree inside a single top-level directory, which becomes the staging source.
+# This needs unzip plus at least one downloader.
 sync_with_github_zip() {
 	typeset tmpdir zipfile unpack_dir srcdir
 	tmpdir=$(mktemp -d "/tmp/site-sync.XXXXXX") || return 1
@@ -320,6 +360,9 @@ sync_with_github_zip() {
 #####################
 # Post-update steps #
 #####################
+# Make the staged tree readable by the web server, restart the service, then
+# attempt certificate renewal when acme-client is installed. An ownership
+# failure is only a warning; a failed restart aborts the run.
 post_update_steps() {
 	cd "$WWW_DIR" || return 1
 
@@ -337,7 +380,8 @@ post_update_steps() {
 		return 1
 	fi
 
-	# ACME certificate renewal
+	# ACME certificate renewal. This is opportunistic: a missing client or
+	# a failed renewal only warns, so it does not undo a good deployment.
 	if command -v acme-client >/dev/null 2>&1; then
 		log "Running acme-client for ${WWW_HOST}..."
 		if acme-client "${WWW_HOST}"; then
@@ -357,6 +401,9 @@ post_update_steps() {
 ########
 # Main #
 ########
+# Remove this run's PID file and then the lock directory. rmdir only succeeds
+# when the directory is empty, so a directory with unexpected contents is left
+# in place. Called from the EXIT, INT, and TERM traps below.
 cleanup_lock() {
 	if [ -n "${LOCKDIR:-}" ]; then
 		rm -f "${LOCKDIR}/pid"
@@ -364,6 +411,8 @@ cleanup_lock() {
 	fi
 }
 
+# mkdir is atomic, so creating the lock directory doubles as the mutex. The
+# PID inside identifies the owner for the stale-lock check.
 acquire_lock() {
 	typeset lock_pid
 
@@ -393,25 +442,33 @@ main() {
 	log "----------------------------------------"
 	log "Sync started (user: $GH_USER)"
 
+	# Deployment writes under /var/www, changes ownership, and restarts
+	# httpd, so it must run as root.
 	if [ "$(id -u)" -ne 0 ]; then
 		error "This script must be run as root."
 		exit 1
 	fi
 
+	# Check the target before taking the lock, which lives inside WWW_DIR.
 	[ -d "$WWW_DIR" ] || {
 		error "$WWW_DIR does not exist"
 		exit 1
 	}
 
+	# A held lock means another sync is already running; exit successfully
+	# rather than reporting a collision as an error.
 	if ! acquire_lock; then
 		log "Another sync running. Exiting."
 		exit 0
 	fi
 
+	# Release the lock on normal exit, interrupt, and termination.
 	trap 'cleanup_lock' EXIT
 	trap 'cleanup_lock; exit 130' INT
 	trap 'cleanup_lock; exit 143' TERM
 
+	# Try GitHub CLI, then plain git, then the ZIP archive; stop at the
+	# first method that stages the site successfully.
 	if ! sync_with_gh_cli && ! sync_with_git &&
 		! sync_with_github_zip; then
 		error "all sync methods failed."

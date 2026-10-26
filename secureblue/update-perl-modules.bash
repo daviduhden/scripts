@@ -1,18 +1,23 @@
 #!/bin/bash
 set -euo pipefail
 
-# Secureblue local Perl module updater
-# Automated script to update the Perl distributions installed in the
-# user's local::lib (the modules installed with cpanm -l).
+# SecureBlue local Perl module updater.
 #
-# - Checks the local::lib for outdated distributions with cpan-outdated
-# - Reinstalls them with cpanm so they stay in the local::lib
-# - Excludes dual-life core modules by default, so the system or
-#   Homebrew Perl installation is not shadowed
+# Updates only the distributions installed in the user's local::lib (the tree
+# produced by cpanm --local-lib, by default $HOME/perl5). Run it as the user who
+# owns that tree; it performs no elevation and prepends the tree to PERL5LIB
+# and PATH for the tools it invokes.
 #
-# The local::lib is produced by cpanm --local-lib (for example when
-# installing Perl::Critic). Modules already loaded through the system
-# or Homebrew Perl are left untouched unless --include-core is given.
+# cpan-outdated lists outdated distributions, and cpanm reinstalls them with
+# --local-lib so they stay in the same tree. Dual-life core modules are excluded
+# by default: it is usually undesirable for a local copy of a module that ships
+# with the system or Homebrew Perl to shadow the packaged version.
+# --include-core considers them anyway, and --list only reports without
+# installing.
+#
+# App::cpanoutdated is installed into the local::lib on demand, so the first run
+# may need network access. cpanm then fetches distributions from CPAN; no root
+# access is used and nothing is installed system-wide.
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
@@ -21,6 +26,8 @@ PERL_LOCAL_LIB="${PERL_LOCAL_LIB:-$HOME/perl5}"
 CPANM_BIN="${CPANM_BIN:-cpanm}"
 PERL_BIN="${PERL_BIN:-perl}"
 
+# EXCLUDE_CORE passes --exclude-core unless --include-core was given;
+# LIST_ONLY reports outdated distributions without installing them.
 EXCLUDE_CORE=1
 LIST_ONLY=0
 
@@ -108,12 +115,15 @@ parse_args() {
 	done
 }
 
-# Make the local::lib visible to the tools this script runs.
+# Make the local::lib visible to the tools this script runs. Existing PERL5LIB
+# entries are preserved after the local tree rather than overwritten.
 setup_local_lib() {
 	export PERL5LIB="$PERL_LOCAL_LIB/lib/perl5${PERL5LIB:+:$PERL5LIB}"
 	export PATH="$PERL_LOCAL_LIB/bin:$PATH"
 }
 
+# Prefer cpanm from PATH, but accept one already installed in the local::lib
+# (App::cpanminus installs its launcher there).
 ensure_cpanm() {
 	if command -v "$CPANM_BIN" >/dev/null 2>&1; then
 		return 0
@@ -151,6 +161,8 @@ update_local_lib() {
 		exit 1
 	fi
 
+	# Split the captured output into one distribution per line. mapfile needs
+	# Bash 4, which SecureBlue provides.
 	if [[ -n $raw ]]; then
 		mapfile -t outdated <<<"$raw"
 	fi

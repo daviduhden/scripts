@@ -1,19 +1,28 @@
 #!/bin/bash
 set -euo pipefail
 
-# SecureBlue lyrebird update/install script
-# Automated script to install or update the lyrebird
-# Go-based Tor transport
-# - Ensures Go is installed (via Homebrew if available)
-# - Clones the lyrebird repository from Tor Project GitLab
-# - Builds the binary with make
-# - Installs the resulting binary into /usr/local/bin (requires root)
+# SecureBlue lyrebird install/update helper.
+#
+# Builds the Go-based Tor pluggable transport from the Tor Project GitLab and
+# installs it as /usr/local/bin/lyrebird. Run it as the normal desktop user:
+# Go is installed through Homebrew when missing, the build happens in
+# ~/.local/src, and run0 is used only for the copy into /usr/local/bin.
+#
+# The persistent checkout is fetched and checked out at the newest tag (by the
+# date of its tagged commit). If the repository has no tags, it falls back to
+# a fast-forward pull of the default branch. When the checkout is already at
+# that tag and the installed binary exists, the build and install are skipped.
+#
+# Source trust is Git-over-HTTPS only; no release checksum or signature is
+# verified. Builds use the standard allocator to avoid hardened_malloc issues.
 
 REPO="tpo/anti-censorship/pluggable-transports/lyrebird"
 REPO_URL="https://gitlab.torproject.org/${REPO}.git"
 BUILD_DIR="${HOME}/.local/src"
 BIN_NAME="lyrebird"
 INSTALL_PATH="/usr/local/bin/$BIN_NAME"
+# ROOT_CMD is empty when already root. SKIP_BUILD is set when the checkout is
+# already at the newest tag.
 ROOT_CMD=""
 SKIP_BUILD=0
 
@@ -139,7 +148,8 @@ clone_or_update_repo() {
 	# Fetch tags and remote refs
 	git fetch --tags --prune origin || git fetch --tags --prune
 
-	# Determine the latest tag (by tag creation date)
+	# Determine the latest tag by the date of its tagged commit. This is not
+	# semantic-version ordering, but it matches the upstream release flow.
 	latest_tag=$(git describe --tags \
 		"$(git rev-list --tags --max-count=1)" \
 		2>/dev/null || true)
@@ -163,6 +173,7 @@ clone_or_update_repo() {
 	fi
 }
 
+# The upstream Makefile writes the binary into the repository root.
 build_lyrebird() {
 	log "Building lyrebird..."
 	run_build make build
@@ -173,6 +184,8 @@ build_lyrebird() {
 
 install_lyrebird() {
 	log "Installing lyrebird to $INSTALL_PATH..."
+	# cp and chmod are system binaries, so they remain runnable through run0
+	# even though the build itself ran in the user's environment.
 	run_root cp "./$BIN_NAME" "$INSTALL_PATH"
 	run_root chmod +x "$INSTALL_PATH"
 	log "Lyrebird installed successfully."
@@ -185,6 +198,8 @@ check_prereqs() {
 	ensure_go
 }
 
+# Skipping requires both conditions: a current checkout and an installed
+# binary. A missing binary forces a rebuild even when the source is current.
 maybe_skip_build() {
 	if [ "$SKIP_BUILD" -eq 1 ] && [ -x "$INSTALL_PATH" ]; then
 		log "No build required. Exiting."

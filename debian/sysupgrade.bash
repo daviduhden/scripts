@@ -7,7 +7,22 @@ set -euo pipefail
 # - Runs full-upgrade with non-interactive config file handling
 # - Runs autoremove and clean
 # - Reloads systemd and restarts services (if needrestart is available)
-# - Collects system information to /var/log/sysupgrade (rotates weekly)
+# - Collects system information under /tmp and prunes old reports
+#
+# Requirements: root privileges; apt, apt-cache, date, find, chmod, and
+# mktemp. lynis, systemcheck, and needrestart are optional and are
+# used only when installed.
+#
+# Usage: sysupgrade.bash [--skip-audit]. The script does not reboot the
+# system.
+#
+# Phases are classified as mandatory (update, full-upgrade, cleanup) or
+# optional (service restarts, security audit, system information).
+# Mandatory failures are recorded and reported in a final summary; the
+# script exits non-zero after all phases have run. Audit and report
+# files are written under /tmp with mode 0600 and pruned after seven
+# days. The APT configuration keeps locally modified configuration
+# files (--force-confold) and assumes yes for prompts.
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
@@ -94,6 +109,8 @@ apt_suite_enabled() {
 	return 1
 }
 
+# Phase bookkeeping: PHASE_ORDER keeps insertion order (associative
+# arrays do not), while the other maps store kind, label, and result.
 declare -a PHASE_ORDER=()
 declare -A PHASE_STATUS=()
 declare -A PHASE_KIND=()
@@ -107,6 +124,8 @@ record_phase_status() {
 	PHASE_STATUS["$phase"]="$status"
 }
 
+# Run one phase and record its result. Failures are logged but do not
+# abort the run; print_phase_summary decides the final exit status.
 run_phase() {
 	local phase="$1" kind="$2" label="$3" phase_fn="$4"
 	if "$phase_fn"; then
@@ -127,6 +146,8 @@ mark_phase_skipped() {
 	log "Skipping ${label}: ${reason}"
 }
 
+# Print per-phase results and totals. Returns non-zero when any
+# mandatory phase failed, which is the script's overall failure signal.
 print_phase_summary() {
 	local phase status kind
 	local mandatory_failures=0 optional_failures=0 successes=0 skipped=0
@@ -219,6 +240,11 @@ apt_update() {
 	fi
 }
 
+# Run up to two full-upgrade passes: first with the release's backports
+# suite when that suite is configured, then against all repositories.
+# The backports pass is skipped when the codename cannot be determined
+# or the suite is not enabled. Both passes keep existing configuration
+# files.
 apt_full_upgrade() {
 	local codename target
 	local -a apt_opts
@@ -275,6 +301,8 @@ apt_cleanup() {
 	fi
 }
 
+# Reload systemd and let needrestart restart services that use upgraded
+# libraries. A missing needrestart is only a warning.
 restart_services() {
 	log "Reloading systemd manager configuration..."
 	systemctl daemon-reload ||
@@ -293,6 +321,9 @@ restart_services() {
 	fi
 }
 
+# Run optional Lynis and systemcheck audits, tee their output to /tmp,
+# restrict the resulting files to the owner, then delete audit files
+# older than seven days. Missing tools are skipped with a warning.
 run_security_audit() {
 	local audit_ts audit_log audit_report syscheck_log
 	audit_ts="$(date +%Y%m%d-%H%M%S)"
@@ -358,6 +389,9 @@ run_security_audit() {
 	fi
 }
 
+# systemcheck needs a non-root desktop session. Resolve the invoking
+# user (SUDO_USER, then logname), require an active user bus, and run
+# the audit with that user's HOME, UID, and D-Bus environment.
 run_systemcheck_audit() {
 	local audit_user="$1" audit_home audit_uid
 
@@ -394,6 +428,11 @@ run_systemcheck_audit() {
 		systemcheck --cli
 }
 
+# Collect a system report and tee it to /tmp. Despite the historical
+# function name, nothing is uploaded. Commands that can legitimately
+# fail (for example apt list in a container or journalctl without a
+# previous boot) are guarded so the rest of the report is still
+# produced. Files older than seven days are pruned.
 collect_system_info_and_upload() {
 	local info_ts info_log
 	local rc=0
@@ -499,6 +538,8 @@ check_prereqs() {
 	require_cmd "$APT_BIN"
 }
 
+# Reset phase state, run the phases in order, and fail if the summary
+# reports a mandatory failure.
 run_maintenance() {
 	log "Starting apt maintenance run..."
 	PHASE_ORDER=()

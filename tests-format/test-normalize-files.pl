@@ -21,15 +21,22 @@ use File::Spec;
 use File::Temp qw(tempdir);
 use Test::More;
 
+# Locate perl/normalize-files.pl relative to this test and load it as a
+# library. normalize-files.pl guards its entry point with "unless caller", so
+# require defines NormalizeFiles::* without running a scan.
 my ( $vol, $dirs ) = File::Spec->splitpath( File::Spec->rel2abs($0) );
 my $SCRIPT = File::Spec->catfile( $dirs, '..', 'perl', 'normalize-files.pl' );
 -f $SCRIPT or BAIL_OUT("cannot find perl/normalize-files.pl relative to $0");
 require $SCRIPT;
 
+# Windows lacks the POSIX permission-bit behavior some tests rely on.
 my $WINDOWS = ( $^O eq 'MSWin32' ) ? 1 : 0;
 
 # ---------------------------------------------------------------- helpers
 
+# Read a file as bytes without newline translation. Returning undef on open
+# failure is intentional so callers can use this in a conditional. A scoped
+# local $/ reads the whole file.
 sub slurp_raw {
     my ($path) = @_;
     open my $fh, '<:raw', $path or return;
@@ -39,6 +46,8 @@ sub slurp_raw {
     return $data;
 }
 
+# Write bytes with no encoding layer or newline conversion. A failed open is
+# fatal because every caller is setting up a test fixture.
 sub write_raw {
     my ( $path, $data ) = @_;
     open my $fh, '>:raw', $path or die "cannot write $path: $!";
@@ -47,6 +56,9 @@ sub write_raw {
     return;
 }
 
+# Run the program under the same perl interpreter ($^X) and capture its
+# stdout. The list form of open avoids a shell. $? >> 8 extracts the exit
+# status from the wait status; output defaults to '' on a failed read.
 sub run_capture {
     my (@args) = @_;
     open my $fh, '-|', $^X, $SCRIPT, @args or die "cannot run script: $!";
@@ -56,6 +68,8 @@ sub run_capture {
     return ( $? >> 8, defined $out ? $out : '' );
 }
 
+# TMPDIR => 1 puts the tree in the platform temp directory; CLEANUP removes it
+# when the test program exits.
 sub newtmp {
     return tempdir( 'nf-test-XXXXXX', TMPDIR => 1, CLEANUP => 1 );
 }
@@ -144,6 +158,9 @@ subtest 'normalize_basename is idempotent' => sub {
 };
 
 # ------------------------------------------------- integration: dry-run/apply
+# The CLI contract under test: 0 = clean/applied, 1 = changes needed in
+# dry-run, 2 = a decision or intervention is required (collisions, ambiguous
+# encodings, read-only files), 3 = usage error.
 
 subtest 'dry-run never modifies and reports exit 1' => sub {
     my $tmp = newtmp();
@@ -177,6 +194,9 @@ subtest 'ASCII name already valid: no changes required' => sub {
     done_testing();
 };
 
+# Foo.txt and foo.txt both normalize to foo.txt. The program must report a
+# collision, keep both byte streams, and refuse to overwrite one with the
+# other; exit 2 means a human must resolve the conflict.
 subtest 'collisions are detected and skipped (case-sensitive)' => sub {
     my $tmp = newtmp();
     my $a   = File::Spec->catfile( $tmp, 'Foo.txt' );
@@ -231,6 +251,9 @@ subtest 'nested directories are renamed deepest-first' => sub {
 
 # --------------------------------------------------- unit: rename cycles
 
+# A -> B and B -> A cannot be done with two plain renames. The internal
+# execute_rename_group API is exercised directly to verify that staging breaks
+# the cycle without losing either file's content.
 subtest 'rename cycles preserve data' => sub {
     my $tmp = newtmp();
     my $fa  = File::Spec->catfile( $tmp, 'A' );
@@ -271,6 +294,9 @@ subtest 'rename cycles preserve data' => sub {
 };
 
 # ------------------------------------------------------- encodings
+# Fixtures are written with Encode so the bytes on disk are explicit. Valid
+# UTF-8 must remain byte-identical and BOM-marked UTF-16 is converted; legacy
+# encodings are ambiguous and only change when --assume-encoding decides.
 
 subtest 'UTF-8 valid content is left byte-identical' => sub {
     my $tmp  = newtmp();
@@ -423,6 +449,8 @@ subtest 'text extension with binary content is not rewritten' => sub {
 
 # ------------------------------------------------------- symlinks
 
+# The link stores an absolute target path inside $tmp. If the platform forbids
+# symlink creation, skip the whole subtest instead of failing it.
 subtest 'symlinks are not followed and targets are untouched' => sub {
     my $tmp    = newtmp();
     my $target = File::Spec->catfile( $tmp, 'Target File.txt' );
@@ -516,6 +544,9 @@ subtest '.gitattributes and .editorconfig are never modified' => sub {
     done_testing();
 };
 
+# Windows has no comparable POSIX mode bits, and root (effective UID $>)
+# bypasses them, so both cases skip rather than produce a misleading pass or
+# failure.
 subtest 'read-only files are skipped, never made writable' => sub {
     if ($WINDOWS) { plan skip_all => 'POSIX permission bits are used here' }
     if ( $> == 0 ) {
@@ -546,6 +577,8 @@ subtest 'BOM-prefixed binary that decodes to NUL is skipped' => sub {
     done_testing();
 };
 
+# A rename that changes only case may stage through a .norm-* helper file.
+# Whatever the strategy, no staging artifact may survive the run.
 subtest 'staging leaves no temporary files behind' => sub {
     my $tmp = newtmp();
     write_raw( File::Spec->catfile( $tmp, 'README.TXT' ), "hi\n" );
@@ -558,6 +591,9 @@ subtest 'staging leaves no temporary files behind' => sub {
     done_testing();
 };
 
+# The second operation names a missing file, so the group must undo the first
+# rename. This checks the all-or-nothing behavior of a rename group, including
+# the report's applied count.
 subtest 'partial rename failure rolls the group back' => sub {
     my $tmp = newtmp();
     my $fx  = File::Spec->catfile( $tmp, 'X' );
@@ -597,6 +633,8 @@ subtest 'partial rename failure rolls the group back' => sub {
     done_testing();
 };
 
+# 0xFF cannot be part of a valid UTF-8 sequence. The file name must be left
+# alone, but the file's bytes are still normalized by path.
 subtest 'undecodable file name: content processed, rename skipped' => sub {
     my $tmp = newtmp();
     my $raw = pack( 'C*', 0x62, 0x61, 0x64, 0xFF, 0x2E, 0x74, 0x78, 0x74 );
@@ -610,6 +648,8 @@ subtest 'undecodable file name: content processed, rename skipped' => sub {
     done_testing();
 };
 
+# glob_match translates shell-style patterns, so regex metacharacters such as
+# + must stay literal and malformed classes must not die.
 subtest 'glob_match is robust' => sub {
     is( NormalizeFiles::glob_match( '*.py', 'a.py' ), 1,
         'simple glob matches' );
@@ -625,6 +665,8 @@ subtest 'glob_match is robust' => sub {
     done_testing();
 };
 
+# The sandbox helper is meaningful only on OpenBSD; skip there and verify on
+# every other platform that calling it returns instead of dying.
 subtest 'OpenBSD sandbox is a no-op on other systems' => sub {
     plan skip_all => 'OpenBSD only' if $^O eq 'openbsd';
     my $tmp = newtmp();
@@ -637,6 +679,9 @@ subtest 'OpenBSD sandbox is a no-op on other systems' => sub {
     done_testing();
 };
 
+# The command must exit 0 and print its name plus a version. When the
+# repository VERSION file is present, the output must contain that value; trim
+# trailing whitespace first so a newline does not affect the match.
 subtest '--version reports the project version' => sub {
     my ( $rc, $out ) = run_capture('--version');
     is( $rc, 0, 'exit 0' );

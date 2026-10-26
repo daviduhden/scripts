@@ -42,6 +42,8 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
 try {
+    # Best effort: the HTTPS endpoints need TLS 1.2, and a failure to change the
+    # process-wide setting is ignored.
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 } catch { }
 
@@ -79,6 +81,15 @@ function Write-Fail {
     Write-Host "[ERROR] $Message" -ForegroundColor Red
 }
 
+<#
+.SYNOPSIS
+    Maps the running OS architecture to a release asset tag.
+.OUTPUTS
+    'x64' or 'arm64'.
+.NOTES
+    Reads RuntimeInformation.OSArchitecture and falls back to
+    PROCESSOR_ARCHITECTURE when that API is unavailable. Other values throw.
+#>
 function Get-PlatformTag {
     $arch = $null
     try {
@@ -93,6 +104,13 @@ function Get-PlatformTag {
     }
 }
 
+<#
+.SYNOPSIS
+    Normalizes a version string for comparison and directory names.
+.OUTPUTS
+    The trimmed value without a leading 'rust-' or 'v' prefix; $null for null
+    or whitespace input.
+#>
 function Normalize-Version {
     param([string]$Value)
     if ([string]::IsNullOrWhiteSpace($Value)) { return $null }
@@ -102,6 +120,18 @@ function Normalize-Version {
     return $v
 }
 
+<#
+.SYNOPSIS
+    Reads the version reported by an installed CLI.
+.PARAMETER ExePath
+    Executable to run with --version.
+.OUTPUTS
+    The last whitespace-separated token of the first output line, normalized;
+    $null when the file is missing, prints nothing, or fails.
+.NOTES
+    This executes the target binary, so only pass executables that the script
+    installed or located.
+#>
 function Get-ExeVersion {
     param([string]$ExePath)
     if (-not (Test-Path -LiteralPath $ExePath)) { return $null }
@@ -121,6 +151,18 @@ function Test-VersionEqual {
     return ($A.Trim() -eq $B.Trim())
 }
 
+<#
+.SYNOPSIS
+    Prepends a directory to the user PATH and the current process PATH.
+.PARAMETER Directory
+    Directory to add. It is created when missing.
+.NOTES
+    Writes HKCU\Environment\Path directly so the stored value kind (for example
+    REG_EXPAND_SZ) and unexpanded %VAR% entries are preserved. Managed
+    directories are deduplicated and kept in insertion order, so repeated runs
+    do not rewrite PATH. Sets $script:PathChanged only when the stored value
+    actually changes.
+#>
 function Add-PathEntry {
     param([string]$Directory)
 
@@ -171,6 +213,16 @@ function Add-PathEntry {
     $env:Path = (@($script:ManagedDirs) + $procEntries) -join ';'
 }
 
+<#
+.SYNOPSIS
+    Locates bun.exe without installing or changing PATH.
+.DESCRIPTION
+    Checks the current PATH, winget and Bun default directories, BUN_INSTALL,
+    the persistent user and machine PATH, and finally the newest Oven-sh.Bun
+    package directory.
+.OUTPUTS
+    The full path to bun.exe, or $null when none is found.
+#>
 function Find-BunExe {
     $command = Get-Command bun.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($null -ne $command) { return $command.Source }
@@ -201,6 +253,19 @@ function Find-BunExe {
     return $null
 }
 
+<#
+.SYNOPSIS
+    Adds or replaces a marked function in the current-user PowerShell profile.
+.PARAMETER Name
+    Command name, such as codex or opencode.
+.PARAMETER DefaultArgument
+    Argument inserted before the caller's arguments, such as --yolo.
+.NOTES
+    The block is delimited by BEGIN/END comments, so unrelated profile content
+    is preserved. The profile is written as UTF-8 with a BOM, creating its
+    parent directory when needed. The function is also defined in the current
+    session because profile changes apply only to new sessions.
+#>
 function Set-CliWrapper {
     param([string]$Name, [string]$DefaultArgument)
 
@@ -225,6 +290,21 @@ function Set-CliWrapper {
     Set-Item -Path "Function:global:$Name" -Value ([scriptblock]::Create($body))
 }
 
+<#
+.SYNOPSIS
+    Makes an installed CLI reachable and optionally adds its default-argument wrapper.
+.PARAMETER Name
+    Command name to check.
+.PARAMETER ExePath
+    Installed executable; a missing or empty path produces a warning and no
+    environment changes.
+.PARAMETER DefaultArgument
+    Argument for Set-CliWrapper, or empty to skip the wrapper.
+.NOTES
+    In -Check mode this only reports whether the command is missing from the
+    current PATH. Normal runs add the executable's directory and let
+    $ErrorActionPreference handle any registry failure.
+#>
 function Repair-CliEnvironment {
     param([string]$Name, [string]$ExePath, [string]$DefaultArgument)
 
@@ -240,6 +320,17 @@ function Repair-CliEnvironment {
     if ($DefaultArgument) { Set-CliWrapper -Name $Name -DefaultArgument $DefaultArgument }
 }
 
+<#
+.SYNOPSIS
+    Downloads a URI to a file, retrying transient failures.
+.PARAMETER Uri
+    Source URL.
+.PARAMETER OutFile
+    Destination path.
+.NOTES
+    Makes three attempts with a three-second pause and 900-second timeout per
+    request, then rethrows the last error.
+#>
 function Invoke-Download {
     param([string]$Uri, [string]$OutFile)
     $attempts = 3
@@ -255,12 +346,33 @@ function Invoke-Download {
     }
 }
 
+<#
+.SYNOPSIS
+    Fetches a URL and returns its response body as text.
+.PARAMETER Uri
+    Source URL.
+.PARAMETER Headers
+    Optional request headers; $null is treated as an empty table.
+#>
 function Get-RemoteText {
     param([string]$Uri, [hashtable]$Headers)
     if ($null -eq $Headers) { $Headers = @{} }
     return (Invoke-WebRequest -Uri $Uri -UseBasicParsing -TimeoutSec 60 -Headers $Headers).Content
 }
 
+<#
+.SYNOPSIS
+    Replaces a current executable with a copy of a versioned one.
+.PARAMETER SourceExe
+    Versioned executable to copy.
+.PARAMETER TargetExe
+    Active executable to replace.
+.NOTES
+    Renames the existing target to a timestamped .old-* file, copies the source,
+    and then deletes the backup. If the copy fails, restores the backup when
+    possible and rethrows. A target that cannot be renamed is overwritten in
+    place by Copy-Item -Force.
+#>
 function Set-CurrentExe {
     param([string]$SourceExe, [string]$TargetExe)
 
@@ -294,6 +406,12 @@ function Set-CurrentExe {
 # ---------------------------------------------------------------------------
 # OpenCode
 # ---------------------------------------------------------------------------
+<#
+.SYNOPSIS
+    Resolves the latest OpenCode version from the update metadata endpoint.
+.OUTPUTS
+    A normalized version string without the 'v' prefix.
+#>
 function Get-OpenCodeLatestVersion {
     $raw = Get-RemoteText -Uri $script:OpenCodeMetaUrl
     $meta = $raw | ConvertFrom-Json
@@ -303,6 +421,17 @@ function Get-OpenCodeLatestVersion {
     return (Normalize-Version $meta.version)
 }
 
+<#
+.SYNOPSIS
+    Prunes old OpenCode version directories.
+.PARAMETER CurrentVersion
+    Directory name of the active version, which is never removed.
+.PARAMETER Keep
+    Total number of versions to keep, including the current one.
+.NOTES
+    Non-current directories are ordered by LastWriteTime, newest first. Removal
+    failures are ignored because stale versions are not fatal.
+#>
 function Remove-OldOpenCodeVersions {
     param([string]$CurrentVersion, [int]$Keep = 3)
 
@@ -319,6 +448,17 @@ function Remove-OldOpenCodeVersions {
     }
 }
 
+<#
+.SYNOPSIS
+    Installs or updates the OpenCode CLI for the current user.
+.PARAMETER Version
+    Version to install. Empty selects the latest release.
+.NOTES
+    -Check only reports installed and available versions. A normal run downloads
+    and extracts a temporary zip, stores the binary under versions\<version>,
+    points bin\opencode.exe at it, verifies the reported version, and prunes old
+    version directories. Downloads and version strings come from opencode.ai.
+#>
 function Install-OpenCode {
     param([string]$Version)
 
@@ -392,6 +532,13 @@ function Install-OpenCode {
 # ---------------------------------------------------------------------------
 # Codex
 # ---------------------------------------------------------------------------
+<#
+.SYNOPSIS
+    Resolves the latest Codex release tag from the GitHub API.
+.NOTES
+    Sends a User-Agent and the GitHub JSON media type, then normalizes the rust-v
+    tag prefix away.
+#>
 function Get-CodexLatestVersion {
     $headers = @{ 'User-Agent' = 'update-aiclis'; 'Accept' = 'application/vnd.github+json' }
     $raw = Get-RemoteText -Uri $script:CodexLatestApi -Headers $headers
@@ -402,6 +549,12 @@ function Get-CodexLatestVersion {
     return (Normalize-Version $meta.tag_name)
 }
 
+<#
+.SYNOPSIS
+    Returns the Codex release target triple for this machine.
+.OUTPUTS
+    x86_64-pc-windows-msvc or aarch64-pc-windows-msvc.
+#>
 function Get-CodexTarget {
     $platform = Get-PlatformTag
     switch ($platform) {
@@ -411,6 +564,13 @@ function Get-CodexTarget {
     }
 }
 
+<#
+.SYNOPSIS
+    Tests whether the visible Codex bin directory is a junction into the versions tree.
+.OUTPUTS
+    $true when bin is a reparse point whose target starts with the versions
+    directory; otherwise $false.
+#>
 function Test-CodexManagedLayout {
     # The visible directory must be a junction to versions\<version>\bin.
     $item = Get-Item -LiteralPath $script:CodexBin -Force -ErrorAction SilentlyContinue
@@ -421,6 +581,17 @@ function Test-CodexManagedLayout {
     return ($target -like "$($script:CodexVersions)*")
 }
 
+<#
+.SYNOPSIS
+    Points the visible Codex bin directory at a version directory.
+.PARAMETER VersionDir
+    Version directory containing bin, codex-resources, and codex-package.json.
+.NOTES
+    Recreates bin as a junction. An existing junction is removed with rmdir so
+    its target is untouched; a real directory is deleted recursively. When a
+    junction cannot be created, copies the executables, resources, and package
+    manifest instead and warns. The fallback does not copy codex-path.
+#>
 function Set-CodexVisibleBin {
     param([string]$VersionDir)
 
@@ -450,6 +621,17 @@ function Set-CodexVisibleBin {
     }
 }
 
+<#
+.SYNOPSIS
+    Prunes old Codex version directories.
+.PARAMETER CurrentVersion
+    Directory name of the active version, which is never removed.
+.PARAMETER Keep
+    Total number of versions to keep, including the current one.
+.NOTES
+    Non-current directories are ordered by LastWriteTime, newest first. Removal
+    failures are ignored because stale versions are not fatal.
+#>
 function Remove-OldCodexVersions {
     param([string]$CurrentVersion, [int]$Keep = 3)
 
@@ -465,6 +647,18 @@ function Remove-OldCodexVersions {
     }
 }
 
+<#
+.SYNOPSIS
+    Installs or updates the Codex CLI for the current user.
+.PARAMETER Version
+    Version to install. Empty selects the latest release.
+.NOTES
+    -Check only reports installed and available versions. A normal run may migrate
+    an unmanaged layout to a junction, download the GitHub release zip with the
+    three binaries, install the optional code-mode host, write a
+    codex-package.json manifest, verify the version, and prune old versions. A
+    code-mode host failure is reported as a warning because it is optional.
+#>
 function Install-Codex {
     param([string]$Version)
 
@@ -605,6 +799,15 @@ function Install-Codex {
 # ---------------------------------------------------------------------------
 # Bun (winget)
 # ---------------------------------------------------------------------------
+<#
+.SYNOPSIS
+    Installs, updates, or checks Bun through winget.
+.NOTES
+    Requires winget. -Check only lists the installed and available packages.
+    Normal runs use --silent and accept source and package agreements; -Force
+    adds --force. The "not installed" and "already up to date" winget exit codes
+    are treated as expected outcomes.
+#>
 function Install-Bun {
     $winget = Get-Command winget -ErrorAction SilentlyContinue
     if ($null -eq $winget) {
@@ -645,6 +848,13 @@ function Install-Bun {
 # ---------------------------------------------------------------------------
 # winget (optional CLI cleanup)
 # ---------------------------------------------------------------------------
+<#
+.SYNOPSIS
+    Uninstalls the winget copies of OpenCode and Codex.
+.NOTES
+    Best effort: a missing winget or an uninstall failure produces a warning.
+    Bun is never removed because winget manages that installation.
+#>
 function Remove-WingetPackages {
     $winget = Get-Command winget -ErrorAction SilentlyContinue
     if ($null -eq $winget) {
@@ -700,7 +910,7 @@ if ($RemoveWinget -and -not $Check) {
 
 # Repair existing installations even when an update failed (for example, offline).
 # OpenCode and Codex come first so their directories are prepended before Bun's
-# win-get Links directory (which may contain shims for the same commands).
+# winget Links directory (which may contain shims for the same commands).
 foreach ($cli in @(
     @{ Enabled = $doOpenCode; Name = 'opencode'; ExePath = $script:OpenCodeExe; DefaultArgument = '--auto' }
     @{ Enabled = $doCodex; Name = 'codex'; ExePath = $script:CodexExe; DefaultArgument = '--yolo' }

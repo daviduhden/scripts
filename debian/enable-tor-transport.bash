@@ -11,6 +11,22 @@ set -euo pipefail
 # Backups are stored under
 # /etc/apt/tor-transport-backup-<timestamp>.
 #
+# Requirements: root privileges, dpkg, awk, cp, date, install, and ps.
+# Network access is needed to install apt-transport-tor and tor.
+#
+# Side effects:
+#  - Installs/updates apt-transport-tor and tor
+#  - Copies sources.list and sources.list.d into a timestamped backup
+#  - Rewrites deb/deb-src lines and deb822 URIs fields to use
+#    tor+https:// or tor+http://
+#  - Enables and starts tor through the detected service manager
+#
+# The rewrite applies to all APT sources, including third-party
+# repositories, and is not rolled back automatically; use the backup
+# directory to restore the previous files. The script does not run
+# apt update after conversion. A service-manager failure makes the
+# script exit non-zero after the sources have already been rewritten.
+#
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
 
@@ -49,6 +65,8 @@ detect_apt_cmd() {
 	fi
 }
 
+# Install the transport helper and Tor before rewriting sources, so
+# the converted entries remain usable on the next apt update.
 install_tor_transport_packages() {
 	log "Updating APT index and installing" \
 		"tor transport packages..."
@@ -56,6 +74,9 @@ install_tor_transport_packages() {
 	"$APT_CMD" install -y apt-transport-tor tor
 }
 
+# Copy the current APT source configuration into a new directory named
+# with a second-resolution timestamp. The directory is created even if
+# neither source path exists.
 backup_sources() {
 	local timestamp backup_dir
 	timestamp="$(date +%Y%m%d%H%M%S)"
@@ -72,6 +93,9 @@ backup_sources() {
 	log "Backups stored in ${backup_dir}"
 }
 
+# Rewrite http(s) URLs on deb/deb-src lines in a one-line sources.list
+# file. Entries already using tor+http(s) are left alone. The result is
+# written through a temporary file and installed with mode 0644.
 convert_list_file() {
 	local file="$1" tmp
 	tmp="$(mktemp)"
@@ -89,6 +113,8 @@ convert_list_file() {
 	rm -f "$tmp"
 }
 
+# Rewrite http(s) URLs on URIs lines in a deb822 .sources file. Other
+# fields and already converted entries are preserved.
 convert_sources_file() {
 	local file="$1" tmp
 	tmp="$(mktemp)"
@@ -106,6 +132,8 @@ convert_sources_file() {
 	rm -f "$tmp"
 }
 
+# Run a service command, logging a warning and returning non-zero on
+# failure so callers can try an alternative action.
 service_action() {
 	local action_desc="$1"
 	shift
@@ -126,6 +154,8 @@ systemd_unit_exists() {
 	systemctl list-unit-files "$1" >/dev/null 2>&1
 }
 
+# Enable the unit, then restart it (falling back to start), and verify
+# that systemd reports it active. Returns non-zero if any step fails.
 ensure_systemd_unit_active() {
 	local unit="$1"
 
@@ -331,6 +361,9 @@ enable_and_start_tor() {
 	return 1
 }
 
+# Convert the main sources.list and every .list/.sources fragment.
+# nullglob keeps the loops from running on the literal pattern when no
+# files of a given type exist.
 convert_sources_to_tor_transport() {
 	if [[ -f /etc/apt/sources.list ]]; then
 		log "Converting /etc/apt/sources.list..."
@@ -367,6 +400,8 @@ run_enable_tor_transport() {
 	backup_sources
 	convert_sources_to_tor_transport
 
+	# Source conversion is already complete at this point, even if the
+	# service step fails.
 	log "Enabling and starting tor service..."
 	enable_and_start_tor
 	log "Conversion complete. Run 'apt update'" \

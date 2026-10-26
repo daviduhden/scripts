@@ -13,6 +13,23 @@ set -euo pipefail
 # It supports only amd64, i386, arm64 and armhf
 # architectures (as per repository).
 #
+# Requirements: root privileges, network access, dpkg, curl, gpg,
+# mktemp, and ps. gpg must already be installed; apt-transport-https is
+# installed when missing.
+#
+# Side effects:
+#  - Writes /usr/share/keyrings/purplei2p.gpg
+#  - Writes /etc/apt/sources.list.d/purplei2p.sources
+#  - Removes the legacy /etc/apt/sources.list.d/purplei2p.list
+#  - Runs apt update and installs i2pd
+#  - Enables and starts i2pd through the detected service manager
+#
+# The source file contains a second, disabled deb-src stanza. The
+# keyring and source files are overwritten without a backup. Service
+# setup covers several init systems; on s6 it only prints instructions.
+# If a detected manager's commands fail, the script exits non-zero
+# after i2pd has been installed.
+#
 # Supported (based on current published repos):
 #   Debian/Raspbian: bookworm, trixie, sid
 #   Ubuntu: jammy, noble
@@ -82,6 +99,8 @@ load_os_release() {
 	fi
 }
 
+# Normalize derivatives that advertise Ubuntu in ID_LIKE to "ubuntu"
+# so they use the Ubuntu repository path.
 normalize_dist() {
 	DIST="${ID:-}"
 	if [[ $DIST != "debian" &&
@@ -119,6 +138,9 @@ log_detected_platform() {
 	log "Using native APT architecture: ${ARCH_FILTER}"
 }
 
+# Download the repository key into a temporary file, dearmor it into
+# /usr/share/keyrings, and remove the temporary file on success or
+# failure. The keyring is replaced on every run.
 install_repo_key() {
 	local key_tmp
 
@@ -140,6 +162,10 @@ install_repo_key() {
 	rm -f "$key_tmp"
 }
 
+# Write the deb822 source and a second stanza for source packages.
+# The deb-src stanza is disabled with "Enabled: no" so APT does not
+# fetch source indexes unless the user opts in. The legacy .list file
+# is removed to avoid duplicate entries.
 write_i2pd_sources() {
 	log "Writing APT deb822 sources file for Purple I2P..."
 	rm -f /etc/apt/sources.list.d/purplei2p.list
@@ -334,6 +360,8 @@ get_release() {
 	esac
 }
 
+# Match the native dpkg architecture against the four architectures
+# the Purple I2P repository publishes.
 detect_arch_filter() {
 	local native
 	native="$(dpkg --print-architecture 2>/dev/null || true)"
@@ -354,6 +382,10 @@ detect_arch_filter() {
 	esac
 }
 
+# Refresh the base index, then install gpg and apt-transport-https
+# only when they are missing. Installing from the base repositories
+# first keeps the later repository setup from depending on packages
+# that are not yet resolvable.
 ensure_base_dependencies() {
 	log "Updating APT index for base repositories..."
 	"$APT_CMD" update
@@ -369,6 +401,8 @@ ensure_base_dependencies() {
 	fi
 }
 
+# Run a service command, logging a warning and returning non-zero on
+# failure so callers can try an alternative action.
 service_action() {
 	local action_desc="$1"
 	shift
@@ -389,6 +423,8 @@ systemd_unit_exists() {
 	systemctl list-unit-files "$1" >/dev/null 2>&1
 }
 
+# Enable the unit, then restart it (falling back to start), and verify
+# that systemd reports it active. Returns non-zero if any step fails.
 ensure_systemd_unit_active() {
 	local unit="$1"
 
@@ -435,6 +471,9 @@ enable_i2pd_openrc() {
 		rc-service i2pd start
 }
 
+# runit needs the service linked into /etc/service before sv can use
+# it; the link is only created when the source directory exists and
+# no link is already present.
 enable_i2pd_runit() {
 	log "Detected runit. Enabling and" \
 		"starting i2pd via runit..."
@@ -520,6 +559,11 @@ enable_i2pd_sysv() {
 	return "$failed"
 }
 
+# Identify the init system from PID 1 and dispatch to the matching
+# helper. If PID 1 is not recognized, probe for service-manager
+# commands in priority order. The s6 path only prints instructions;
+# the final fallback warns and returns non-zero when no manager is
+# found. sinit is expected to be handled through its SysV scripts.
 enable_and_start_i2pd() {
 	local init_comm
 	init_comm="$(ps -p 1 -o comm= 2>/dev/null |

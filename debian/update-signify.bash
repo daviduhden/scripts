@@ -6,6 +6,21 @@ set -euo pipefail
 # Build dependencies are installed via apt and
 # privileged steps use sudo.
 #
+# Requirements: Debian 13, network access, dpkg, and either root or a
+# working sudo. Missing build dependencies (git, clang, make,
+# libbsd-dev) are installed through apt.
+#
+# Side effects:
+#  - Clones or updates the source under $HOME/.local/src/signify-build
+#  - Checks out the latest v* tag
+#  - Builds with make using clang and BUNDLED_LIBBSD=1
+#  - Installs the binary as /usr/local/bin/signify
+#
+# The build runs with LD_PRELOAD unset. Source authenticity relies on
+# the Git transport; there is no separate signature check. The build is
+# skipped when the source is already at the latest tag and the installed
+# binary exists.
+#
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
 
@@ -25,6 +40,9 @@ error() {
 
 have_cmd() { command -v "$1" >/dev/null 2>&1; }
 
+# Set ROOT_CMD to an empty string when already root, or to sudo when
+# available. Root is not mandatory, but installing into /usr/local/bin
+# is.
 require_sudo_or_root() {
 	if [ "${EUID:-$(id -u)}" -eq 0 ]; then
 		ROOT_CMD=""
@@ -76,6 +94,9 @@ install_build_deps() {
 	run_root apt-get install -y -qq "${missing[@]}" >/dev/null
 }
 
+# Take the highest v* tag after a version-aware sort and remove peeled
+# tag suffixes and duplicates. Prints nothing if the remote cannot be
+# read.
 get_latest_tag() {
 	git ls-remote --tags \
 		--sort='version:refname' \
@@ -86,6 +107,9 @@ get_latest_tag() {
 		tail -n1
 }
 
+# Clone if needed, fetch tags, and check out the latest tag. A tagged
+# HEAD is compared with the latest tag to set SOURCE_CHANGED; an
+# untagged HEAD always causes a checkout.
 prepare_source() {
 	if [ ! -d "$BUILD_DIR/.git" ]; then
 		log "Cloning signify repository"
@@ -117,6 +141,8 @@ prepare_source() {
 	return 0
 }
 
+# Build with clang and the bundled libbsd compatibility code, then
+# install with mode 0755 as root. The build runs with LD_PRELOAD unset.
 build_and_install() {
 	log "Building signify from source"
 	if ! env -u LD_PRELOAD make -s \

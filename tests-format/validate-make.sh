@@ -1,7 +1,8 @@
 #!/bin/sh
 set -eu
 
-# Save original stdout/stderr, create per-run log in TMPDIR and redirect
+# Announce the log path on descriptor 3, then send normal output to the log.
+# The log remains under ${TMPDIR:-/tmp} after exit for inspection.
 exec 3>&1 4>&2
 TMPLOG="${TMPDIR:-/tmp}/validate-make-$$.log"
 printf '%s\n' "[INFO] Logging to: $TMPLOG" >&3
@@ -31,6 +32,7 @@ require_cmd() {
 
 run_validate_make() {
 
+	# One optional ROOT_DIR; reject option-looking paths before doing work.
 	ROOT_DIR=${1:-.}
 	[ "$#" -le 1 ] || usage
 	[ "${ROOT_DIR#-}" = "$ROOT_DIR" ] || usage
@@ -55,14 +57,18 @@ run_validate_make() {
 	TMP_FAILS="$TMPDIR_BASE/validate-make-fails-$$.txt"
 	trap 'rm -f "$TMP_FAILS"' EXIT
 
+	# Pipelines run their loops in subshells; use a file to accumulate names.
 	note_fail() { printf '%s\n' "$1" >>"$TMP_FAILS"; }
 
 	printf '%s\n' "[INFO] Formatting Makefiles with mbake..."
+	# mbake is unavailable on OpenBSD, and checkmake is skipped there as well.
 	if [ "$IS_OPENBSD" -eq 1 ]; then
 		printf '%s\n' "[INFO] OpenBSD: skipping mbake"
 	elif command -v mbake >/dev/null 2>&1; then
 		UNFMT="$TMPDIR_BASE/unformatted-make-$$.txt"
 
+		# --check reports drift without rewriting; names are collected so the
+		# rewrite pass can print what it is about to change.
 		find "$ROOT_DIR" \
 			\( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) \
 			-prune -o -type f \
@@ -80,6 +86,8 @@ run_validate_make() {
 			printf '%s\n' "[INFO] mbake will format the following files:"
 			sed -n '1,200p' "$UNFMT" | sed 's/^/  - /'
 
+			# A successful rewrite is still recorded as an issue so the run
+			# exits nonzero and the diff is reviewed.
 			while IFS= read -r file; do
 				[ -n "$file" ] || continue
 				if mbake format "$file" >/dev/null 2>&1; then
@@ -121,7 +129,9 @@ run_validate_make() {
 		printf '%s\n' "[INFO] checkmake not installed; skipping Makefile lint"
 	fi
 
-	# Run bmake/make dry-run to ensure BSD make compatibility
+	# Run bmake/make dry-run to ensure BSD make compatibility. On OpenBSD the
+	# base make is bmake, so fall back to "make" there. On other systems a
+	# missing bmake skips the check rather than silently testing GNU make.
 	MAKE_CMD="bmake"
 	if [ "$IS_OPENBSD" -eq 1 ] &&
 		! command -v bmake >/dev/null 2>&1 &&
@@ -144,7 +154,7 @@ run_validate_make() {
 				# bmake resolves relative paths against the
 				# invocation directory (GNU make does not chdir
 				# either), so run the dry-run from the Makefile's
-				# own directory.
+				# own directory. The subshell keeps the caller here.
 				if ! (cd "$make_dir" &&
 					"$MAKE_CMD" -n -f "$make_file") \
 					>/dev/null 2>&1; then
@@ -163,6 +173,8 @@ run_validate_make() {
 		issues=$(sort -u "$TMP_FAILS" | wc -l | tr -d ' ')
 	fi
 
+	# Rewrites and lint/dry-run failures are recorded as issues (exit 2).
+	# Missing optional tools are skips, not findings.
 	if [ "${issues:-0}" -ne 0 ]; then
 		printf '%s\n' \
 			"[INFO] Completed with $issues issue(s)" \

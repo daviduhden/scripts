@@ -1,6 +1,12 @@
 #requires -Version 7.0
+# psfmt 0.1.0 - formatting front end for PSScriptAnalyzer.
+# Exit codes: 0 success; 1 usage, dependency, discovery, read, parse, format, or
+# write error; 2 files need formatting in -c mode. See README.md here for the
+# full interface and byte-preservation rules.
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+# Set UTF-8 for console output while this script runs; the caller's setting is
+# restored in finally.
 $previousOutputEncoding = [Console]::OutputEncoding
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
 
@@ -56,6 +62,17 @@ function Write-PsfmtDiagnostic {
     Write-Error -Message "psfmt: $Message" -ErrorAction Continue
 }
 
+<#
+.SYNOPSIS
+    Parses psfmt arguments into a mode, path list, exclusions, and settings path.
+.PARAMETER Arguments
+    Raw argument strings, normally $args.
+.OUTPUTS
+    A pscustomobject with Mode, Paths, Exclusions, Settings, Help, and Version.
+.NOTES
+    Parsing stops at --; later arguments are literal paths. Unknown options,
+    empty paths, conflicting modes, and missing option values throw.
+#>
 function Get-PsfmtOption {
     param([object[]] $Arguments)
     $paths = [Collections.Generic.List[string]]::new()
@@ -100,6 +117,15 @@ function Get-PsfmtOption {
     [pscustomobject]@{ Mode = $mode; Paths = $paths; Exclusions = $exclusions; Settings = $settings; Help = $help; Version = $version }
 }
 
+<#
+.SYNOPSIS
+    Imports PSScriptAnalyzer, installing it for the current user when missing.
+.NOTES
+    This is psfmt's only configuration and network side effect: a missing module
+    is installed from PSGallery with -Scope CurrentUser. Module messages go to
+    the diagnostic stream so formatted code on stdout stays clean. A failure
+    rethrows after printing the manual installation command.
+#>
 function Initialize-PsfmtEngine {
     # Redirect every non-success stream: dependency notices must not contaminate code stdout.
     if (@(Get-Module -ListAvailable -Name PSScriptAnalyzer).Count -eq 0) {
@@ -129,6 +155,20 @@ function Test-PsfmtReparsePath {
     return $false
 }
 
+<#
+.SYNOPSIS
+    Tests a path against the built-in ignored directory names and user exclusions.
+.PARAMETER Path
+    File or directory path to test.
+.PARAMETER BasePath
+    Working directory used to compute the relative form.
+.PARAMETER Patterns
+    Wildcard patterns built from repeated -exclude options.
+.NOTES
+    The built-in names exclude a directory itself or any path below it. Patterns
+    are matched against the file name, the absolute path, and the relative path,
+    all with forward slashes.
+#>
 function Test-PsfmtExcluded {
     param([string] $Path, [string] $BasePath, [Collections.Generic.List[Management.Automation.WildcardPattern]] $Patterns)
     $normalized = $Path.Replace('\', '/')
@@ -144,6 +184,24 @@ function Test-PsfmtExcluded {
     return $false
 }
 
+<#
+.SYNOPSIS
+    Discovers supported PowerShell files and applies exclusions.
+.PARAMETER Paths
+    Files and directories to examine; directories are searched recursively.
+.PARAMETER BasePath
+    Working directory used to resolve relative inputs and exclusions.
+.PARAMETER Exclusions
+    User-supplied -exclude patterns.
+.OUTPUTS
+    A pscustomobject with Files (sorted absolute paths) and Failed ($true when
+    any input produced a diagnostic).
+.NOTES
+    Traversal is iterative, skips reparse points including ancestors, and
+    deduplicates paths with ordinal comparison on Windows and case-sensitive
+    ordinal comparison elsewhere. Per-path errors are reported and do not stop
+    discovery; unsupported explicit files are errors.
+#>
 function Get-PsfmtFile {
     param([Collections.Generic.List[string]] $Paths, [string] $BasePath, [Collections.Generic.List[string]] $Exclusions)
     $comparer = if ($IsWindows) { [StringComparer]::OrdinalIgnoreCase } else { [StringComparer]::Ordinal }
@@ -201,6 +259,18 @@ function Get-PsfmtFile {
     [pscustomobject]@{ Files = $sorted; Failed = $failed }
 }
 
+<#
+.SYNOPSIS
+    Reads a file as text and records its byte and newline metadata.
+.PARAMETER Path
+    File to read.
+.OUTPUTS
+    An object with Bytes, Text, Encoding, Newline, and Ending.
+.NOTES
+    Detects UTF-8 with or without a BOM and BOM-marked UTF-16 LE/BE with strict
+    decoders. Rejects UTF-32, NUL content, bare CR, and mixed line endings so a
+    later write cannot silently change them.
+#>
 function Read-PsfmtText {
     param([string] $Path)
     $bytes = [IO.File]::ReadAllBytes($Path)
@@ -228,6 +298,14 @@ function Read-PsfmtText {
     [pscustomobject]@{ Bytes = $bytes; Text = $text; Encoding = $encoding; Newline = $newline; Ending = $ending }
 }
 
+<#
+.SYNOPSIS
+    Throws when PowerShell cannot parse the supplied text.
+.PARAMETER Text
+    Script text to parse.
+.NOTES
+    Uses the PowerShell parser only; it does not execute the text.
+#>
 function Assert-PsfmtSyntax {
     param([string] $Text)
     $tokens = $null
@@ -239,6 +317,21 @@ function Assert-PsfmtSyntax {
     }
 }
 
+<#
+.SYNOPSIS
+    Formats one document and restores its original newline and trailing newline.
+.PARAMETER Document
+    Object returned by Read-PsfmtText.
+.PARAMETER Settings
+    Validated .psd1 settings path, or empty for formatter defaults.
+.PARAMETER Path
+    Source path used in diagnostics.
+.OUTPUTS
+    The formatted text, including the document's original trailing newline.
+.NOTES
+    Validates syntax before and after formatting. Formatter messages are sent to
+    the diagnostic stream, and exactly one output string is required.
+#>
 function Format-PsfmtText {
     param([pscustomobject] $Document, [string] $Settings, [string] $Path)
     Assert-PsfmtSyntax $Document.Text
@@ -260,6 +353,21 @@ function Format-PsfmtText {
     return $formatted
 }
 
+<#
+.SYNOPSIS
+    Replaces a file through a verified temporary file and File.Replace.
+.PARAMETER Path
+    Destination file.
+.PARAMETER Document
+    Original document metadata, including the bytes used for the concurrency check.
+.PARAMETER Text
+    Formatted text to store.
+.NOTES
+    Refuses reparse points, read-only files, and files changed since reading.
+    Writes and flushes a same-directory temporary file, verifies its bytes, and
+    replaces the original atomically when the file system supports it. The
+    temporary file is removed in finally; there is no delete-then-move fallback.
+#>
 function Write-PsfmtAtomicFile {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Writes are explicitly selected by the CLI -w mode, not a cmdlet API.')]
     param([string] $Path, [pscustomobject] $Document, [string] $Text)
@@ -288,6 +396,19 @@ function Write-PsfmtAtomicFile {
     }
 }
 
+<#
+.SYNOPSIS
+    Emits a single unified diff hunk for one changed file.
+.PARAMETER Path
+    Path shown in the --- and +++ headers.
+.PARAMETER Original
+    Text before formatting.
+.PARAMETER Formatted
+    Text after formatting.
+.NOTES
+    Uses a common prefix and suffix with up to three context lines. Memory and
+    time are linear in the input size; this is not a minimal diff algorithm.
+#>
 function Write-PsfmtDiff {
     param([string] $Path, [string] $Original, [string] $Formatted)
     # One valid unified hunk spanning the changed region. Linear memory/time;
@@ -326,6 +447,9 @@ function Write-PsfmtDiff {
     }
 }
 
+# Main flow: parse arguments, validate the working directory and settings, then
+# process each selected file. Per-file failures are collected; -c returns 2 only
+# when files changed and no errors occurred.
 try {
     $options = Get-PsfmtOption $args
     if ($options.Help) { Show-PsfmtHelp; exit 0 }

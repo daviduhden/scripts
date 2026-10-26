@@ -16,6 +16,38 @@ set -euo pipefail
 # - Configure monerod ZMQ and monero-lws public REST
 #   endpoints for Debian
 #
+# Requirements: root privileges, systemd, network access, curl, tar,
+# awk, install, sha256sum, and gpg. useradd is needed unless
+# --skip-service-and-user-setup is used. --install-lws additionally
+# requires git, cmake, make, and a C++ compiler; missing LWS build
+# packages are installed through apt.
+#
+# Usage: update-monero.bash [--skip-service-and-user-setup]
+# [--install-lws]. Environment variables are documented by --help.
+#
+# Side effects:
+#  - Downloads the CLI tarball into /tmp, verifies it against the
+#    GPG-signed hashes.txt with the binaryFate key, and installs the
+#    binaries into /usr/bin
+#  - Creates the monero system user and data/log directories
+#  - Creates /etc/monerod.conf when absent, then updates its keys
+#    during a full run (existing values are replaced in place)
+#  - Stops monerod before replacing binaries when it is running, and
+#    restarts it afterward
+#  - Installs the upstream systemd unit with paths rewritten to
+#    /usr/bin and /etc/monerod.conf
+#  - With --install-lws: builds monero-lws in /tmp, installs its
+#    binaries, writes /etc/monero-lws/monero-lws.conf and the
+#    monero-lws unit, optionally edits torrc/tunnels.conf, and adds
+#    runtime nftables rules for FIREWALL_TCP_PORTS
+#
+# The GPG home and source/build directories are temporary and removed
+# by an EXIT trap. Firewall rules added by this script are runtime-only
+# and are not saved to the nftables configuration. The monerod
+# configuration is edited without a backup. On systems where monerod is
+# already at the latest tag and LWS is not requested, the script exits
+# early without refreshing the configuration or the unit.
+#
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
 
@@ -172,6 +204,9 @@ require_cmd() {
 	fi
 }
 
+# Resolve the monero-lws account once: prefer an existing "monero-lws"
+# user, otherwise reuse the monerod user. The group defaults to the
+# account's primary group. Explicit LWS_USER/LWS_GROUP overrides win.
 resolve_lws_account() {
 	if [[ -z ${LWS_USER} ]]; then
 		if id -u monero-lws >/dev/null 2>&1; then
@@ -186,6 +221,8 @@ resolve_lws_account() {
 	fi
 }
 
+# Require the base tools plus the conditional ones for user setup and
+# LWS builds.
 check_prereqs() {
 	require_cmd curl
 	require_cmd tar
@@ -205,6 +242,9 @@ check_prereqs() {
 	fi
 }
 
+# Install only missing monero-lws build packages, and only when LWS was
+# requested and the dpkg/apt tooling is available. This is a no-op
+# otherwise.
 ensure_lws_build_dependencies() {
 	local -a missing=()
 
@@ -235,7 +275,9 @@ ensure_lws_build_dependencies() {
 # Open the service ports in the host firewall with nftables. Ports that the
 # active ruleset already allows are left untouched. The family/table/chain is
 # taken from NFT_TABLE/NFT_CHAIN, or auto-detected among the common input
-# chains (for example "inet mainfw").
+# chains (for example "inet mainfw"). Rules are added to the running ruleset
+# only and are not persisted across a reboot. Missing nft, a missing chain,
+# or a failed rule is reported without failing the run.
 open_firewall_ports() {
 	if ! command -v nft >/dev/null 2>&1; then
 		log "nft is not installed;" \
@@ -301,6 +343,9 @@ has_cmd() {
 	command -v "$1" >/dev/null 2>&1
 }
 
+# Replace an existing "key=value" line (including leading whitespace)
+# or append a new one. The file is edited in place with no backup, and
+# a key with a suffix such as "key2" is not matched.
 set_config_value() {
 	local file key value
 	file="$1"
@@ -316,6 +361,7 @@ set_config_value() {
 	fi
 }
 
+# Append a line only when the exact same line is not already present.
 append_config_line() {
 	local file line
 	file="$1"
@@ -326,6 +372,11 @@ append_config_line() {
 	fi
 }
 
+# Apply the script's monerod defaults, replacing existing values rather
+# than merging with them. Existing tx-proxy and anonymous-inbound lines
+# are removed first; they are re-added only when MONERO_TOR_ONION or
+# MONERO_I2P_B32 is set. The bind addresses can be overridden with the
+# MONEROD_* environment variables read here.
 configure_monerod_conf() {
 	log "Configuring ${MONEROD_CONF} for" \
 		"public clearnet and monero-lws..."
@@ -412,6 +463,11 @@ configure_monerod_for_lws() {
 	configure_monerod_conf
 }
 
+# Create the LWS account when it differs from the monerod user, prepare
+# the data/log directories, create the config file with mode 0640 if
+# absent, and (re)write the hardened systemd unit. Existing config keys
+# are replaced in place; the unit is always overwritten. The unit
+# requires monerod.service and confines the daemon to the LWS paths.
 configure_lws_service() {
 	if [[ ${LWS_USER} != "${MONERO_USER}" ]] &&
 		! id -u "${LWS_USER}" >/dev/null 2>&1; then
@@ -517,6 +573,10 @@ EOF
 	chmod 0644 "$LWS_SERVICE_FILE"
 }
 
+# Add hidden-service ports for LWS and restricted RPC to existing Tor
+# and I2P configurations. Each port is added only when the exact line is
+# not already present; both services are restarted afterward. This runs
+# only when the corresponding config file and command exist.
 configure_monero_privacy_transports() {
 	if [[ -f $TOR_CONF_FILE ]] &&
 		command -v tor >/dev/null 2>&1; then
@@ -582,6 +642,8 @@ EOF
 	fi
 }
 
+# Resolve the highest v* tag through git ls-remote, falling back to the
+# GitHub releases API when git is unavailable or returns nothing.
 get_latest_release() {
 	local tag json
 
@@ -607,6 +669,8 @@ get_latest_release() {
 		<<<"$json"
 }
 
+# Choose the highest strict vN[.N...] tag from the monero-lws remote.
+# Non-version tags are filtered out. Returns non-zero without git.
 get_latest_lws_tag() {
 	if ! has_cmd git; then
 		return 1
@@ -621,6 +685,8 @@ get_latest_lws_tag() {
 		tail -n1
 }
 
+# Resolve the commit for an annotated tag by preferring the peeled
+# (^{}) ref, then the plain ref. Prints nothing when neither exists.
 get_lws_tag_commit() {
 	local tag="$1" refs commit
 
@@ -635,6 +701,8 @@ get_lws_tag_commit() {
 	[[ -n ${commit} ]] && printf '%s\n' "$commit"
 }
 
+# Consider LWS current only when the daemon is installed and the state
+# file records the same "tag:commit" pair.
 lws_is_current() {
 	local tag="$1"
 	local ref="$2"
@@ -648,6 +716,13 @@ lws_is_current() {
 	[[ ${installed_ref} == "${tag}:${ref}" ]]
 }
 
+# Build and install monero-lws from a shallow tagged clone. The cloned
+# HEAD must match the resolved tag commit, submodules are initialized,
+# and the build uses a Release cmake configuration. Executable binaries
+# named monero-lws* are installed into /usr/bin and the tag/commit pair
+# is recorded in LWS_STATE_FILE. The clone directory is assigned to
+# LWS_TMP for the run_update cleanup trap rather than given its own
+# trap, so the monerod restore logic is not replaced.
 install_or_update_lws() {
 	local lws_tag lws_ref lws_head lws_tmp lws_build
 
@@ -754,6 +829,11 @@ install_or_update_lws() {
 		"from ${lws_tag}"
 }
 
+# Main flow: resolve the latest tag, short-circuit when monerod already
+# matches it, otherwise download and verify the tarball, replace the
+# binaries, update configuration and the unit, and optionally set up
+# LWS. Verification uses a private, temporary GPG home so the system
+# keyring is not modified.
 run_update() {
 	log "Checking latest Monero CLI release" \
 		"from GitHub..."
@@ -773,6 +853,9 @@ run_update() {
 		log "Current monerod version line:" \
 			"${CURRENT_VERSION_RAW:-unknown}"
 
+		# The version line embeds the tag. Matching with a substring is
+		# the script's existing freshness test; without --install-lws
+		# the run ends here without touching config or services.
 		if [[ -n ${CURRENT_VERSION_RAW} &&
 			${CURRENT_VERSION_RAW} == *"${LATEST_TAG}"* ]]; then
 			log "Monero CLI already at latest" \
@@ -823,6 +906,9 @@ run_update() {
 	log "Tarball to download: ${TARBALL}"
 	log "Download URL: ${DOWNLOAD_URL}"
 
+	# From here on, the EXIT trap removes both temporary directories and
+	# any LWS source tree, and brings monerod back up if this run
+	# stopped it and it is not running at exit.
 	WORK_DIR="$(mktemp -d /tmp/monero-cli-XXXXXX)"
 	GPG_HOME="$(mktemp -d /tmp/monero-gpg-XXXXXX)"
 	cleanup() {
@@ -845,6 +931,9 @@ run_update() {
 		error "download failed from ${DOWNLOAD_URL}"
 	fi
 
+	# hashes.txt is clearsigned. Import binaryFate's key into the
+	# temporary GPG home, verify the signature, then decrypt to get the
+	# plain checksum list. Any failure aborts before extraction.
 	log "Fetching reference hashes for verification..."
 	HASHES_ASC="${WORK_DIR}/hashes.txt"
 	HASHES_PLAIN="${WORK_DIR}/hashes-plain.txt"
@@ -898,6 +987,8 @@ run_update() {
 			"${TARBALL} in downloaded hash list"
 	fi
 
+	# Compare the signed reference checksum with the downloaded archive
+	# before extracting or installing anything.
 	ACTUAL_HASH="$(sha256sum \
 		"${WORK_DIR}/${TARBALL}" | awk '{print $1}')"
 	if [[ ${EXPECTED_HASH} != "${ACTUAL_HASH}" ]]; then
@@ -920,6 +1011,9 @@ run_update() {
 
 	log "Extracted directory: ${EXTRACTED_DIR}"
 
+	# Stop the service before replacing binaries so the running process
+	# is not using files that are being overwritten. WAS_ACTIVE drives
+	# the later restart and the cleanup trap.
 	log "Stopping monerod service if it is running..."
 	WAS_ACTIVE=0
 	if systemctl is-active --quiet monerod; then
@@ -1023,6 +1117,8 @@ EOF
 		configure_monerod_conf
 	fi
 
+	# Download the upstream unit and rewrite its Debian-package paths
+	# (/usr/local/bin and /etc/monero) to the locations this script uses.
 	if [[ ${SKIP_SERVICE_AND_USER_SETUP} -eq 0 ]]; then
 		log "Updating systemd unit:" \
 			"/etc/systemd/system/monerod.service..."
@@ -1102,6 +1198,10 @@ EOF
 			"$(monerod --version 2>/dev/null | sed -n '1p' || true)"
 	fi
 
+	# Optional LWS integration: build/install first, then apply the ZMQ
+	# configuration, unit, privacy transports, firewall rules, and
+	# restarts. Skipping service setup leaves only the binaries and
+	# state file behind.
 	if [[ ${INSTALL_OR_UPDATE_LWS} -eq 1 ]]; then
 		install_or_update_lws
 		if [[ ${SKIP_SERVICE_AND_USER_SETUP} -eq 0 ]]; then

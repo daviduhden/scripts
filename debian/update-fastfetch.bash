@@ -8,6 +8,20 @@ set -euo pipefail
 # - Download .deb package from GitHub releases
 # - Install the .deb package via apt/apt-get
 #
+# Requirements: root privileges, network access, curl, awk, uname,
+# find, mktemp, and head, plus either apt-get or apt. gh and git are
+# optional; gh can also download the release asset when available.
+#
+# Side effects:
+#  - Downloads the release .deb into a temporary directory under /tmp
+#  - Installs it with apt-get/apt and removes the temporary directory
+#    on exit
+#
+# The archive is installed directly; the script does not verify a
+# checksum or signature. The asset name uses fastfetch's own
+# architecture names (for example aarch64), which are derived from
+# uname -m rather than dpkg.
+#
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
 
@@ -55,6 +69,10 @@ ensure_apt() {
 }
 
 # Get the latest version tag from GitHub releases
+# Resolve the latest tag through the first available source:
+# gh release view, git ls-remote tags, or the GitHub releases API.
+# Returns non-zero only when the API request fails and no earlier
+# source produced a tag.
 get_latest_release() {
 	local tag json
 
@@ -87,6 +105,9 @@ get_latest_release() {
 	awk -F'"' '/"tag_name":/ {print $4; exit}' <<<"$json"
 }
 
+# Map the kernel machine type to the architecture string used in the
+# upstream .deb asset name. The mapping is intentionally separate from
+# Debian architecture names and does not use dpkg.
 detect_pkg_arch() {
 	local arch
 	arch="$(uname -m)"
@@ -104,6 +125,9 @@ detect_pkg_arch() {
 	esac
 }
 
+# Try gh release download first, then fall back to the public release
+# URL with curl. gh writes the asset under its upstream name in
+# out_dir; the curl path writes to the exact out_file path.
 download_deb() {
 	local version="$1" arch="$2" out_dir="$3" out_file="$4" url
 
@@ -153,6 +177,8 @@ run_fastfetch_update() {
 	fi
 
 	PKG_ARCH="$(detect_pkg_arch)"
+	# The trap covers every later error path; no manual cleanup is
+	# needed after this point.
 	WORK_DIR="$(mktemp -d /tmp/fastfetch-XXXXXX)"
 	DEB_FILE="$WORK_DIR/fastfetch-linux-${PKG_ARCH}.deb"
 	trap 'rm -rf "$WORK_DIR" 2>/dev/null || true' EXIT
@@ -164,6 +190,8 @@ run_fastfetch_update() {
 			"${LATEST_VERSION} (${PKG_ARCH})"
 	fi
 
+	# gh may have saved the asset under the expected name; if not,
+	# accept the first fastfetch .deb it left in the work directory.
 	if [[ ! -f $DEB_FILE ]]; then
 		alt_file="$(find "$WORK_DIR" -maxdepth 1 \
 			-type f -name 'fastfetch-linux-*.deb' |

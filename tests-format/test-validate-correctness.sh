@@ -20,6 +20,8 @@ set -u
 fail=0
 npass=0
 
+# Minimal assertion harness: pass/fail counters plus helpers that inspect the
+# validator's text report. No external test framework is required.
 pass() {
 	npass=$((npass + 1))
 }
@@ -42,6 +44,8 @@ assert_rc() {
 }
 
 # assert_error <file-substring> <output> <desc>
+# The oracle is the printed report: a line beginning with "ERROR " followed by
+# a matching path. This avoids depending on internal finding order.
 assert_error() {
 	match=$1
 	shift
@@ -69,6 +73,9 @@ assert_no_error() {
 	fi
 }
 
+# Locate the validator next to this test when invoked by a path. A bare name
+# falls back to the current directory. The test exits early rather than
+# silently skipping when the target is missing.
 VALIDATE=
 case "$0" in
 */*) VALIDATE=$(cd "$(dirname "$0")" && pwd)/validate-correctness.sh ;;
@@ -83,8 +90,11 @@ BASE=$(mktemp -d "${TMPDIR:-/tmp}/vcorr-test-XXXXXX") || {
 	printf '%s\n' "[ERROR] cannot create temp dir" >&2
 	exit 1
 }
+# All fixtures are generated below BASE and removed on every exit path.
 trap 'rm -rf "$BASE"' EXIT HUP INT TERM
 
+# Mirror the repository layout under T so report paths have the same
+# openbsd/, debian/, and tests-format/ prefixes the validator expects.
 T="$BASE/tree"
 mkdir -p "$T/openbsd" "$T/debian"
 
@@ -234,6 +244,9 @@ fi
 EOF
 
 # ---- Host-family fixture with a nonexistent command ----
+# This repeats the validator's own host detection on purpose: only the host
+# family is probed for command existence, so the fixture is created only when
+# a family was recognized.
 HOST_FAMILY=
 case "$(uname -s)" in
 OpenBSD) HOST_FAMILY=openbsd ;;
@@ -373,6 +386,8 @@ EOF
 assert_rc 0 $? "--strict with clean tree exits 0"
 
 # ---- JSON output is valid (with and without findings) ----
+# python3 is optional: without it the JSON syntax check is skipped rather than
+# failed. Both the nonempty and empty report paths are exercised.
 if command -v python3 >/dev/null 2>&1; then
 	out=$("$VALIDATE" --target all --format json "$T" 2>/dev/null)
 	if printf '%s' "$out" | python3 -c \

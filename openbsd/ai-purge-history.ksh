@@ -11,14 +11,25 @@ set -eu
 #
 # Set SWIVAL_PROJECT_HOME to select the project whose .swival state is purged.
 #
+# Run this as the user whose history should be removed. It needs write access
+# to the configured paths, not root; the defaults are under that user's home
+# and the current project directory.
+#
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
 
+# Tool data directories. Each can be overridden from the environment;
+# the defaults follow the tools' own conventions. Crush honors XDG_DATA_HOME
+# and falls back to ~/.local/share, while Swival state is tied to the current
+# project directory unless SWIVAL_PROJECT_HOME points elsewhere.
 CODEX_HOME=${CODEX_HOME:-"$HOME/.codex"}
 COPILOT_HOME=${COPILOT_HOME:-"$HOME/.copilot"}
 CRUSH_DATA_HOME=${CRUSH_GLOBAL_DATA:-"${XDG_DATA_HOME:-$HOME/.local/share}/crush"}
 SWIVAL_PROJECT_HOME=${SWIVAL_PROJECT_HOME:-"$PWD"}
 
+# Normalize DRY_RUN from the environment. Any value other than one of the
+# truthy spellings below means a real purge, and the --dry-run option can
+# still enable it later.
 typeset DRY_RUN
 DRY_RUN="${DRY_RUN:-0}"
 case "$DRY_RUN" in
@@ -26,6 +37,8 @@ case "$DRY_RUN" in
 *) DRY_RUN=0 ;;
 esac
 
+# Help text. ksh's print builtin is used throughout this tree instead of
+# echo because its escape and option handling is predictable.
 usage() {
 	print "Usage: ai-purge-history.ksh [--dry-run|-n] [--help]"
 	print ""
@@ -37,6 +50,8 @@ usage() {
 	print "  --help, -h     Show this help"
 }
 
+# Parse options before anything is deleted. Unknown options print the usage
+# text to stderr and exit with status 2.
 while [ "$#" -gt 0 ]; do
 	case "$1" in
 	--dry-run | -n) DRY_RUN=1 ;;
@@ -53,6 +68,13 @@ while [ "$#" -gt 0 ]; do
 	shift
 done
 
+# Delete every path given as an argument. Missing paths are not an error
+# because each tool creates only the files it uses.
+#
+# In dry-run mode, test -e as well as -L so dangling symlinks are reported.
+# A real run uses rm -rf, which removes symlinks themselves rather than
+# following them, and the leading -- stops a path starting with "-" from
+# being read as an option.
 remove_paths() {
 	typeset path
 
@@ -67,9 +89,14 @@ remove_paths() {
 	done
 }
 
+# Codex and Copilot: remove session state and logs only. Configuration,
+# credentials, and other files in those home directories are left intact.
 remove_paths "$CODEX_HOME/sessions" "$CODEX_HOME/archived_sessions"
 remove_paths "$COPILOT_HOME/session-state" "$COPILOT_HOME/logs"
+# Crush keeps all of its state in a single data directory.
 remove_paths "$CRUSH_DATA_HOME"
+# Swival stores history and state inside the selected project. Remove the
+# listed files only; the rest of .swival and the project are preserved.
 remove_paths \
 	"$SWIVAL_PROJECT_HOME/.swival/HISTORY.md" \
 	"$SWIVAL_PROJECT_HOME/.swival/HISTORY.md.lock" \

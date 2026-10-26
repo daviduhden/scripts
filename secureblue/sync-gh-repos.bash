@@ -1,17 +1,23 @@
 #!/bin/bash
 set -euo pipefail
 
-# GitHub repository sync script
-# Sync or clone all repositories for a GitHub user
-# into a local base directory.
-# - Uses GitHub CLI for authenticated API access
-# - If a repo directory exists, renames it, fresh-clones
-#   via SSH, keeps only .git and .github from the clone,
-#   then copies the previous working tree over
-# - Otherwise, clones the repo via SSH
-# - Configurable via OWNER and BASE_DIR environment variables
-# - If BASE_DIR is not set, questions interactively
-#   (unless --non-interactive)
+# GitHub repository sync helper.
+#
+# Clones every repository returned for OWNER into BASE_DIR, or refreshes
+# existing checkouts, using gh for authenticated API access and SSH URLs for
+# cloning. Requires an authenticated gh session and SSH access to GitHub.
+#
+# Existing repository directories are not updated in place. Each one is
+# renamed to a timestamped backup, a fresh clone is made, and then the old
+# working tree is copied over the new Git metadata (only .git is excluded).
+# As a result, uncommitted and untracked local files survive, but history and
+# remotes are reset to the fresh clone, and the working tree becomes the old
+# tree plus any fresh .github files. The backup is deleted after a successful
+# copy; an ERR trap restores it if cloning or checkout fails.
+#
+# BASE_DIR must already exist and is not created here. It defaults to
+# ${HOME}/git, prompting first when stdin is a terminal unless
+# --non-interactive is given. No elevation is used.
 #
 # Environment variables:
 #   OWNER     GitHub username to sync (default: daviduhden)
@@ -59,6 +65,7 @@ make_backup_dir() {
 	printf '%s\n' "$candidate"
 }
 
+# Reduce a fresh clone to its Git metadata and repository automation files.
 remove_all_except_git_and_github() {
 	local dir="$1"
 	find "$dir" -mindepth 1 -maxdepth 1 \
@@ -71,10 +78,10 @@ copy_from_backup_excluding_git() {
 	local backup_dir="$1"
 	local target_dir="$2"
 
-	# Copy everything (including dotfiles) except .git
-	# from backup into target. Using tar keeps
-	# permissions reasonably intact and avoids
-	# requiring rsync.
+	# Copy everything (including dotfiles) except .git from backup into the
+	# target. Using tar keeps permissions reasonably intact and avoids
+	# requiring rsync. Only .git is excluded, so a backup .github directory
+	# overlays the fresh clone's copy rather than replacing it wholesale.
 	tar --exclude='./.git' -C "$backup_dir" -cf - . |
 		tar -C "$target_dir" -xf -
 }
@@ -139,6 +146,9 @@ parse_args() {
 	fi
 }
 
+# An explicitly set BASE_DIR wins even if empty (which then fails the directory
+# check). Otherwise prompt only for an interactive terminal, and fall back to
+# the default when input is unavailable.
 resolve_base_dir() {
 	if [ -z "${BASE_DIR+x}" ]; then
 		if [ $NON_INTERACTIVE -eq 0 ] && [ -t 0 ]; then
@@ -170,6 +180,9 @@ check_prereqs() {
 	fi
 }
 
+# Sync one repository. The backup/restore dance is deliberately local to this
+# function: the ERR trap is installed only when an existing directory was
+# moved aside and is cleared once the sync completes.
 sync_single_repo() {
 	local name="$1"
 	local ssh_url="$2"
@@ -252,6 +265,8 @@ sync_single_repo() {
 
 sync_repositories() {
 	log "Listing repositories for $OWNER"
+	# --paginate walks every API page; jq emits one tab-separated record per
+	# repository so the while loop does not need to parse JSON.
 	while IFS=$'\t' read -r name ssh_url default_branch; do
 		[ -n "$name" ] || continue
 		sync_single_repo "$name" "$ssh_url" "$default_branch"

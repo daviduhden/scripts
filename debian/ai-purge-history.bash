@@ -9,7 +9,15 @@ set -euo pipefail
 # - Keeps configuration files and credentials intact.
 # - Supports --dry-run/-n or DRY_RUN=1 to preview without deleting.
 #
-# Set SWIVAL_PROJECT_HOME to select the project whose .swival state is purged.
+# Run this as the user whose data should be removed; it does not
+# require root and does not elevate. Deletion is permanent: there is
+# no prompt, backup, or trash step.
+#
+# The history locations can be overridden with CODEX_HOME,
+# COPILOT_HOME, OPENCODE_STATE_HOME, OPENCODE_DATA_HOME, and
+# CRUSH_GLOBAL_DATA, plus the standard XDG variables. Set
+# SWIVAL_PROJECT_HOME to select the project whose .swival state is
+# purged; it defaults to the current working directory.
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
@@ -21,6 +29,8 @@ OPENCODE_DATA_HOME=${OPENCODE_DATA_HOME:-"${XDG_DATA_HOME:-$HOME/.local/share}/o
 CRUSH_DATA_HOME=${CRUSH_GLOBAL_DATA:-"${XDG_DATA_HOME:-$HOME/.local/share}/crush"}
 SWIVAL_PROJECT_HOME=${SWIVAL_PROJECT_HOME:-"$PWD"}
 
+# Accept common true-ish values from the environment; anything else
+# means a real run. The --dry-run flag sets this later.
 DRY_RUN="${DRY_RUN:-0}"
 case "$DRY_RUN" in
 1 | true | TRUE | yes | YES | on | ON) DRY_RUN=1 ;;
@@ -55,6 +65,9 @@ while [ "$#" -gt 0 ]; do
 	shift
 done
 
+# Remove each path, or print it in dry-run mode. Missing paths are
+# ignored (rm -rf does not fail on them). In dry-run mode, only paths
+# that currently exist are listed.
 remove_paths() {
 	local path
 
@@ -69,6 +82,8 @@ remove_paths() {
 	done
 }
 
+# Only session/state paths are listed here; configuration files and
+# credentials in the same home directories are intentionally omitted.
 remove_paths "$CODEX_HOME/sessions" "$CODEX_HOME/archived_sessions"
 remove_paths "$COPILOT_HOME/session-state" "$COPILOT_HOME/logs"
 remove_paths \

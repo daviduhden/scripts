@@ -27,13 +27,19 @@ set -eu
 ###################
 # PATH and logging #
 ###################
+# Reset PATH for a root-run installer that may be started from cron or a
+# minimal shell. /usr/local entries cover curl, git-lfs, and installed ports.
 PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin
 export PATH
 
+# Timestamped messages via ksh's print builtin; warnings and errors go to
+# stderr.
 log() { print "$(date '+%Y-%m-%d %H:%M:%S') [INFO] $*"; }
 warn() { print "$(date '+%Y-%m-%d %H:%M:%S') [WARN] $*" >&2; }
 error() { print "$(date '+%Y-%m-%d %H:%M:%S') [ERROR] $*" >&2; }
 
+# Print usage to stderr and exit 2. This runs before root is checked, so a
+# malformed invocation reports the correct problem.
 usage() {
 	print "Usage: $0 [USER]" >&2
 	print "  USER  user to configure for DeepSeek (default: root)" >&2
@@ -43,6 +49,8 @@ usage() {
 #####################
 # Common helpers    #
 #####################
+# Installing under /usr/local, backing up the old binary, and writing into a
+# user's home all require root.
 check_root() {
 	if [ "$(id -u)" -ne 0 ]; then
 		error "This script must be run as root."
@@ -50,6 +58,8 @@ check_root() {
 	fi
 }
 
+# Download a URL to a file. curl is preferred when installed; otherwise use
+# ftp(1), the HTTP client included in the OpenBSD base system.
 fetch_url() {
 	typeset url="$1" out="$2"
 	if command -v curl >/dev/null 2>&1; then
@@ -62,6 +72,8 @@ fetch_url() {
 	fi
 }
 
+# Translate uname -m values into the architecture names used in the release
+# asset filenames.
 map_arch() {
 	# Asset names verified against the charmbracelet/crush
 	# GitHub releases: crush_<ver>_Openbsd_armv7.tar.gz,
@@ -76,6 +88,8 @@ map_arch() {
 	esac
 }
 
+# Read the target user's home directory from /etc/passwd. This avoids a
+# dependency on getent(1), which is not part of the OpenBSD base system.
 resolve_home() {
 	typeset user="$1"
 	awk -F: -v u="$user" '$1 == u { print $6; exit }' /etc/passwd
@@ -84,6 +98,10 @@ resolve_home() {
 ###################
 # DeepSeek config #
 ###################
+# Write the DeepSeek provider and model block into CRUSH_USER's crushrc. Marker
+# comments delimit the managed section, so an existing file can be rewritten
+# without disturbing other providers or models. The API key is referenced from
+# the environment at startup, never stored here, and the file stays mode 0600.
 configure_deepseek() {
 	typeset user_home crushrc_dir crushrc
 
@@ -192,6 +210,7 @@ CRUSHRC_EOF
 
 	chown -R "$CRUSH_USER" "$crushrc_dir" ||
 		warn "chown failed for $crushrc_dir"
+	# Mode 0600 keeps the user's provider configuration private.
 	chmod 0600 "$crushrc"
 
 	log "DeepSeek provider configured in $crushrc"
@@ -204,6 +223,9 @@ CRUSHRC_EOF
 ##############################
 # Download, verify, install  #
 ##############################
+# Resolve the release asset for the running architecture, verify its SHA-256
+# digest against the release's checksums.txt, then install the binary, man
+# page, and license under /usr/local. An existing binary is backed up first.
 install_crush() {
 	typeset arch asset url checksum expected_checksum
 	typeset extracted release_base
@@ -254,6 +276,8 @@ install_crush() {
 	}
 
 	if [ -x "$BINDIR/crush" ]; then
+		# Keep a timestamped copy of the previous binary. A failed backup
+		# only warns; it does not block the install.
 		backup="$BINDIR/crush.bak.$(date +%Y%m%d%H%M%S)"
 		if cp -p "$BINDIR/crush" "$backup"; then
 			log "Previous crush binary saved to $backup"
@@ -283,6 +307,9 @@ install_crush() {
 	return 0
 }
 
+# Print the installed semantic version, if one can be parsed. A missing
+# binary or output without a version yields nothing; the caller treats that
+# as "not installed".
 installed_version() {
 	[ -x "$BINDIR/crush" ] || return 0
 	"$BINDIR/crush" --version 2>/dev/null |
@@ -292,12 +319,15 @@ installed_version() {
 ###################
 # Main            #
 ###################
+# Install destinations follow the OpenBSD ports layout under /usr/local.
 BINDIR=/usr/local/bin
 MANDIR=/usr/local/man/man1
 DOCDIR=/usr/local/share/doc/crush
 
 CRUSH_USER=${1:-root}
 
+# This script has no options, so an argument starting with "-" is a usage
+# error rather than a user name.
 if [ "${CRUSH_USER#-}" != "$CRUSH_USER" ]; then
 	usage
 fi
@@ -309,12 +339,15 @@ if [ "$(uname -s)" != "OpenBSD" ]; then
 	exit 1
 fi
 
+# Work in a private temporary directory and remove it on exit or signal.
 tmpdir=$(mktemp -d /tmp/crush-update.XXXXXX) || {
 	error "Cannot create temporary directory."
 	exit 1
 }
 trap 'rm -rf "$tmpdir"' EXIT INT TERM
 
+# Ask the GitHub API for the latest release and read the tag name from the
+# JSON. Network access and a CA bundle are required for this request.
 log "Fetching latest crush release info..."
 fetch_url \
 	"https://api.github.com/repos/charmbracelet/crush/releases/latest" \
@@ -323,6 +356,8 @@ fetch_url \
 	exit 1
 }
 
+# Read the tag_name field from the latest-release JSON; strip the optional
+# "v" prefix to get the version used in asset names and comparisons.
 CRUSH_VERSION=$(sed -n -E \
 	's/.*"tag_name"[[:space:]]*:[[:space:]]*"v?([^"]+)".*/\1/p' \
 	"$tmpdir/release.json" | head -n 1)
@@ -333,6 +368,8 @@ CRUSH_VERSION=$(sed -n -E \
 
 current_version=$(installed_version || true)
 
+# Install when crush is absent, update when the version differs, and honor
+# CRUSH_FORCE=1 when the same version should be reinstalled.
 if [ -z "$current_version" ]; then
 	log "crush is not installed; installing $CRUSH_VERSION..."
 	install_crush || exit 1
@@ -347,6 +384,8 @@ else
 	log "crush $CRUSH_VERSION is already up to date."
 fi
 
+# Refresh the managed DeepSeek block even when the binary is already current,
+# so crushrc stays in sync with this script.
 configure_deepseek || exit 1
 
 log "Done. Run 'crush' as $CRUSH_USER to start using" \

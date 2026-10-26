@@ -17,13 +17,19 @@ set -eu
 # and license details.
 
 # Basic PATH
+# Reset PATH because an upgrade may run from cron or a minimal environment;
+# the generated first-boot script inherits its own PATH from rc(8).
 PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin
 export PATH
 
+# Timestamped messages via ksh's print builtin. This script runs under
+# /bin/ksh and does not use Bash features.
 log() { print "$(date '+%Y-%m-%d %H:%M:%S') [INFO] $*"; }
 warn() { print "$(date '+%Y-%m-%d %H:%M:%S') [WARN] $*" >&2; }
 error() { print "$(date '+%Y-%m-%d %H:%M:%S') [ERROR] $*" >&2; }
 
+# Clear leftovers from an interrupted run. /upgrade.site is regenerated
+# below; stale info dumps in /tmp would otherwise accumulate across runs.
 cleanup_previous_artifacts() {
 	if [ -f /upgrade.site ]; then
 		rm -f /upgrade.site
@@ -33,6 +39,9 @@ cleanup_previous_artifacts() {
 	fi
 }
 
+# Write the site-specific script that sysupgrade(8) executes at the end of
+# the upgrade. The heredoc is quoted, so variable references and command
+# substitutions inside it are evaluated when /upgrade.site runs, not now.
 write_upgrade_site() {
 	cat <<'EOF' >/upgrade.site
 #!/bin/ksh
@@ -349,11 +358,18 @@ main "$@"
 EOF
 }
 
+# -s upgrades to the snapshot branch and -f forces a snapshot upgrade that
+# was already applied. sysupgrade downloads and verifies the sets, then
+# reboots by default to run the one-shot upgrade.
 run_sysupgrade() {
 	log "Running sysupgrade -sf..."
 	/usr/sbin/sysupgrade -sf
 }
 
+# Build /upgrade.site before starting the upgrade; it is only honored when
+# executable. /upgrade.site runs at the end of the upgrade in the new system
+# and appends the first-boot tasks to /etc/rc.firsttime, which rc(8) runs on
+# the next boot.
 main() {
 	log "Preparing /upgrade.site for post-upgrade tasks..."
 	cleanup_previous_artifacts

@@ -125,6 +125,7 @@ if not exist "%REPO%windows\test-format\psfmt.ps1" (
     echo [ERROR] missing formatter: windows\test-format\psfmt.ps1
     exit /b 2
 )
+rem psfmt lives under test-format but is installed like a top-level script.
 call :collect_ps_program "psfmt.ps1"
 if "%INSTALL_FAIL%"=="1" (
     echo [ERROR] invalid PowerShell script name; cannot continue.
@@ -278,6 +279,9 @@ echo   --install-dir PATH   Install to PATH instead of the per-user default.
 echo   --help               Show this help.
 exit /b 0
 
+rem Ask Windows PowerShell for the OS version without changing anything. The
+rem result is read from a temporary file; if the probe fails, WINVER stays
+rem "unknown" and the platform check rejects the host.
 :detect_windows
 set "WIN_OK=0"
 set "WINVER=unknown"
@@ -291,6 +295,7 @@ for /f "tokens=1 delims=." %%A in ("%WINVER%") do set "WINMAJOR=%%A"
 if "%WINMAJOR%"=="10" set "WIN_OK=1"
 exit /b 0
 
+rem Warn, but do not refuse, when the install root needs administrator rights.
 :warn_if_system_dir
 echo "%~1" | find /i "%SystemRoot%" >nul
 if not errorlevel 1 echo [WARN] %SystemRoot% needs administrator rights; prefer the default per-user path.
@@ -298,6 +303,9 @@ echo "%~1" | find /i "Program Files" >nul
 if not errorlevel 1 echo [WARN] Program Files needs administrator rights; prefer the default per-user path.
 exit /b 0
 
+rem Validate one perl\programs.txt line. Entries are bare .pl names; blank lines
+rem and lines starting with # are ignored, and invalid entries set MANIFEST_BAD
+rem for the caller to report after the loop.
 :collect_program
 set "NAME=%~1"
 if "%NAME%"=="" exit /b 0
@@ -326,6 +334,9 @@ if not "%CHK%"=="%NAME%" set "MANIFEST_BAD=1"
 set "PROGRAMS=%PROGRAMS% %NAME%"
 exit /b 0
 
+rem Add one discovered PowerShell script. Names must end in .ps1 and must not
+rem contain spaces or the shell characters checked here, because the installed
+rem launcher name is derived from the script name. Failures set INSTALL_FAIL.
 :collect_ps_program
 set "NAME=%~1"
 if "%NAME%"=="" exit /b 0
@@ -351,6 +362,7 @@ if not "%CHK%"=="%NAME%" set "INSTALL_FAIL=1"
 set "PS_PROGRAMS=%PS_PROGRAMS% %NAME%"
 exit /b 0
 
+rem Accept a candidate only when it runs with every required core module.
 :try_perl
 set "CAND=%~1"
 if not exist "%CAND%" exit /b 0
@@ -358,6 +370,8 @@ if not exist "%CAND%" exit /b 0
 if not errorlevel 1 set "PERL_EXE=%CAND%"
 exit /b 0
 
+rem Search PATH, common Strawberry Perl locations, then the persistent registry
+rem PATH in case this process environment is stale.
 :find_perl
 set "PERL_EXE="
 for /f "delims=" %%P in ('where perl 2^>nul') do call :try_perl "%%P"
@@ -375,6 +389,8 @@ for /f "delims=" %%P in ('where perl 2^>nul') do call :try_perl "%%P"
 if defined SAVED_PATH set "PATH=%SAVED_PATH%"
 exit /b 0
 
+rem Read the machine and user PATH through Windows PowerShell. The value is
+rem loaded into REGPATH only and is not written back.
 :load_registry_path
 set "REGPATH="
 set "RTMP=%TEMP%\nf_regpath_%RANDOM%%RANDOM%.txt"
@@ -385,6 +401,9 @@ if exist "%RTMP%" (
 )
 exit /b 0
 
+rem Install Strawberry Perl with winget only after no existing Perl passed the
+rem module check. A nonzero winget status is a warning because Perl may still
+rem have become available, so find_perl is retried.
 :install_perl
 echo [INFO] No suitable Perl found; a Windows Perl distribution is required.
 where winget >nul 2>&1
@@ -402,6 +421,9 @@ call :find_perl
 if defined PERL_EXE echo [INFO] Perl available at: %PERL_EXE%
 exit /b 0
 
+rem Copy one program (or psfmt.ps1) and create its launcher. Launcher names must
+rem be unique across Perl and PowerShell programs. Every installed file is added
+rem to installed-files.txt for the next upgrade's obsolete-file cleanup.
 :install_one
 set "NAME=%~1"
 set "LNAME=%~n1"
@@ -431,11 +453,16 @@ if errorlevel 1 (
 >> "%INSTALL_DIR%\installed-files.txt" echo bin\%LNAME%.cmd
 exit /b 0
 
+rem Walk the previous installed-files.txt and delete entries that this version no
+rem longer installs.
 :cleanup_obsolete
 set "OLD=%~1"
 for /f "usebackq tokens=1 delims=" %%E in ("%OLD%") do call :maybe_remove "%%E"
 exit /b 0
 
+rem Keep manifest files and any current program or launcher. Only direct children
+rem of bin\, perl\, and windows\ are candidates, and a bin\ file is removed only
+rem when it carries a known launcher marker.
 :maybe_remove
 set "ENTRY=%~1"
 if "%ENTRY%"=="" exit /b 0
@@ -468,6 +495,10 @@ del /f /q "%TARGET%" >nul 2>&1
 if not exist "%TARGET%" echo [INFO] Removed obsolete: %ENTRY%
 exit /b 0
 
+rem Add INSTALL_DIR\bin to HKCU\Environment\Path only, appending when absent and
+rem changing nothing when present. The inline PowerShell preserves the value
+rem kind, ignores empty entries, and compares existing entries after expansion
+rem so environment-variable forms are recognized. The system PATH is never touched.
 :update_user_path
 set "NF_BIN=%INSTALL_DIR%\bin"
 set "PSOUT=%TEMP%\nf_path_%RANDOM%%RANDOM%.txt"
@@ -482,12 +513,15 @@ if /i "%PATH_RESULT%"=="present" echo [INFO] User PATH already contains: %NF_BIN
 if /i not "%PATH_RESULT%"=="added" if /i not "%PATH_RESULT%"=="present" echo [WARN] Could not update the user PATH automatically.
 exit /b 0
 
+rem Verify every installed program, plus the normalize-files launcher's argument
+rem forwarding and exit status.
 :verify_all
 call :verify_launcher "normalize-files"
 for %%N in (%PROGRAMS%) do call :verify_script "%%N"
 for %%N in (%PS_PROGRAMS%) do call :verify_ps_script "%%N"
 exit /b 0
 
+rem Parse the installed PowerShell script without executing it.
 :verify_ps_script
 set "PS_SCRIPT=%INSTALL_DIR%\windows\%~1"
 powershell -NoProfile -Command "$tokens=$null; $errors=$null; $null=[System.Management.Automation.Language.Parser]::ParseFile($env:PS_SCRIPT,[ref]$tokens,[ref]$errors); if($errors.Count){$errors | Out-String | Write-Host; exit 1}" >nul 2>&1
@@ -499,6 +533,8 @@ if errorlevel 1 (
 )
 exit /b 0
 
+rem Compile-check the installed Perl program with the interpreter selected by
+rem this run.
 :verify_script
 set "NAME=%~1"
 "%PERL_EXE%" -c "%INSTALL_DIR%\perl\%NAME%" >nul 2>&1
@@ -510,6 +546,9 @@ if errorlevel 1 (
 )
 exit /b 0
 
+rem Exercise the normalize-files launcher: --version and --help must succeed, an
+rem unknown option must return 3, and --dry-run on a temporary directory with a
+rem sample file must return 1. All output goes to a temporary file.
 :verify_launcher
 set "LNAME=%~1"
 set "LAUNCHER=%INSTALL_DIR%\bin\%LNAME%.cmd"

@@ -11,6 +11,28 @@ set -euo pipefail
 # - Ensures "xd" system user/group and working directory exist
 # - Installs/upgrades official xd.service systemd unit
 #
+# Requirements: root privileges, network access, git, curl, install,
+# getent, make, and Go. useradd, groupadd, and systemctl are required
+# unless --skip-service-and-user-setup is used. Go is not installed by
+# this script.
+#
+# Side effects:
+#  - Clones or updates the source under $HOME/.local/src/XD and checks
+#    out the latest tag
+#  - Builds with make and installs through make install PREFIX=/usr,
+#    placing the binary in /usr/bin to match the upstream unit
+#  - Creates the xd system user/group and /var/lib/XD
+#  - Stops a running xd before building and restores it on exit if the
+#    run stopped it
+#  - Replaces /etc/systemd/system/xd.service, reloads systemd, enables
+#    xd, and restarts it when it was active before
+#
+# The unit file is downloaded from the upstream master branch and is
+# not verified. With --skip-service-and-user-setup the build and
+# install still run, but user, unit, and systemd steps are omitted.
+# When the checkout is already at the latest tag, the build is skipped
+# and service setup still runs.
+#
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
 
@@ -103,6 +125,9 @@ ensure_go() {
 	log "Go version: $(go version)"
 }
 
+# Clone on first use, fetch tags, and compare HEAD with the newest tag.
+# The newest tag is the one attached to the most recent tagged commit.
+# Sets SKIP_BUILD when HEAD is exactly that tag.
 clone_or_update_repo() {
 	mkdir -p "$BUILD_DIR"
 	cd "$BUILD_DIR"
@@ -139,6 +164,8 @@ clone_or_update_repo() {
 	fi
 }
 
+# Build with LD_PRELOAD unset, then install under /usr. PREFIX=/usr is
+# deliberate: the upstream unit expects /usr/bin/XD.
 build_and_install_XD() {
 	log "Building XD..."
 	env -u LD_PRELOAD make
@@ -148,6 +175,9 @@ build_and_install_XD() {
 	log "XD installed successfully."
 }
 
+# Create the group and user only when missing, using system accounts.
+# The user has no login shell. The home directory is created if needed
+# and its ownership is normalized on every run.
 ensure_xd_user_group_and_home() {
 	log "Ensuring xd system group/user and working directory exist..."
 
@@ -187,6 +217,9 @@ restore_xd_if_needed() {
 }
 trap restore_xd_if_needed EXIT
 
+# Download the upstream unit, install it mode 0644, reload systemd,
+# and enable xd. The service is restarted only if it was active before
+# this run; otherwise the user is told how to start it.
 install_systemd_service() {
 	log "Updating systemd unit: $SYSTEMD_UNIT_FILE..."
 	install -d /etc/systemd/system
@@ -253,6 +286,9 @@ finalize_service_setup() {
 	fi
 }
 
+# Build order matters: prepare and stop the service before replacing
+# the binary, then build, then install or refresh the unit. If the
+# build is skipped, service setup still proceeds.
 run_update() {
 	ensure_go
 	clone_or_update_repo

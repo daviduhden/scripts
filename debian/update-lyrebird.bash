@@ -10,6 +10,20 @@ set -euo pipefail
 # - Builds the project using make
 # - Installs the resulting binary into /usr/local/bin
 #
+# Requirements: root privileges, network access, git, Go, and make. Go
+# is not installed by this script.
+#
+# Side effects:
+#  - Clones or updates the repository under $HOME/.local/src/lyrebird
+#  - Checks out the latest tag, or pulls the default branch when the
+#    repository has no tags
+#  - Builds with make and copies the binary to /usr/local/bin
+#
+# The build runs with LD_PRELOAD unset. Source authenticity relies on
+# the Git transport; there is no separate signature check. When HEAD is
+# already at the latest tag, the build and install steps are skipped
+# (the installed binary is not compared against the source).
+#
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
 
@@ -47,6 +61,10 @@ ensure_go() {
 	log "Go version: $(go version)"
 }
 
+# Clone on first use, fetch tags, and compare HEAD with the newest tag.
+# The newest tag is the one attached to the most recent commit in
+# rev-list --tags output, not necessarily the highest version string.
+# Sets SKIP_BUILD when HEAD is exactly that tag.
 clone_or_update_repo() {
 	mkdir -p "$BUILD_DIR"
 	cd "$BUILD_DIR"
@@ -84,6 +102,8 @@ clone_or_update_repo() {
 	fi
 }
 
+# Build with LD_PRELOAD unset and fail if the expected binary was not
+# produced.
 build_lyrebird() {
 	log "Building lyrebird..."
 	env -u LD_PRELOAD make build
@@ -92,6 +112,8 @@ build_lyrebird() {
 	fi
 }
 
+# Copy the built binary into /usr/local/bin. cp preserves the source
+# mode, and chmod +x makes the installed file executable explicitly.
 install_lyrebird() {
 	log "Installing lyrebird to /usr/local/bin..."
 	cp ./lyrebird /usr/local/bin/

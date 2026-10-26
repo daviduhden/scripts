@@ -9,6 +9,20 @@ set -euo pipefail
 # Upstream release tags are stale; this tracks the latest
 # master branch commit instead.
 #
+# Requirements: Debian 13, network access, dpkg, and either root or a
+# working sudo. Missing build dependencies (git, bmake, build-essential,
+# zlib1g-dev) are installed through apt.
+#
+# Side effects:
+#  - Clones or updates the source under
+#    $HOME/.local/src/openrsync-build
+#  - Runs configure and bmake, then installs under /usr/local
+#  - Skips the build when the source is unchanged and the installed
+#    binary already exists
+#
+# The build runs with LD_PRELOAD unset. Source authenticity relies on
+# the Git transport; there is no separate signature check.
+#
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
 
@@ -29,6 +43,8 @@ error() {
 
 have_cmd() { command -v "$1" >/dev/null 2>&1; }
 
+# Set ROOT_CMD to an empty string when already root, or to sudo when
+# available. Root is not mandatory, but installing under /usr/local is.
 require_sudo_or_root() {
 	if [ "${EUID:-$(id -u)}" -eq 0 ]; then
 		ROOT_CMD=""
@@ -85,6 +101,9 @@ get_latest_commit() {
 		awk '{print $1}'
 }
 
+# Clone if needed, fetch the latest master commit, and check it out.
+# SOURCE_CHANGED distinguishes an updated tree from one already at the
+# latest commit; LATEST_COMMIT is used for logging and the skip check.
 prepare_source() {
 	if [ ! -d "$BUILD_DIR/.git" ]; then
 		log "Cloning openrsync repository"
@@ -115,6 +134,9 @@ prepare_source() {
 	return 0
 }
 
+# Configure and build in the source tree, then install with bmake as
+# root. The configure and build steps run with LD_PRELOAD unset; only
+# the install step is elevated.
 build_and_install() {
 	cd "$BUILD_DIR"
 
@@ -140,6 +162,8 @@ verify_install() {
 	fi
 }
 
+# Build when the source changed or the binary is missing; otherwise
+# verify the existing installation and report that nothing was done.
 main() {
 	ensure_debian
 	require_sudo_or_root

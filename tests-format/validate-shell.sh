@@ -1,7 +1,10 @@
 #!/bin/sh
 set -eu
 
-# Save original stdout/stderr, create per-run log in TMPDIR and redirect
+# Announce the log path on descriptor 3, then redirect normal output to the
+# log. The trap removes the temporary failure and format lists on exit or
+# signal; the log itself is kept for inspection. The helper variables start
+# empty so the trap can safely test them before they are assigned.
 exec 3>&1 4>&2
 TMPDIR_BASE="${TMPDIR:-/tmp}"
 TMPLOG=$(mktemp "$TMPDIR_BASE/validate-shell-XXXXXX")
@@ -38,6 +41,8 @@ require_cmd() {
 
 run_validate_shell() {
 
+	# One optional ROOT_DIR. Reject option-looking paths and verify the
+	# directory before creating any temporary files.
 	ROOT_DIR=${1:-.}
 	[ "$#" -le 1 ] || usage
 	[ "${ROOT_DIR#-}" = "$ROOT_DIR" ] || usage
@@ -58,12 +63,18 @@ run_validate_shell() {
 
 	TMP_FAILS=$(mktemp "$TMPDIR_BASE/validate-shell-fails-XXXXXX")
 
+	# Findings are appended to a file rather than an in-memory counter because
+	# the find pipelines below run their loops in subshells; a variable update
+	# there would be lost when the subshell exits.
 	note_fail() { printf '%s\n' "$1" >>"$TMP_FAILS"; }
 
 	printf '%s\n' "[INFO] Formatting shell scripts with shfmt..."
 	if command -v shfmt >/dev/null 2>&1; then
 		UNFMT_SH=$(mktemp "$TMPDIR_BASE/unformatted-sh-XXXXXX")
 
+		# This pass only lists files that -l reports as unformatted. stdout is
+		# captured, stderr is discarded, and a nonzero status from shfmt does
+		# not abort the validation run.
 		find "$ROOT_DIR" \
 			\( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) \
 			-prune -o -type f \
@@ -78,6 +89,9 @@ run_validate_shell() {
 			printf '%s\n' "[INFO] shfmt will format the following files:"
 			sed -n '1,200p' "$UNFMT_SH" | sed 's/^/  - /'
 
+			# Rewrite in place with the same -s simplification mode used for
+			# detection. Both success and failure are recorded, so a run that
+			# changed files still exits nonzero and forces a diff review.
 			while IFS= read -r file; do
 				[ -n "$file" ] || continue
 				if shfmt -w -s "$file" 2>/dev/null; then
@@ -98,6 +112,9 @@ run_validate_shell() {
 
 	printf '%s\n' "[INFO] Running shell syntax checks..."
 
+	# Syntax checks are grouped by extension. A failing file is named on
+	# stderr (logged) and on stdout (captured by the trailing loop, which
+	# records it once in TMP_FAILS). -n parses without executing anything.
 	find "$ROOT_DIR" \
 		\( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) \
 		-prune -o -type f -name '*.sh' -print |
@@ -130,6 +147,8 @@ run_validate_shell() {
 	fi
 
 	KSH_CMD=""
+	# Prefer oksh on Linux because it is a portable ksh and often closer to
+	# OpenBSD's shell than a vendor ksh; otherwise accept any ksh.
 	if [ "$OS_NAME" = "Linux" ] &&
 		command -v oksh >/dev/null 2>&1; then
 		KSH_CMD="oksh"
@@ -165,6 +184,8 @@ run_validate_shell() {
 	if command -v checkbashisms >/dev/null 2>&1; then
 		CHECKBASHISMS=$(command -v checkbashisms)
 		printf '%s\n' "[INFO] Running checkbashisms on POSIX sh scripts..."
+		# checkbashisms is a Perl program. Run it through perl -T when perl is
+		# present so taint mode is enforced; otherwise rely on its shebang.
 		find "$ROOT_DIR" \
 			\( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) \
 			-prune -o -type f -name '*.sh' -print |
@@ -192,6 +213,8 @@ run_validate_shell() {
 
 	if command -v shellcheck >/dev/null 2>&1; then
 		printf '%s\n' "[INFO] Running shellcheck..."
+		# -x follows source/. directives so included files are analyzed too.
+		# ShellCheck's exit status is nonzero for any warning or error.
 		find "$ROOT_DIR" \
 			\( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) \
 			-prune -o -type f \
@@ -215,6 +238,9 @@ run_validate_shell() {
 		issues=$(sort -u "$TMP_FAILS" | wc -l | tr -d ' ')
 	fi
 
+	# Findings and rewrites exit 2; usage errors also exit 2, but usage exits
+	# before any checks run. Duplicate file names from different checks are
+	# collapsed by sort -u. Missing optional tools are skips, not findings.
 	if [ "${issues:-0}" -ne 0 ]; then
 		printf '%s\n' \
 			"[INFO] Completed with $issues issue(s)" \
