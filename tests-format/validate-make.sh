@@ -60,6 +60,26 @@ run_validate_make() {
 	# Pipelines run their loops in subshells; use a file to accumulate names.
 	note_fail() { printf '%s\n' "$1" >>"$TMP_FAILS"; }
 
+	is_bsd_makefile() {
+		# mbake and checkmake implement GNU make syntax. Do not feed them
+		# BSD-only directory variables or the custom suffix chains used by
+		# bmake; those files are checked by the native dry run below.
+		grep -Eq '\$\{\.(CURDIR|OBJDIR)\}|^[[:space:]]*\.(CURDIR|OBJDIR)[[:space:]]*=|^[[:space:]]*\.SUFFIXES:.*\.[[:alnum:]_-]+-[[:alnum:]_-]+' "$1"
+	}
+
+	is_makefile_wrapper() {
+		# checkmake does not follow includes, so linting a wrapper in isolation
+		# can only report missing targets that are defined by the included file.
+		awk '
+			NF && $1 !~ /^#/ {
+				lines++
+				if ($1 == "include") includes++
+				else if ($1 !~ /^\.(CURDIR|OBJDIR)=$/) invalid = 1
+			}
+			END { exit !(lines <= 3 && includes == 1 && !invalid) }
+		' "$1"
+	}
+
 	printf '%s\n' "[INFO] Formatting Makefiles with mbake..."
 	# mbake is unavailable on OpenBSD, and checkmake is skipped there as well.
 	if [ "$IS_OPENBSD" -eq 1 ]; then
@@ -77,6 +97,10 @@ run_validate_make() {
 			-print |
 			while IFS= read -r f; do
 				[ -n "$f" ] || continue
+				if [ "${f##*/}" != "GNUmakefile" ] && is_bsd_makefile "$f"; then
+					printf '%s\n' "[INFO] Skipping mbake for BSD makefile: $f" >&2
+					continue
+				fi
 				if ! mbake format --check "$f" >/dev/null 2>&1; then
 					printf "%s\n" "$f"
 				fi
@@ -120,6 +144,10 @@ run_validate_make() {
 			-print |
 			while IFS= read -r f; do
 				[ -n "$f" ] || continue
+				if is_bsd_makefile "$f" || is_makefile_wrapper "$f"; then
+					printf '%s\n' "[INFO] Skipping checkmake for unsupported makefile dialect: $f" >&2
+					continue
+				fi
 				if ! checkmake "$f" >/dev/null 2>&1; then
 					printf '%s\n' "[ERROR] checkmake found issues in: $f" 1>&2
 					note_fail "$f"
@@ -150,7 +178,17 @@ run_validate_make() {
 			while IFS= read -r f; do
 				[ -n "$f" ] || continue
 				make_dir=$(dirname "$f")
-				make_file=$(basename "$f")
+				make_file=${f##*/}
+				if [ "$make_file" = "GNUmakefile" ]; then
+					printf '%s\n' "[INFO] Skipping bmake for GNU makefile: $f" >&2
+					continue
+				fi
+				if [ "$make_file" = "Makefile" ] &&
+					grep -Eq '^[[:space:]]*include[[:space:]]+\$\{\.CURDIR\}/config\.mk' "$f" &&
+					[ ! -f "$make_dir/config.mk" ]; then
+					printf '%s\n' "[INFO] Skipping bmake until configure generates config.mk: $f" >&2
+					continue
+				fi
 				# bmake resolves relative paths against the
 				# invocation directory (GNU make does not chdir
 				# either), so run the dry-run from the Makefile's

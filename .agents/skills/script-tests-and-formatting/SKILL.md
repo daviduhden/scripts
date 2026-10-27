@@ -118,8 +118,12 @@ goal is to drive the tree to a clean audit, not for every routine run.
 
 Optional tools are discovered through `PATH`: `shfmt`, `shellcheck`,
 `checkbashisms`, `perltidy`, `perlcritic`, `mbake`, `checkmake`, `bmake`,
-`mandoc`. A missing tool is a skipped check, not a pass. `checkmake` findings
-are recorded as failures; `checkmake` and `mbake` are skipped on OpenBSD.
+`mandoc`. A missing tool is a skipped check, not a pass. `mbake` and
+`checkmake` are GNU make tools; `validate-make.sh` skips them for files using
+detected BSD make syntax and for include-only wrappers that they cannot lint
+in isolation. The BSD make dry run skips GNUmakefile wrappers and build
+Makefiles whose generated `config.mk` is absent. On OpenBSD, `mbake` and
+`checkmake` are skipped because they are not ported.
 
 ## Common problems
 

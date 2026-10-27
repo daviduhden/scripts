@@ -15,7 +15,7 @@ Command Prompt without a POSIX shell or Make.
 | [install-knfmt-linux.sh](install-knfmt-linux.sh) | Builds and installs knfmt on Linux with optional `[PREFIX]` (default `/usr/local`). |
 | [validate-agent-knowledge.py](validate-agent-knowledge.py) | Requires substantive agent/skills documentation changes alongside project changes; checks instruction structure and relative Markdown links. Accepts `--base REF` for pull request comparisons. Semantic relevance requires review. |
 | [validate-correctness.sh](validate-correctness.sh) | Audits shell semantics, command portability, unsafe operations, and platform assumptions. Supports target selection, strict checks, and text/JSON output. |
-| [validate-make.sh](validate-make.sh) | Checks Makefile syntax and formatting under `[ROOT_DIR]` with `mbake`, lints with `checkmake`, and runs a `bmake` dry run for BSD make compatibility. |
+| [validate-make.sh](validate-make.sh) | Checks GNU make formatting and lint where applicable, skips those GNU-only tools for detected BSD make syntax and include-only wrappers, and runs `bmake` dry runs for BSD makefiles. A build Makefile that requires an absent generated `config.mk` is reported as skipped until configuration exists. |
 | [validate-manpages.sh](validate-manpages.sh) | Runs `mandoc` lint on manual pages under `[ROOT_DIR]`, treating warnings as errors; skips when `mandoc` is absent. |
 | [validate-perl.sh](validate-perl.sh) | Checks Perl syntax and applies available Perl linting/formatting under `[ROOT_DIR]`. |
 | [validate-python.sh](validate-python.sh) | Formats Python files with Ruff, checks them with `ruff check`, then clears Ruff caches under `[ROOT_DIR]`; formatting changes are reported as validation issues. |
