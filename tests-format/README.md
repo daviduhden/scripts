@@ -13,7 +13,7 @@ Command Prompt without a POSIX shell or Make.
 | [fourmolu-all.sh](fourmolu-all.sh) | Formats Haskell `.hs`, `.hsig`, and `.hs-boot` files under `[ROOT_DIR]` using the bundled Fourmolu configuration. |
 | [fix-permissions.sh](fix-permissions.sh) | Classifies file contents and normalizes modes. `--check` is read-only; `--dry-run` previews and `--verbose` explains decisions. |
 | [install-knfmt-linux.sh](install-knfmt-linux.sh) | Builds and installs knfmt on Linux with optional `[PREFIX]` (default `/usr/local`). |
-| [validate-agent-knowledge.sh](validate-agent-knowledge.sh) | Requires substantive agent/skills documentation changes alongside project changes; checks instruction structure and relative Markdown links. Accepts `--base REF` for pull request comparisons. Semantic relevance requires review. |
+| [validate-agent-knowledge.py](validate-agent-knowledge.py) | Requires substantive agent/skills documentation changes alongside project changes; checks instruction structure and relative Markdown links. Accepts `--base REF` for pull request comparisons. Semantic relevance requires review. |
 | [validate-correctness.sh](validate-correctness.sh) | Audits shell semantics, command portability, unsafe operations, and platform assumptions. Supports target selection, strict checks, and text/JSON output. |
 | [validate-make.sh](validate-make.sh) | Checks Makefile syntax and formatting under `[ROOT_DIR]` with `mbake`, lints with `checkmake`, and runs a `bmake` dry run for BSD make compatibility. |
 | [validate-manpages.sh](validate-manpages.sh) | Runs `mandoc` lint on manual pages under `[ROOT_DIR]`, treating warnings as errors; skips when `mandoc` is absent. |
@@ -40,13 +40,16 @@ perl tests-format/test-normalize-files.pl
 including `validate-manpages.sh` (which skips when `mandoc` is absent); it does
 not run every script in this directory. See the root [README](../README.md) and
 [Makefile](../Makefile) for the exact sequence.
+The regression target also runs `tests/test_sync_website_filters.py`, which
+stages temporary trees through the Debian Bash and OpenBSD ksh synchronization
+filters without invoking deployment side effects.
 `make install-tests-format` installs the tools selected by the Makefile,
 removing `.sh` from shell command names.
 
 Run `make check-agent-knowledge` before completing repository changes. For CI,
-use `/bin/sh tests-format/validate-agent-knowledge.sh --base BASE_REF .` after
-fetching the target branch. No CI workflow is present in this repository; this
-standalone check can be added to a future pull request workflow. The check
+use `python3 scripts/validate-agent-knowledge.py --scope range --base BASE_REF --head HEAD` after
+fetching the target branch. The `.github/workflows/agent-knowledge-validation.yml` PR workflow runs this
+check against the pull request base and head revisions. The check
 requires a substantive, non-cosmetic change in an operational instruction file
 when project files change. It validates required section/frontmatter structure
 and relative Markdown links, but cannot decide whether the guidance is

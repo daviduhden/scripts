@@ -76,14 +76,22 @@ Important boundaries:
     optional tool with an OpenBSD port/package mapping; keep that file
     informational and verify package paths before recording them.
    - for agent instruction synchronization, use
-     `validate-agent-knowledge.sh`; `make test-validate` runs it against the
+     `validate-agent-knowledge.py`; `make test-validate` runs it against the
      current worktree, while `--base REF` supports pull request comparisons.
      No CI workflow is currently configured in this repository.
 5. To add a regression test:
-   - use POSIX `sh` or core-module Perl;
-   - create all fixtures under a `mktemp` tree and clean up with a trap;
+   - use POSIX `sh` or core-module Perl for portable shell/tool tests; use the
+     Python standard library when a filesystem harness needs to exercise both
+     platform-specific sync scripts without sourcing their deployment entry
+     points;
+   - keep fixtures in a `mktemp` tree with trap cleanup in shell tests, or use
+     `tempfile.TemporaryDirectory` in Python tests;
    - do not access the network, the user's home, or system configuration;
-   - add it to `test-regression` and the README table.
+   - add it to `test-regression` and document it in the relevant README.
+   - website sync filter coverage lives in
+     `tests/test_sync_website_filters.py`; it runs both the rsync and copy
+     staging paths, tests initial and existing destinations, and preserves a
+     temporary `.sync.lock` without touching a real document root.
 6. The permission policy is content-based: directories and scripts are 0755,
    data is 0644, Makefiles are 0755. Use `--check` to report and
    `--dry-run` to preview. Only `make fix-permissions` applies changes.
@@ -147,7 +155,7 @@ the repository. Add only knowledge that will help future work; omit
 execution-specific notes and cosmetic edits. Review affected specialized
 agent instructions for consistency and run
 `make check-agent-knowledge` (or
-`/bin/sh tests-format/validate-agent-knowledge.sh .`). The automated check
+`python3 scripts/validate-agent-knowledge.py --scope worktree .`). The automated check
 covers structure and resolvable local references; semantic relevance still
 requires review. Report the synchronization result in the final summary and
 do not claim completion if it was skipped or failed.

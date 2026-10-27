@@ -17,11 +17,12 @@ repository's scope, say so instead of inventing support.
 | --- | --- |
 | `debian/` | Bash helpers for Debian-based systems; several require Debian 13 or a supported derivative. |
 | `openbsd/` | OpenBSD base `ksh` helpers using native tools; not Bash. |
+| `debian/sync-website.bash`, `openbsd/sync-website.ksh` | Platform-specific staged website synchronization; public-tree filters are intentionally kept aligned. |
 | `perl/` | Portable Perl programs (5.10.1+, core modules). `programs.txt` is the public manifest shared by the POSIX and Windows installers. |
 | `secureblue/` | Bash helpers for SecureBlue's rpm-ostree environment, user services, and `run0`; `systemd/` holds user-unit templates. |
 | `shell/` | Bash helpers that are sourced interactively; they target Linux/SecureBlue and are not standalone programs. |
 | `windows/` | Batch installers/launchers and PowerShell utilities; Windows-only. `test-format/` contains `psfmt` and its tests. |
-| `tests-format/` | POSIX `sh` validators/formatters, Perl regression tests, Python Ruff validation, and the Windows batch validator. |
+| `tests-format/` | POSIX `sh` validators/formatters, Perl regression tests, Python agent-knowledge validation and Ruff validation, and the Windows batch validator. |
 | `Makefile` | POSIX-sh install and test entry points; recipes must remain BSD make compatible. |
 | `VERSION` | Installed version metadata (`1.0.0`). |
 
@@ -79,9 +80,9 @@ make install-tests-format
 
 `make test` runs `validate-python.sh` first, then `validate-shell.sh`,
 `validate-perl.sh`, `validate-make.sh`, `fix-permissions.sh --check`, `validate-correctness.sh
---target all`, `validate-agent-knowledge.sh`, `validate-manpages.sh` (skipped
-without `mandoc`), then the four regression tests. Windows checks are not
-part of it.
+--target all`, `validate-agent-knowledge.py`, `validate-manpages.sh` (skipped
+  without `mandoc`), then the regression tests, including temporary-tree tests
+  for both website synchronizers. Windows checks are not part of it.
 
 Read-only checks that do not apply formatting:
 
@@ -131,6 +132,16 @@ pwsh -NoProfile -File .\windows\test-format\tests\run-tests.ps1
   unless it was.
 - Before changing a script, read its platform README and check `git status`.
   Do not revert, reformat, or commit unrelated changes.
+- Website sync stages a full repository checkout outside the document root,
+  then filters known GitHub/agent documentation, VCS metadata, development
+  settings, tests, and caches before copying. Both implementations also remove
+  only those known stale internal paths from the existing document root;
+  preserve the active `.sync.lock`, public content, and linked maintenance
+  scripts. Keep the exclusion lists equivalent across Debian and OpenBSD, and
+  validate both initial and update paths against temporary trees only.
+  `tests/test_sync_website_filters.py` exercises rsync and copy fallback paths
+  when their tools are available, verifies stale-file cleanup and lock
+  preservation, and never sources the full deployment scripts.
 - Do not commit, push, or tag unless asked. Change `VERSION` only for an
   intentional release.
 
@@ -156,7 +167,7 @@ A code change without the corresponding agent knowledge maintenance is considere
 
 Never claim completion when the synchronization step has been skipped or has failed.
 
-This review is required after every change to code, configuration, dependencies, features, bug fixes, refactors, tests, workflows, documentation, or repository architecture. At task end, inspect the root and nested `AGENTS.md`, `.github/agents/*.agent.md`, `.agents/skills/**/SKILL.md`, `.github/skills/**/SKILL.md`, `.claude/skills/**/SKILL.md`, and any tool-specific instruction files present (including Cursor and Copilot files). The current repository has one root `AGENTS.md` and five skills under `.agents/skills/`; no specialized agent definitions or CI workflows exist.
+This review is required after every change to code, configuration, dependencies, features, bug fixes, refactors, tests, workflows, documentation, or repository architecture. At task end, inspect the root and nested `AGENTS.md`, `.github/agents/*.agent.md`, `.agents/skills/**/SKILL.md`, `.github/skills/**/SKILL.md`, `.claude/skills/**/SKILL.md`, and any tool-specific instruction files present (including Cursor and Copilot files). The current repository has one root `AGENTS.md`, five skills under `.agents/skills/`, and a PR workflow at `.github/workflows/agent-knowledge-validation.yml`; no specialized agent definitions exist.
 
 Map changed paths to the instructions whose scope covers them, then read the applicable skill(s) and their linked references. Update an existing skill when its procedures, tools, assumptions, validation, or reusable knowledge change. Create a skill only when a durable responsibility has no suitable existing skill. Update specialized agent instructions when their workflow or responsibility changes. Remove obsolete or conflicting guidance and verify that changed local references still resolve. Do not add cosmetic edits, timestamps, or task-specific notes solely to satisfy this rule.
 
@@ -164,7 +175,7 @@ Before declaring a task complete:
 
 1. Make a relevant, substantive update to at least one agent instruction or skill for every project change. If no reusable change is warranted, record the reason in the relevant operational documentation; do not silently omit synchronization.
 2. Check changed guidance against the implementation, examples, commands, paths, validation behavior, and cross-references.
-3. Run `make check-agent-knowledge` (or `/bin/sh tests-format/validate-agent-knowledge.sh .`) and the checks appropriate to the changed code. The automated check verifies structural conditions and local references; semantic relevance still requires agent review.
+3. Run `make check-agent-knowledge` (or `python3 scripts/validate-agent-knowledge.py --scope worktree`) and the checks appropriate to the changed code. The automated check verifies structural conditions and local references; semantic relevance still requires agent review.
 4. If synchronization or validation cannot be completed, state the exact limitation and mark the task incomplete. Do not claim completion.
 
 This applies to edits to AGENTS.md, skills, agent definitions, and these rules as well. Perform one complete synchronization review at task end; rerun the check only after correcting a detected failure.
@@ -182,3 +193,24 @@ This applies to edits to AGENTS.md, skills, agent definitions, and these rules a
 - [ ] Final synchronization status reported.
 
 Final reports must include an **Agent & Skills Synchronization** section with agents and skills reviewed, instruction files updated, knowledge incorporated or corrected, validations actually run, and final status `PASS` or `FAIL`.
+
+### Shared Agent Knowledge Validation Contract
+
+Use `python3 scripts/validate-agent-knowledge.py --scope worktree` for local
+changes and `python3 -m unittest discover -s tests/agent_knowledge_validator -v`
+for its contract tests. The validator requires Python 3.11+ and Git, uses only
+the Python standard library, and publishes contract version `1.0.0`. All
+adopting repositories share the same CLI, AK001-AK006 identifiers, output
+schema, and exit codes (`0` pass, `1` policy failure, `2` execution/configuration
+error). For a pull request, pass both revisions with
+`--scope range --base BASE_REF --head HEAD_REF`; compare from their merge base.
+
+Read [Agent Knowledge Validation Contract](docs/agent-knowledge-validation.md)
+for the complete rules, JSON schema, optional repository configuration,
+warning semantics, and extension process. AK004 and AK006 can require human
+review; their warnings do not prove or disprove semantic correctness. Keep the
+canonical script and black-box unittest suite byte-identical across adopting
+repositories. Repository-specific requirements belong in the documented TOML
+configuration or a stable `AKX...` extension, never in a private fork of the
+shared rules. The GitHub PR workflow runs the same tests and range command;
+it does not edit files or require secrets.

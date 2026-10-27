@@ -119,7 +119,7 @@ the repository. Add only knowledge that will help future work; omit
 execution-specific notes and cosmetic edits. Review affected specialized
 agent instructions for consistency and run
 `make check-agent-knowledge` (or
-`/bin/sh tests-format/validate-agent-knowledge.sh .`). The automated check
+`python3 scripts/validate-agent-knowledge.py --scope worktree .`). The automated check
 covers structure and resolvable local references; semantic relevance still
 requires review. Report the synchronization result in the final summary and
 do not claim completion if it was skipped or failed.

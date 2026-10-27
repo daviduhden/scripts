@@ -58,12 +58,22 @@ description: >-
 9. For deployments, inspect the destination and service before running.
    Existing website synchronization replaces content; existing repository
    synchronization replaces Git metadata.
+10. Website synchronization must stage repository sources outside the public
+    tree, omit known repository-only documentation and tooling from the public
+    copy, remove those same known paths left by an older deployment, and keep
+    the active `.sync.lock`. Test the copy/filter behavior in temporary trees;
+    never use a production document root for validation.
 
 ## Risk checklist for this tree
 
 - `debian/clean-logs.bash` and `openbsd/clean-logs.ksh` delete under
   `/var/log` and `/`.
 - `*sync-website*` replaces the deployed tree and restarts the web service.
+  Its source checkout is private staging data; the document root must not
+  expose `.git`, GitHub or agent instructions, maintainer documentation, test
+  and cache directories, or development-only configuration. The Debian Bash
+  and OpenBSD ksh filters should stay aligned, and cleanup must preserve the
+  live `.sync.lock` and site assets.
 - `*ai-purge-history*` deletes session/state data; use its `--dry-run` /
   `-DryRun` preview. The Windows variant removes the whole Crush data
   directory, including configuration stored there.
@@ -126,7 +136,7 @@ the repository. Add only knowledge that will help future work; omit
 execution-specific notes and cosmetic edits. Review affected specialized
 agent instructions for consistency and run
 `make check-agent-knowledge` (or
-`/bin/sh tests-format/validate-agent-knowledge.sh .`). The automated check
+`python3 scripts/validate-agent-knowledge.py --scope worktree .`). The automated check
 covers structure and resolvable local references; semantic relevance still
 requires review. Report the synchronization result in the final summary and
 do not claim completion if it was skipped or failed.
