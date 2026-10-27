@@ -160,6 +160,7 @@ test-regression:
 	@echo "Running correctness regression tests..." && /bin/sh tests-format/test-validate-correctness.sh
 	@echo "Running ssh-menu regression test..." && perl tests-format/test-ssh-menu.pl
 	@echo "Running normalize-files regression test..." && perl tests-format/test-normalize-files.pl
+	@echo "Running website sync filter tests..." && python3 -m unittest discover -s tests -p 'test_sync_website_filters.py'
 
 fix-permissions:
 	@/bin/sh tests-format/fix-permissions.sh .

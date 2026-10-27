@@ -41,6 +41,70 @@ error() {
 	print "$(date '+%Y-%m-%d %H:%M:%S') [ERROR] $*" >&2
 }
 
+# Remove only known repository and development paths from a staged tree or
+# public destination. Ordinary Markdown content remains eligible for publishing.
+filter_site_tree() {
+	typeset dir="$1" name path preserve_lock=0
+	[ -d "$dir" ] || return 1
+	[ "${2:-}" = "preserve-lock" ] && preserve_lock=1 || true
+
+	for name in \
+		README.md CODE_OF_CONDUCT.md CODEOFCONDUCT.md CONTRIBUTING.md \
+		AGENTS.md CLAUDE.md GEMINI.md copilot-instructions.md \
+		.gitignore .gitmodules .gitattributes .htmltest.yml \
+		.perlcriticrc .stylelintrc.json dprint.json .editorconfig \
+		.cursorrules .windsurfrules .aider.conf.yml Makefile .DS_Store; do
+		path="$dir/$name"
+		if [ -e "$path" ] || [ -L "$path" ]; then rm -rf "$path"; fi
+	done
+	if [ "$preserve_lock" -eq 0 ] &&
+		{ [ -e "$dir/.sync.lock" ] || [ -L "$dir/.sync.lock" ]; }; then
+		rm -rf "$dir/.sync.lock"
+	fi
+
+	for name in \
+		.git .github .agents .claude .codex .cursor .vscode .idea \
+		.devcontainer .zed .cache .pytest_cache .ruff_cache .mypy_cache \
+		.htmltest node_modules t tests docs tmp tmp_archive build dist; do
+		path="$dir/$name"
+		if [ -e "$path" ] || [ -L "$path" ]; then rm -rf "$path"; fi
+	done
+
+	# Keep the active lock directory intact while pruning known nested internals.
+	find "$dir" -mindepth 1 \
+		\( -path "$dir/.sync.lock" -o -path "$dir/.sync.lock/*" \) -prune -o \
+		-type d \( -name .git -o -name .github \
+		-o -name .agents -o -name .claude -o -name .codex \
+		-o -name .cursor -o -name .vscode -o -name .idea \
+		-o -name .devcontainer -o -name .zed -o -name .cache \
+		-o -name .pytest_cache -o -name .ruff_cache -o -name .mypy_cache \
+		-o -name .htmltest -o -name node_modules -o -name __pycache__ \) \
+		-prune -exec rm -rf {} +
+	find "$dir" -mindepth 1 \
+		\( -path "$dir/.sync.lock" -o -path "$dir/.sync.lock/*" \) -prune -o \
+		\( -type f -o -type l \) \
+		\( -name .git -o -name .github -o -name .agents -o -name .claude \
+		-o -name .codex -o -name .cursor -o -name .vscode -o -name .idea \
+		-o -name .devcontainer -o -name .zed -o -name .cache \
+		-o -name .pytest_cache -o -name .ruff_cache -o -name .mypy_cache \
+		-o -name .htmltest -o -name node_modules -o -name __pycache__ \
+		-o -name AGENTS.md -o -name CLAUDE.md -o -name GEMINI.md \
+		-o -name copilot-instructions.md -o -name .gitignore \
+		-o -name .gitmodules -o -name .gitattributes -o -name .htmltest.yml \
+		-o -name .perlcriticrc -o -name .stylelintrc.json -o -name dprint.json \
+		-o -name .editorconfig -o -name .DS_Store -o -name '*.swp' \
+		-o -name '*.swo' -o -name '*~' -o -name '*.bak' \
+		-o -name '*.orig' -o -name '*.rej' \) -exec rm -f {} +
+	if [ -e "$dir/scripts/openbsd-tools.txt" ] ||
+		[ -L "$dir/scripts/openbsd-tools.txt" ]; then
+		rm -f "$dir/scripts/openbsd-tools.txt"
+	fi
+	if [ -e "$dir/scripts/validate-agent-knowledge.py" ] ||
+		[ -L "$dir/scripts/validate-agent-knowledge.py" ]; then
+		rm -f "$dir/scripts/validate-agent-knowledge.py"
+	fi
+}
+
 # Decide whether a cloned tree has anything worth deploying. .git and
 # .github are pruned, but any other entry at any depth counts, including
 # dotfiles, so a repo whose only entries are those metadata directories is
@@ -134,23 +198,45 @@ run_as_gh_user() {
 	fi
 }
 
-# Replace the deployed tree with srcdir. Metadata left by an earlier sync is
-# removed first; rsync -a --delete mirrors the source, and the fallback empties
-# WWW_DIR before copying. The exclusions preserve the lock directory and keep
-# VCS metadata out of the deployed tree.
+# Replace the deployed content with a filtered checkout. Known excluded paths
+# are removed from both source and destination so old internal files do not
+# survive rsync --delete or the copy fallback. The active lock is preserved.
 stage_from_source() {
 	typeset srcdir="$1"
-	if [ -d "$WWW_DIR/.git" ]; then rm -rf "$WWW_DIR/.git"; fi
-	if [ -d "$WWW_DIR/.github" ]; then rm -rf "$WWW_DIR/.github"; fi
-	if [ -e "$WWW_DIR/.gitattributes" ]; then
-		rm -f "$WWW_DIR/.gitattributes"
+	filter_site_tree "$srcdir"
+	filter_site_tree "$WWW_DIR" preserve-lock
+	if ! has_repo_content "$srcdir"; then
+		warn "staged source has no publishable website files"
+		return 1
 	fi
 
 	if command -v rsync >/dev/null 2>&1; then
 		if ! rsync -a --delete \
-			--exclude=".git" \
-			--exclude=".github" \
-			--exclude=".gitattributes" \
+			--exclude="/.git" --exclude="/.github" \
+			--exclude="/.agents" --exclude="/.claude" --exclude="/.codex" \
+			--exclude="/.cursor" --exclude="/.vscode" --exclude="/.idea" \
+			--exclude="/.devcontainer" --exclude="/.zed" \
+			--exclude="/.gitignore" --exclude="/.gitmodules" \
+			--exclude="/.gitattributes" --exclude="/README.md" \
+			--exclude="/CODE_OF_CONDUCT.md" --exclude="/CODEOFCONDUCT.md" \
+			--exclude="/CONTRIBUTING.md" --exclude="/AGENTS.md" \
+			--exclude="/CLAUDE.md" --exclude="/GEMINI.md" \
+			--exclude="/copilot-instructions.md" --exclude="/.htmltest.yml" \
+			--exclude="/.perlcriticrc" --exclude="/.stylelintrc.json" \
+			--exclude="/dprint.json" --exclude="/.editorconfig" \
+			--exclude="/.cursorrules" --exclude="/.windsurfrules" \
+			--exclude="/.aider.conf.yml" --exclude="/Makefile" \
+			--exclude="/.DS_Store" --exclude="*.swp" --exclude="*.swo" \
+			--exclude="*~" --exclude="*.bak" --exclude="*.orig" \
+			--exclude="*.rej" --exclude="/docs/" --exclude="/t/" \
+			--exclude="/tests/" --exclude="/tmp/" \
+			--exclude="/tmp_archive/" --exclude="/.cache/" \
+			--exclude="/.pytest_cache/" --exclude="/.ruff_cache/" \
+			--exclude="/.mypy_cache/" --exclude="/.htmltest/" \
+			--exclude="/__pycache__/" --exclude="/node_modules/" \
+			--exclude="/build/" --exclude="/dist/" \
+			--exclude="/scripts/openbsd-tools.txt" \
+			--exclude="/scripts/validate-agent-knowledge.py" \
 			--exclude=".sync.lock" \
 			"$srcdir"/ "$WWW_DIR"/; then
 			return 1
@@ -169,11 +255,7 @@ stage_from_source() {
 		fi
 	fi
 
-	if ! rm -rf "$WWW_DIR/.git" \
-		"$WWW_DIR/.github" \
-		"$WWW_DIR/.gitattributes"; then
-		return 1
-	fi
+	filter_site_tree "$WWW_DIR" preserve-lock
 	return 0
 }
 

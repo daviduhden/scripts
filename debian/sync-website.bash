@@ -21,7 +21,8 @@ set -euo pipefail
 # Side effects:
 #  - Replaces the contents of /var/www/daviduhden-website, except the
 #    lock directory, with the repository branch contents
-#  - Removes .git, .github, and .gitattributes from the destination
+#  - Filters repository documentation, VCS metadata, agent instructions,
+#    development configuration, tests, and caches from the public destination
 #  - Sets ownership to www-data:www-data and modes 755/644
 #  - Restarts apache2 and, when certbot is installed, attempts
 #    certificate renewal
@@ -47,6 +48,79 @@ warn() { printf '%s [WARN] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
 error() {
 	printf '%s [ERROR] %s\n' \
 		"$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2
+}
+
+# Remove only known repository and tooling paths from a staged tree or the
+# destination. Keep ordinary Markdown files below the repository root because
+# a project may use them as public content.
+filter_site_tree() {
+	local dir="$1" name path preserve_lock=0
+	[ -d "$dir" ] || return 1
+	[ "${2:-}" = "preserve-lock" ] && preserve_lock=1 || true
+
+	for name in \
+		README.md CODE_OF_CONDUCT.md CODEOFCONDUCT.md CONTRIBUTING.md \
+		AGENTS.md CLAUDE.md GEMINI.md copilot-instructions.md \
+		.gitignore .gitmodules .gitattributes .htmltest.yml \
+		.perlcriticrc .stylelintrc.json dprint.json .editorconfig \
+		.cursorrules .windsurfrules .aider.conf.yml Makefile \
+		.DS_Store; do
+		path="$dir/$name"
+		if [ -e "$path" ] || [ -L "$path" ]; then
+			rm -rf "$path"
+		fi
+	done
+	if [ "$preserve_lock" -eq 0 ] &&
+		{ [ -e "$dir/.sync.lock" ] || [ -L "$dir/.sync.lock" ]; }; then
+		rm -rf "$dir/.sync.lock"
+	fi
+
+	for name in \
+		.git .github .agents .claude .codex .cursor .vscode .idea \
+		.devcontainer .zed .cache .pytest_cache .ruff_cache .mypy_cache \
+		.htmltest node_modules t tests docs tmp tmp_archive build dist; do
+		path="$dir/$name"
+		if [ -e "$path" ] || [ -L "$path" ]; then
+			rm -rf "$path"
+		fi
+	done
+
+	# Agent instruction files and editor/cache directories can also occur below
+	# the root. Do not use a blanket hidden-file or Markdown exclusion here.
+	find "$dir" -mindepth 1 \
+		\( -path "$dir/.sync.lock" -o -path "$dir/.sync.lock/*" \) -prune -o \
+		-type d \( -name .git -o -name .github -o -name .agents \
+		-o -name .claude -o -name .codex \
+		-o -name .cursor -o -name .vscode -o -name .idea \
+		-o -name .devcontainer -o -name .zed -o -name .cache \
+		-o -name .pytest_cache -o -name .ruff_cache -o -name .mypy_cache \
+		-o -name .htmltest -o -name node_modules -o -name __pycache__ \) \
+		-prune -exec rm -rf {} +
+	find "$dir" -mindepth 1 \
+		\( -path "$dir/.sync.lock" -o -path "$dir/.sync.lock/*" \) -prune -o \
+		\( -type f -o -type l \) \
+		\( -name .git -o -name .github -o -name .agents -o -name .claude \
+		-o -name .codex -o -name .cursor -o -name .vscode -o -name .idea \
+		-o -name .devcontainer -o -name .zed -o -name .cache \
+		-o -name .pytest_cache -o -name .ruff_cache -o -name .mypy_cache \
+		-o -name .htmltest -o -name node_modules -o -name __pycache__ \
+		-o -name AGENTS.md -o -name CLAUDE.md -o -name GEMINI.md \
+		-o -name copilot-instructions.md -o -name .gitignore \
+		-o -name .gitmodules -o -name .gitattributes \
+		-o -name .htmltest.yml -o -name .perlcriticrc \
+		-o -name .stylelintrc.json -o -name dprint.json \
+		-o -name .editorconfig -o -name .DS_Store \
+		-o -name '*.swp' -o -name '*.swo' -o -name '*~' \
+		-o -name '*.bak' -o -name '*.orig' -o -name '*.rej' \) \
+		-exec rm -f {} +
+	if [ -e "$dir/scripts/openbsd-tools.txt" ] ||
+		[ -L "$dir/scripts/openbsd-tools.txt" ]; then
+		rm -f "$dir/scripts/openbsd-tools.txt"
+	fi
+	if [ -e "$dir/scripts/validate-agent-knowledge.py" ] ||
+		[ -L "$dir/scripts/validate-agent-knowledge.py" ]; then
+		rm -f "$dir/scripts/validate-agent-knowledge.py"
+	fi
 }
 
 # Treat the staged tree as usable only when it has at least one entry
@@ -120,28 +194,74 @@ run_as_gh_user() {
 	fi
 }
 
-# Replace the deployed content with the staged checkout. With rsync,
-# --delete removes stale files; without it, the top level of the
-# destination is cleared first (except lock and metadata names) and
-# then repopulated with cp -a. The lock directory is always preserved,
-# and VCS metadata is removed from the destination at the end.
+# Replace the deployed content with a filtered checkout. rsync and the cp
+# fallback receive the same sanitized source; known excluded paths are also
+# removed from the old destination before --delete can preserve stale excludes.
+# The synchronization lock remains in place for the duration of this run.
 stage_from_source() {
 	local srcdir="$1"
-	if [ -d "$WWW_DIR/.git" ]; then
-		rm -rf "$WWW_DIR/.git"
-	fi
-	if [ -d "$WWW_DIR/.github" ]; then
-		rm -rf "$WWW_DIR/.github"
-	fi
-	if [ -e "$WWW_DIR/.gitattributes" ]; then
-		rm -f "$WWW_DIR/.gitattributes"
+	filter_site_tree "$srcdir"
+	filter_site_tree "$WWW_DIR" preserve-lock
+	if ! has_repo_content "$srcdir"; then
+		warn "staged source has no publishable website files"
+		return 1
 	fi
 
 	if command -v rsync >/dev/null 2>&1; then
 		if ! rsync -a --delete \
-			--exclude=".git" \
-			--exclude=".github" \
-			--exclude=".gitattributes" \
+			--exclude="/.git" \
+			--exclude="/.github" \
+			--exclude="/.agents" \
+			--exclude="/.claude" \
+			--exclude="/.codex" \
+			--exclude="/.cursor" \
+			--exclude="/.vscode" \
+			--exclude="/.idea" \
+			--exclude="/.devcontainer" \
+			--exclude="/.zed" \
+			--exclude="/.gitignore" \
+			--exclude="/.gitmodules" \
+			--exclude="/.gitattributes" \
+			--exclude="/README.md" \
+			--exclude="/CODE_OF_CONDUCT.md" \
+			--exclude="/CODEOFCONDUCT.md" \
+			--exclude="/CONTRIBUTING.md" \
+			--exclude="/AGENTS.md" \
+			--exclude="/CLAUDE.md" \
+			--exclude="/GEMINI.md" \
+			--exclude="/copilot-instructions.md" \
+			--exclude="/.htmltest.yml" \
+			--exclude="/.perlcriticrc" \
+			--exclude="/.stylelintrc.json" \
+			--exclude="/dprint.json" \
+			--exclude="/.editorconfig" \
+			--exclude="/.cursorrules" \
+			--exclude="/.windsurfrules" \
+			--exclude="/.aider.conf.yml" \
+			--exclude="/Makefile" \
+			--exclude="/.DS_Store" \
+			--exclude="*.swp" \
+			--exclude="*.swo" \
+			--exclude="*~" \
+			--exclude="*.bak" \
+			--exclude="*.orig" \
+			--exclude="*.rej" \
+			--exclude="/docs/" \
+			--exclude="/t/" \
+			--exclude="/tests/" \
+			--exclude="/tmp/" \
+			--exclude="/tmp_archive/" \
+			--exclude="/.cache/" \
+			--exclude="/.pytest_cache/" \
+			--exclude="/.ruff_cache/" \
+			--exclude="/.mypy_cache/" \
+			--exclude="/.htmltest/" \
+			--exclude="/__pycache__/" \
+			--exclude="/node_modules/" \
+			--exclude="/build/" \
+			--exclude="/dist/" \
+			--exclude="/scripts/openbsd-tools.txt" \
+			--exclude="/scripts/validate-agent-knowledge.py" \
 			--exclude=".sync.lock" \
 			"$srcdir"/ "$WWW_DIR"/; then
 			return 1
@@ -149,9 +269,6 @@ stage_from_source() {
 	else
 		if ! find "$WWW_DIR" -mindepth 1 \
 			-maxdepth 1 \
-			! -name ".git" \
-			! -name ".github" \
-			! -name ".gitattributes" \
 			! -name ".sync.lock" \
 			-exec rm -rf {} +; then
 			return 1
@@ -161,11 +278,7 @@ stage_from_source() {
 		fi
 	fi
 
-	if ! rm -rf "$WWW_DIR/.git" \
-		"$WWW_DIR/.github" \
-		"$WWW_DIR/.gitattributes"; then
-		return 1
-	fi
+	filter_site_tree "$WWW_DIR" preserve-lock
 	return 0
 }
 

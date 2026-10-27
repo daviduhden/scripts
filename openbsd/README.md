@@ -23,3 +23,10 @@ ksh openbsd/clean-logs.ksh --dry-run
 Inspect deployment settings before running `sync-website.ksh`. For history
 cleanup, `SWIVAL_PROJECT_HOME` selects the project whose `.swival` state is
 removed. The upgrade helper targets snapshots rather than stable releases.
+
+The website synchronizer filters known repository-only documentation, Git
+metadata, agent instructions, development settings, tests, caches, and editor
+backups from staged source and the public document root. It removes these known
+paths from earlier deployments while preserving the active `.sync.lock` and
+public site assets. Test changes with temporary trees; never use the live
+document root for validation.

@@ -43,5 +43,11 @@ bash debian/update-argon-one-v3.bash --help
 
 For website deployment, inspect the repository, destination, and service settings
 before running the synchronization script: it replaces deployment contents.
+The script filters known repository-only documentation, Git metadata, agent
+instructions, development settings, tests, caches, and editor backups from both
+the staged source and the public destination. It removes these known paths from
+older deployments while preserving the active `.sync.lock` and public site
+assets. Validate filter changes only against temporary trees; do not run the
+deployment script against a production document root as a test.
 Run history cleanup as the user whose data should be removed; set
 `SWIVAL_PROJECT_HOME` to select a different project.
