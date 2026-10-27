@@ -69,6 +69,10 @@ Important boundaries:
      `test-manpages` when it depends on an optional tool;
    - make optional-tool checks skip with exit 0 when the tool is absent;
    - document it in `tests-format/README.md`.
+   - for agent instruction synchronization, use
+     `validate-agent-knowledge.sh`; `make test-validate` runs it against the
+     current worktree, while `--base REF` supports pull request comparisons.
+     No CI workflow is currently configured in this repository.
 5. To add a regression test:
    - use POSIX `sh` or core-module Perl;
    - create all fixtures under a `mktemp` tree and clean up with a trap;
@@ -119,6 +123,22 @@ are recorded as failures; `checkmake` and `mbake` are skipped on OpenBSD.
   here-documents; review other generated code manually.
 - Generated Windows test artifacts (`work/`, `vendor/`, `results.json`,
   `self-check.json`) are ignored and should not be committed.
+
+## Maintenance & Continuous Learning
+
+After using this skill to modify the repository, review this skill and the
+applicable agent instructions as part of the task's final synchronization
+step. Update this skill when procedures, tools, configuration, assumptions,
+validation commands, or reusable knowledge have changed. Correct guidance
+that proved inaccurate and keep examples and validation steps aligned with
+the repository. Add only knowledge that will help future work; omit
+execution-specific notes and cosmetic edits. Review affected specialized
+agent instructions for consistency and run
+`make check-agent-knowledge` (or
+`/bin/sh tests-format/validate-agent-knowledge.sh .`). The automated check
+covers structure and resolvable local references; semantic relevance still
+requires review. Report the synchronization result in the final summary and
+do not claim completion if it was skipped or failed.
 
 ## References
 

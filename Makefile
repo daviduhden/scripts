@@ -66,6 +66,7 @@ TESTS_FORMAT_SCRIPTS = \
 	tests-format/fix-permissions.sh \
 	tests-format/install-knfmt-linux.sh \
 	tests-format/validate-correctness.sh \
+	tests-format/validate-agent-knowledge.sh \
 	tests-format/validate-make.sh \
 	tests-format/validate-manpages.sh \
 	tests-format/validate-perl.sh \
@@ -74,7 +75,7 @@ TESTS_FORMAT_SCRIPTS = \
 # Public Perl programs are listed in perl/programs.txt.
 PERL_PROGRAMS_MANIFEST = perl/programs.txt
 
-.PHONY: all clean install-debian install-openbsd install-secureblue install-shell install-shell-bash install-shell-bash-unlock install-shell-bash-copy install-shell-openbsd install-perl install-tests-format test test-validate test-manpages test-regression fix-permissions check-permissions help
+.PHONY: all clean install-debian install-openbsd install-secureblue install-shell install-shell-bash install-shell-bash-unlock install-shell-bash-copy install-shell-openbsd install-perl install-tests-format test test-validate test-manpages test-regression fix-permissions check-permissions check-agent-knowledge help
 
 # OS-specific sets install the same command names, so they cannot share a
 # single BINDIR. 'all' installs only the OS-independent helpers; choose
@@ -140,7 +141,7 @@ install-tests-format:
 test: test-validate test-manpages test-regression
 	@echo "All tests passed."
 
-test-validate:
+test-validate: check-agent-knowledge
 	@echo "Running shell script validation..." && /bin/sh tests-format/validate-shell.sh .
 	@echo "Running perl script validation..." && /bin/sh tests-format/validate-perl.sh .
 	@echo "Running make validation..." && /bin/sh tests-format/validate-make.sh .
@@ -162,5 +163,8 @@ fix-permissions:
 check-permissions:
 	@/bin/sh tests-format/fix-permissions.sh --check .
 
+check-agent-knowledge:
+	@/bin/sh tests-format/validate-agent-knowledge.sh .
+
 help:
-	@printf "Usage: make [target]\n\nTargets:\n  all                      Install the OS-independent helpers (Perl and tests/format)\n  install-debian           Install Debian helper scripts into ${BINDIR}\n  install-openbsd          Install OpenBSD helper scripts into ${BINDIR}\n  install-secureblue       Install secureblue helper scripts into ${BINDIR}\n  install-shell            Install SecureBlue Bash shell helpers\n  install-shell-bash       Install shell aliases into ${BASH_CONF_DST_DIR} (with chattr -i/+i)\n  install-shell-openbsd    Guidance for installing shell helpers on OpenBSD\n  install-perl             Install perl helper scripts into ${BINDIR}\n  install-tests-format     Install tests-format helper scripts into ${BINDIR}\n  test                     Run validation tests (formatters may rewrite formatting)\n  test-validate            Run only the validators (may format with installed tools)\n  test-manpages            Run mandoc lint when mandoc is installed\n  test-regression          Run only the regression tests\n  fix-permissions          Correct file modes from file(1) content\n  check-permissions        Report wrong file modes (read-only, rc != 0)\n  clean                    No-op clean target\n  help                     Show this help\n"
+	@printf "Usage: make [target]\n\nTargets:\n  all                      Install the OS-independent helpers (Perl and tests/format)\n  install-debian           Install Debian helper scripts into ${BINDIR}\n  install-openbsd          Install OpenBSD helper scripts into ${BINDIR}\n  install-secureblue       Install secureblue helper scripts into ${BINDIR}\n  install-shell            Install SecureBlue Bash shell helpers\n  install-shell-bash       Install shell aliases into ${BASH_CONF_DST_DIR} (with chattr -i/+i)\n  install-shell-openbsd    Guidance for installing shell helpers on OpenBSD\n  install-perl             Install perl helper scripts into ${BINDIR}\n  install-tests-format     Install tests-format helper scripts into ${BINDIR}\n  test                     Run validation tests (formatters may rewrite formatting)\n  test-validate            Run only the validators (may format with installed tools)\n  test-manpages            Run mandoc lint when mandoc is installed\n  test-regression          Run only the regression tests\n  fix-permissions          Correct file modes from file(1) content\n  check-permissions        Report wrong file modes (read-only, rc != 0)\n  check-agent-knowledge    Enforce agent/skills synchronization for repository changes\n  clean                    No-op clean target\n  help                     Show this help\n"

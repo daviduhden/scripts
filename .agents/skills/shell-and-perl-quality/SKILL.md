@@ -108,6 +108,22 @@ temporary trees and must not touch repository files.
 - A sourced Bash helper with a shebang or executable bit will be
   misclassified by the permission policy.
 
+## Maintenance & Continuous Learning
+
+After using this skill to modify the repository, review this skill and the
+applicable agent instructions as part of the task's final synchronization
+step. Update this skill when procedures, tools, configuration, assumptions,
+validation commands, or reusable knowledge have changed. Correct guidance
+that proved inaccurate and keep examples and validation steps aligned with
+the repository. Add only knowledge that will help future work; omit
+execution-specific notes and cosmetic edits. Review affected specialized
+agent instructions for consistency and run
+`make check-agent-knowledge` (or
+`/bin/sh tests-format/validate-agent-knowledge.sh .`). The automated check
+covers structure and resolvable local references; semantic relevance still
+requires review. Report the synchronization result in the final summary and
+do not claim completion if it was skipped or failed.
+
 ## References
 
 - [Root agent instructions](../../../AGENTS.md)

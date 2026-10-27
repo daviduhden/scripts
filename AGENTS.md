@@ -63,6 +63,7 @@ make test-validate
 make test-manpages
 make test-regression
 make check-permissions
+make check-agent-knowledge
 make fix-permissions
 make install-debian
 make install-openbsd
@@ -74,8 +75,9 @@ make install-tests-format
 
 `make test` runs, in order: `validate-shell.sh`, `validate-perl.sh`,
 `validate-make.sh`, `fix-permissions.sh --check`, `validate-correctness.sh
---target all`, `validate-manpages.sh` (skipped without `mandoc`), then the
-four regression tests. Windows checks are not part of it.
+--target all`, `validate-agent-knowledge.sh`, `validate-manpages.sh` (skipped
+without `mandoc`), then the four regression tests. Windows checks are not
+part of it.
 
 Read-only checks that do not apply formatting:
 
@@ -137,3 +139,42 @@ pwsh -NoProfile -File .\windows\test-format\tests\run-tests.ps1
 | [windows-powershell-maintenance](.agents/skills/windows-powershell-maintenance/SKILL.md) | Editing anything under `windows/`, batch launchers, the installer, or `psfmt`. |
 | [system-change-safety](.agents/skills/system-change-safety/SKILL.md) | Reviewing or changing privileged, destructive, deployment, service, firewall, or configuration-writing code. |
 | [script-tests-and-formatting](.agents/skills/script-tests-and-formatting/SKILL.md) | Changing `tests-format/`, Makefile test targets, regression tests, or formatting policy. |
+
+## Continuous Agent & Skills Maintenance
+
+Agent instructions and skills are living repository artifacts.
+
+Every repository modification MUST include an agent/skills synchronization step.
+
+Before completing any task, inspect the applicable AGENTS.md and SKILL.md files, update the affected instructions, and validate their consistency with the implementation.
+
+A code change without the corresponding agent knowledge maintenance is considered incomplete.
+
+Never claim completion when the synchronization step has been skipped or has failed.
+
+This review is required after every change to code, configuration, dependencies, features, bug fixes, refactors, tests, workflows, documentation, or repository architecture. At task end, inspect the root and nested `AGENTS.md`, `.github/agents/*.agent.md`, `.agents/skills/**/SKILL.md`, `.github/skills/**/SKILL.md`, `.claude/skills/**/SKILL.md`, and any tool-specific instruction files present (including Cursor and Copilot files). The current repository has one root `AGENTS.md` and five skills under `.agents/skills/`; no specialized agent definitions or CI workflows exist.
+
+Map changed paths to the instructions whose scope covers them, then read the applicable skill(s) and their linked references. Update an existing skill when its procedures, tools, assumptions, validation, or reusable knowledge change. Create a skill only when a durable responsibility has no suitable existing skill. Update specialized agent instructions when their workflow or responsibility changes. Remove obsolete or conflicting guidance and verify that changed local references still resolve. Do not add cosmetic edits, timestamps, or task-specific notes solely to satisfy this rule.
+
+Before declaring a task complete:
+
+1. Make a relevant, substantive update to at least one agent instruction or skill for every project change. If no reusable change is warranted, record the reason in the relevant operational documentation; do not silently omit synchronization.
+2. Check changed guidance against the implementation, examples, commands, paths, validation behavior, and cross-references.
+3. Run `make check-agent-knowledge` (or `/bin/sh tests-format/validate-agent-knowledge.sh .`) and the checks appropriate to the changed code. The automated check verifies structural conditions and local references; semantic relevance still requires agent review.
+4. If synchronization or validation cannot be completed, state the exact limitation and mark the task incomplete. Do not claim completion.
+
+This applies to edits to AGENTS.md, skills, agent definitions, and these rules as well. Perform one complete synchronization review at task end; rerun the check only after correcting a detected failure.
+
+### Mandatory definition of done
+
+- [ ] Repository changes implemented.
+- [ ] Relevant agent instructions reviewed.
+- [ ] Relevant skills reviewed.
+- [ ] Affected AGENTS.md / SKILL.md files updated.
+- [ ] Obsolete knowledge removed.
+- [ ] New reusable knowledge incorporated.
+- [ ] Agent and skill references validated.
+- [ ] Automated maintenance checks passed.
+- [ ] Final synchronization status reported.
+
+Final reports must include an **Agent & Skills Synchronization** section with agents and skills reviewed, instruction files updated, knowledge incorporated or corrected, validations actually run, and final status `PASS` or `FAIL`.
