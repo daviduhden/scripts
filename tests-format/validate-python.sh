@@ -8,7 +8,23 @@ TMPDIR_BASE=${TMPDIR:-/tmp}
 TMPLOG=$(mktemp "$TMPDIR_BASE/validate-python-XXXXXX.log")
 TMP_FAILS=$(mktemp "$TMPDIR_BASE/validate-python-fails-XXXXXX")
 UNFMT=$(mktemp "$TMPDIR_BASE/unformatted-python-XXXXXX")
-trap 'rm -f "$TMP_FAILS" "$UNFMT"' EXIT HUP INT TERM
+RUFF_USED=0
+cleanup() {
+	status=$?
+	trap - EXIT HUP INT TERM
+	rm -f "$TMP_FAILS" "$UNFMT"
+	if [ "$RUFF_USED" -eq 1 ]; then
+		if ! (CDPATH='' cd "$ROOT_DIR" && ruff clean); then
+			printf '%s\n' '[ERROR] Failed to clear Ruff cache' >&2
+			status=1
+		else
+			printf '%s\n' '[INFO] Ruff cache cleared'
+		fi
+	fi
+	exit "$status"
+}
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
 printf '%s\n' "[INFO] Logging to: $TMPLOG" >&3
 exec >"$TMPLOG" 2>&1
 
@@ -55,6 +71,7 @@ command -v ruff >/dev/null 2>&1 || {
 	printf '%s\n' '[ERROR] Python files found but ruff not found in PATH' >&2
 	exit 1
 }
+RUFF_USED=1
 
 note_fail() { printf '%s\n' "$1" >>"$TMP_FAILS"; }
 

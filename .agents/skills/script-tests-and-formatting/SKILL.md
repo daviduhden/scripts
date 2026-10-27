@@ -118,8 +118,9 @@ are recorded as failures; `checkmake` and `mbake` are skipped on OpenBSD.
 - `validate-perl.sh` runs `perltidy` in place; it uses `-npro` so a developer
   profile does not change the result.
 - `validate-python.sh` applies `ruff format` and runs `ruff check` for Python
-  files. Ruff is required only when Python files are found; formatting
-  rewrites are reported as validation failures so the diff can be reviewed.
+  files, then runs `ruff clean` from the selected root. Ruff is required only
+  when Python files are found; formatting rewrites are reported as validation
+  failures so the diff can be reviewed.
 - `fix-permissions.sh --help` now exits 0; other usage errors exit 2.
 - `fix-permissions.sh` prunes `.git` directories and gitfiles, never follows
   symlinks, and preserves setuid/setgid/sticky bits.

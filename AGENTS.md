@@ -45,8 +45,9 @@ share one `BINDIR`. Installed names omit `.bash`, `.ksh`, `.sh`, and `.pl`.
   `$'...'` in that tree.
 - `tests-format/` scripts use `#!/bin/sh` and POSIX constructs.
 - `tests-format/validate-python.sh` applies Ruff formatting and lint to Python
-  files; formatting changes count as validation issues, and Ruff is required
-  only when Python files are found.
+  files, then clears Ruff's caches under the selected root; formatting changes
+  count as validation issues, and Ruff is required only when Python files are
+  found.
 - Windows batch files use CRLF, `DisableDelayedExpansion`, quoted paths, and
   `exit /b %ERRORLEVEL%` in launchers. PowerShell formatter/tests require
   PowerShell 7; the installer uses Windows PowerShell for registry and syntax
