@@ -21,25 +21,27 @@ description: >-
 
 `make test` runs `test-validate` and then `test-regression`:
 
-1. `/bin/sh tests-format/validate-shell.sh .`
-2. `/bin/sh tests-format/validate-perl.sh .`
-3. `/bin/sh tests-format/validate-make.sh .`
-4. `/bin/sh tests-format/fix-permissions.sh --check .`
-5. `/bin/sh tests-format/validate-correctness.sh --target all .`
-6. `/bin/sh tests-format/validate-manpages.sh .`
-7. `/bin/sh tests-format/test-fix-permissions.sh`
-8. `/bin/sh tests-format/test-validate-correctness.sh`
-9. `perl tests-format/test-ssh-menu.pl`
-10. `perl tests-format/test-normalize-files.pl`
+1. `/bin/sh tests-format/validate-python.sh .` (`test-python`, a prerequisite
+   of `test-validate`)
+2. `/bin/sh tests-format/validate-shell.sh .`
+3. `/bin/sh tests-format/validate-perl.sh .`
+4. `/bin/sh tests-format/validate-make.sh .`
+5. `/bin/sh tests-format/fix-permissions.sh --check .`
+6. `/bin/sh tests-format/validate-correctness.sh --target all .`
+7. `/bin/sh tests-format/validate-manpages.sh .`
+8. `/bin/sh tests-format/test-fix-permissions.sh`
+9. `/bin/sh tests-format/test-validate-correctness.sh`
+10. `perl tests-format/test-ssh-menu.pl`
+11. `perl tests-format/test-normalize-files.pl`
 
 Important boundaries:
 
-- Steps 1-3 can rewrite files when `shfmt`, `perltidy`, or `mbake` are
+- Steps 1-4 can rewrite files when `shfmt`, `perltidy`, `ruff`, or `mbake` are
   installed. A successful rewrite still makes the validator exit non-zero.
-- Step 4 is read-only and exits 1 on a permission mismatch.
-- Step 5 is read-only; it creates a temporary directory for its worker.
-- Step 6 is read-only and exits 0 when `mandoc` is absent.
-- Steps 7-10 use temporary trees. They must not modify the repository.
+- Step 5 is read-only and exits 1 on a permission mismatch.
+- Step 6 is read-only; it creates a temporary directory for its worker.
+- Step 7 is read-only and exits 0 when `mandoc` is absent.
+- Steps 8-11 use temporary trees. They must not modify the repository.
 - `validate-windows-installer.bat`, `psfmt`, and the PowerShell test runner
   are Windows-only and are not part of `make test`.
 
@@ -66,7 +68,8 @@ Important boundaries:
    - print a clear log path and use meaningful exit codes;
    - add it to `TESTS_FORMAT_SCRIPTS` in `Makefile` if it should be installed;
    - add it to `test-validate`, or to a separate target such as
-     `test-manpages` when it depends on an optional tool;
+     `test-manpages` when it depends on an optional tool; a dedicated
+     prerequisite target can keep the main validation recipe manageable;
    - make optional-tool checks skip with exit 0 when the tool is absent;
    - document it in `tests-format/README.md`.
    - for agent instruction synchronization, use
@@ -114,6 +117,9 @@ are recorded as failures; `checkmake` and `mbake` are skipped on OpenBSD.
   read-only check.
 - `validate-perl.sh` runs `perltidy` in place; it uses `-npro` so a developer
   profile does not change the result.
+- `validate-python.sh` applies `ruff format` and runs `ruff check` for Python
+  files. Ruff is required only when Python files are found; formatting
+  rewrites are reported as validation failures so the diff can be reviewed.
 - `fix-permissions.sh --help` now exits 0; other usage errors exit 2.
 - `fix-permissions.sh` prunes `.git` directories and gitfiles, never follows
   symlinks, and preserves setuid/setgid/sticky bits.

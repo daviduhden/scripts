@@ -21,7 +21,7 @@ repository's scope, say so instead of inventing support.
 | `secureblue/` | Bash helpers for SecureBlue's rpm-ostree environment, user services, and `run0`; `systemd/` holds user-unit templates. |
 | `shell/` | Bash helpers that are sourced interactively; they target Linux/SecureBlue and are not standalone programs. |
 | `windows/` | Batch installers/launchers and PowerShell utilities; Windows-only. `test-format/` contains `psfmt` and its tests. |
-| `tests-format/` | POSIX `sh` validators/formatters, Perl regression tests, and the Windows batch validator. |
+| `tests-format/` | POSIX `sh` validators/formatters, Perl regression tests, Python Ruff validation, and the Windows batch validator. |
 | `Makefile` | POSIX-sh install and test entry points; recipes must remain BSD make compatible. |
 | `VERSION` | Installed version metadata (`1.0.0`). |
 
@@ -44,6 +44,9 @@ share one `BINDIR`. Installed names omit `.bash`, `.ksh`, `.sh`, and `.pl`.
   unguarded `set -o pipefail`, here-strings, process substitution, and
   `$'...'` in that tree.
 - `tests-format/` scripts use `#!/bin/sh` and POSIX constructs.
+- `tests-format/validate-python.sh` applies Ruff formatting and lint to Python
+  files; formatting changes count as validation issues, and Ruff is required
+  only when Python files are found.
 - Windows batch files use CRLF, `DisableDelayedExpansion`, quoted paths, and
   `exit /b %ERRORLEVEL%` in launchers. PowerShell formatter/tests require
   PowerShell 7; the installer uses Windows PowerShell for registry and syntax
@@ -73,8 +76,8 @@ make install-perl
 make install-tests-format
 ```
 
-`make test` runs, in order: `validate-shell.sh`, `validate-perl.sh`,
-`validate-make.sh`, `fix-permissions.sh --check`, `validate-correctness.sh
+`make test` runs `validate-python.sh` first, then `validate-shell.sh`,
+`validate-perl.sh`, `validate-make.sh`, `fix-permissions.sh --check`, `validate-correctness.sh
 --target all`, `validate-agent-knowledge.sh`, `validate-manpages.sh` (skipped
 without `mandoc`), then the four regression tests. Windows checks are not
 part of it.

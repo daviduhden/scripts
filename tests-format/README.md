@@ -18,6 +18,7 @@ Command Prompt without a POSIX shell or Make.
 | [validate-make.sh](validate-make.sh) | Checks Makefile syntax and formatting under `[ROOT_DIR]` with `mbake`, lints with `checkmake`, and runs a `bmake` dry run for BSD make compatibility. |
 | [validate-manpages.sh](validate-manpages.sh) | Runs `mandoc` lint on manual pages under `[ROOT_DIR]`, treating warnings as errors; skips when `mandoc` is absent. |
 | [validate-perl.sh](validate-perl.sh) | Checks Perl syntax and applies available Perl linting/formatting under `[ROOT_DIR]`. |
+| [validate-python.sh](validate-python.sh) | Formats Python files with Ruff and checks them with `ruff check` under `[ROOT_DIR]`; formatting changes are reported as validation issues. |
 | [validate-shell.sh](validate-shell.sh) | Checks shell syntax and applies available shell analysis/formatting under `[ROOT_DIR]`. |
 | [validate-windows-installer.bat](validate-windows-installer.bat) | Statically checks installer/launcher requirements, program manifests, and CRLF endings. Accepts optional `[ROOT_DIR]`. |
 | [test-fix-permissions.sh](test-fix-permissions.sh) | Tests permission classification and check/preview/application behavior in temporary trees. |

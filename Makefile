@@ -70,12 +70,13 @@ TESTS_FORMAT_SCRIPTS = \
 	tests-format/validate-make.sh \
 	tests-format/validate-manpages.sh \
 	tests-format/validate-perl.sh \
+	tests-format/validate-python.sh \
 	tests-format/validate-shell.sh
 
 # Public Perl programs are listed in perl/programs.txt.
 PERL_PROGRAMS_MANIFEST = perl/programs.txt
 
-.PHONY: all clean install-debian install-openbsd install-secureblue install-shell install-shell-bash install-shell-bash-unlock install-shell-bash-copy install-shell-openbsd install-perl install-tests-format test test-validate test-manpages test-regression fix-permissions check-permissions check-agent-knowledge help
+.PHONY: all clean install-debian install-openbsd install-secureblue install-shell install-shell-bash install-shell-bash-unlock install-shell-bash-copy install-shell-openbsd install-perl install-tests-format test test-validate test-python test-manpages test-regression fix-permissions check-permissions check-agent-knowledge help
 
 # OS-specific sets install the same command names, so they cannot share a
 # single BINDIR. 'all' installs only the OS-independent helpers; choose
@@ -141,12 +142,15 @@ install-tests-format:
 test: test-validate test-manpages test-regression
 	@echo "All tests passed."
 
-test-validate: check-agent-knowledge
+test-validate: check-agent-knowledge test-python
 	@echo "Running shell script validation..." && /bin/sh tests-format/validate-shell.sh .
 	@echo "Running perl script validation..." && /bin/sh tests-format/validate-perl.sh .
 	@echo "Running make validation..." && /bin/sh tests-format/validate-make.sh .
 	@echo "Checking file permissions (read-only)..." && /bin/sh tests-format/fix-permissions.sh --check .
 	@echo "Running correctness audit..." && /bin/sh tests-format/validate-correctness.sh --target all .
+
+test-python:
+	@echo "Running python script validation..." && /bin/sh tests-format/validate-python.sh .
 
 test-manpages:
 	@echo "Running man page validation..." && /bin/sh tests-format/validate-manpages.sh .
