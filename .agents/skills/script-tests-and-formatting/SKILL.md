@@ -72,6 +72,9 @@ Important boundaries:
      prerequisite target can keep the main validation recipe manageable;
    - make optional-tool checks skip with exit 0 when the tool is absent;
    - document it in `tests-format/README.md`.
+  - update `tests-format/openbsd-tools.txt` when adding or changing an
+    optional tool with an OpenBSD port/package mapping; keep that file
+    informational and verify package paths before recording them.
    - for agent instruction synchronization, use
      `validate-agent-knowledge.sh`; `make test-validate` runs it against the
      current worktree, while `--base REF` supports pull request comparisons.
@@ -119,8 +122,10 @@ are recorded as failures; `checkmake` and `mbake` are skipped on OpenBSD.
   profile does not change the result.
 - `validate-python.sh` applies `ruff format` and runs `ruff check` for Python
   files, then runs `ruff clean` from the selected root. Ruff is required only
-  when Python files are found; formatting rewrites are reported as validation
-  failures so the diff can be reviewed.
+  when Python files are found; it follows the neighboring validator structure
+  with `require_cmd` checks in `main`, work in `run_validate_python`, and
+  `main "$@"` as its entry point. Formatting rewrites are reported as
+  validation failures so the diff can be reviewed.
 - `fix-permissions.sh --help` now exits 0; other usage errors exit 2.
 - `fix-permissions.sh` prunes `.git` directories and gitfiles, never follows
   symlinks, and preserves setuid/setgid/sticky bits.

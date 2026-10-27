@@ -4,6 +4,7 @@ knfmt = devel/knfmt
 fourmolu = not ported
 tidy = www/tidy
 perltidy = devel/perltidy
+ruff = devel/ruff
 shfmt = devel/shfmt
 shellcheck = devel/shellcheck
 checkbashisms = sysutils/checkbashisms
