@@ -83,6 +83,10 @@ description: >-
   timestamped backup.
 - `debian/update-monero.bash` edits service units, Tor/I2P/Monero configs,
   and adds runtime nftables rules.
+- `debian/rpi-update-safe` runs `rpi-update` as root with rebooting disabled,
+  then runs `depmod` and can replace the Raspberry Pi 5 DTB and initramfs in
+  `/boot/firmware`. Backups cover replaced boot files, not every firmware or
+  module change made by the updater. Never execute it during review or tests.
 - `secureblue/setup-clamav.bash` changes SELinux contexts, ClamAV configs,
   units, and timers.
 - `secureblue/sync-gh-repos.bash` replaces Git metadata and restores from a

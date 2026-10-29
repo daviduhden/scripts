@@ -32,7 +32,8 @@ DEBIAN_SCRIPTS = \
 	debian/update-openrsync.bash \
 	debian/update-signify.bash \
 	debian/update-xd-torrent.bash \
-	debian/ai-purge-history.bash
+	debian/ai-purge-history.bash \
+	debian/rpi-update-safe
 
 OPENBSD_SCRIPTS = \
 	openbsd/clean-logs.ksh \

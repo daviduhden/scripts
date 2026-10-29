@@ -15,7 +15,7 @@ repository's scope, say so instead of inventing support.
 
 | Path | Runtime and purpose |
 | --- | --- |
-| `debian/` | Bash helpers for Debian-based systems; several require Debian 13 or a supported derivative. |
+| `debian/` | Bash helpers for Debian-based systems; several require Debian 13 or a supported derivative. `rpi-update-safe` is Raspberry Pi 5-specific and updates firmware and boot files. |
 | `openbsd/` | OpenBSD base `ksh` helpers using native tools; not Bash. |
 | `debian/sync-website.bash`, `openbsd/sync-website.ksh` | Platform-specific staged website synchronization; public-tree filters are intentionally kept aligned. |
 | `perl/` | Portable Perl programs (5.10.1+, core modules). `programs.txt` is the public manifest shared by the POSIX and Windows installers. |
@@ -117,6 +117,10 @@ pwsh -NoProfile -File .\windows\test-format\tests\run-tests.ps1
   includes package installs, `sudo`/`doas`/`run0`, service changes, firewall
   rules, `/etc` rewrites, history purges, and deployments. Review the code and
   run static checks instead.
+- `debian/rpi-update-safe` runs the official updater as root with rebooting
+  disabled, then runs `depmod` and may replace the selected Raspberry Pi 5 DTB
+  and initramfs under mounted `/boot/firmware`. Its backups cover replaced boot
+  files, not all updater or module changes. Never execute it for validation.
 - If execution is explicitly requested, use the script's existing dry-run
   flag when present (`clean-logs.bash --dry-run`, `ai-purge-history --dry-run`,
   `install-windows.bat --dry-run`) and a disposable target. Never test
