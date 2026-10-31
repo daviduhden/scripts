@@ -18,7 +18,7 @@ repository's scope, say so instead of inventing support.
 | `debian/` | Bash helpers for Debian-based systems; several require Debian 13 or a supported derivative. `rpi-update-safe` is Raspberry Pi 5-specific and updates firmware and boot files. |
 | `openbsd/` | OpenBSD base `ksh` helpers using native tools; not Bash. |
 | `debian/sync-website.bash`, `openbsd/sync-website.ksh` | Platform-specific staged website synchronization; public-tree filters are intentionally kept aligned. |
-| `perl/` | Portable Perl programs (5.10.1+, core modules). `programs.txt` is the public manifest shared by the POSIX and Windows installers. |
+| `perl/` | Portable Perl programs (5.10.1+, core modules; Windows programs may use bundled Win32 modules). `programs.txt` is the public manifest shared by the POSIX and Windows installers. |
 | `secureblue/` | Bash helpers for SecureBlue's rpm-ostree environment, user services, and `run0`; `systemd/` holds user-unit templates. |
 | `shell/` | Bash helpers that are sourced interactively; they target Linux/SecureBlue and are not standalone programs. |
 | `windows/` | Batch installers/launchers and PowerShell utilities; Windows-only. `test-format/` contains `psfmt` and its tests. |

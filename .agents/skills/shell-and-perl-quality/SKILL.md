@@ -23,7 +23,9 @@ description: >-
    - `openbsd/`: OpenBSD base `ksh`.
    - `shell/`: sourced by Bash, no shebang.
    - `tests-format/*.sh`: POSIX `sh`.
-   - `perl/` and Perl tests: Perl 5.10.1+, core modules.
+   - `perl/` and Perl tests: Perl 5.10.1+, core modules; Windows-only APIs
+     may use modules bundled with the supported Perl distribution when the
+     Windows installer checks for them.
 2. Match the file's existing style. Shell uses tabs and `shfmt -s`. Perl uses
    4-space indentation and an 80-column limit.
 3. Keep error handling explicit. Bash scripts use `set -euo pipefail` except
@@ -51,8 +53,13 @@ description: >-
 ### Perl-specific checks
 
 - `use strict; use warnings;` in every file.
-- Stay on core modules and Perl 5.10.1 syntax. Declare a minimum version in
-  new programs.
+- Stay on core modules and Perl 5.10.1 syntax. Windows-specific bundled
+  modules are acceptable when required for native Windows behavior and checked
+  by the Windows installer. Declare a minimum version in new programs.
+- When Windows Perl returns filesystem names as ANSI-code-page bytes, decode
+  them with the active code page and encode native path components back before
+  calling Perl's narrow filesystem APIs. Add coverage for a non-ASCII parent
+  path when changing this handling.
 - Use `Getopt::Long` for options and `Pod::Usage` for help when the script has
   a POD section.
 - Read and write bytes deliberately (`binmode`/`:raw`). Use a temporary file

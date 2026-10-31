@@ -1,8 +1,10 @@
 # Portable Perl programs
 
 Public programs are listed in [programs.txt](programs.txt), the shared manifest
-used by the POSIX and Windows installers. The scripts use Perl core modules.
-The Windows installer checks for Perl 5.10.1 or newer and required modules.
+used by the POSIX and Windows installers. The programs use Perl core modules
+for portable behavior. On Windows, `normalize-files` also uses the bundled
+`Win32` module to handle names in the active Windows ANSI code page. The
+Windows installer checks for Perl 5.10.1 or newer and the required modules.
 
 | Script | Purpose |
 | --- | --- |

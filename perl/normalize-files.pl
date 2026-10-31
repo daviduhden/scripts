@@ -38,6 +38,7 @@ our $HAVE_ENCODE_UNICODE = eval { require Encode::Unicode; 1 } ? 1 : 0;
 
 our $CFG;
 our @LOG;
+our $WINDOWS_PATH_ENCODING;
 
 my @MODE_KEYS = qw(rename encoding line_endings);
 
@@ -119,6 +120,20 @@ my %EC_CACHE;
 
 sub is_windows { return $^O eq 'MSWin32' }
 sub is_openbsd { return $^O eq 'openbsd' }
+
+# Perl's Windows directory and file APIs expose paths as bytes in the active
+# Windows ANSI code page. Cache the matching Encode name so names can be
+# normalized as Unicode while the original paths remain usable by those APIs.
+sub windows_path_encoding {
+    return unless is_windows();
+    return $WINDOWS_PATH_ENCODING if defined $WINDOWS_PATH_ENCODING;
+
+    require Win32;
+    my $encoding = 'cp' . Win32::GetACP();
+    die "normalize-files: unsupported Windows path encoding $encoding\n"
+      unless Encode::find_encoding($encoding);
+    return $WINDOWS_PATH_ENCODING = $encoding;
+}
 
 # Best-effort OpenBSD sandbox, mirroring perl/ssh-menu.pl: unveil every path
 # the program may touch, lock the veil, then pledge. No-op on other systems.
@@ -311,26 +326,33 @@ sub safe_decode {
 # Names #
 #########
 
-# Decode one native path component into a character string.  The second return
-# value reports whether the bytes were valid UTF-8 (or ASCII on Windows); an
-# invalid name is still usable for traversal but must not be renamed.
+# Decode one native path component into a character string. The second return
+# value reports whether the bytes were valid UTF-8 (or valid in the active
+# Windows code page); an invalid name is still usable for traversal but must
+# not be renamed.
 sub decode_fs_name {
     my ($name) = @_;
     return ( $name, 1 ) if utf8::is_utf8($name);
     if ( is_windows() ) {
-        return ( $name, ( $name =~ /^[\x00-\x7F]*$/ ) ? 1 : 0 );
+        my $decoded = eval {
+            decode( windows_path_encoding(), $name, FB_CROAK | LEAVE_SRC );
+        };
+        return ( $decoded, 1 ) if defined $decoded;
+        return ( $name,    0 );
     }
     my $decoded = eval { decode( 'UTF-8', $name, FB_CROAK | LEAVE_SRC ) };
     return ( $decoded, 1 ) if defined $decoded;
     return ( $name,    0 );
 }
 
-# Convert a normalized character name back to native filesystem bytes.  Windows
-# accepts the Perl character string directly; Unix paths are UTF-8 byte
-# strings.
+# Convert a normalized character name back to native filesystem bytes. Windows
+# Perl's narrow filesystem calls consume bytes in the active ANSI code page;
+# Unix paths are UTF-8 byte strings.
 sub encode_fs_name {
     my ($chars) = @_;
-    return $chars if is_windows();
+    if ( is_windows() ) {
+        return encode( windows_path_encoding(), $chars, FB_CROAK | LEAVE_SRC );
+    }
     return $chars unless utf8::is_utf8($chars);
     return encode( 'UTF-8', $chars );
 }
@@ -2232,8 +2254,11 @@ a space or a dot, or a Windows reserved name.
   "Solución recuperación programación.txt" -> "solucion-recuperacion-programacion.txt"
   "Tema 9- POO Avanzada(4).pdf" -> "tema-9-poo-avanzada-4.pdf"
 
-Non-UTF-8 file names on Unix are left unrenamed; they are noted under
-C<--verbose> when content processing runs.
+On Windows, directory entries are decoded with the active ANSI code page
+reported by C<Win32::GetACP>; normalized names are encoded back to that page
+before file operations. Names that cannot be decoded in that code page are
+left unrenamed. On Unix, names that are not valid UTF-8 are left unrenamed;
+they are noted under C<--verbose> when content processing runs.
 
 =head1 ENCODING POLICY
 
@@ -2291,10 +2316,12 @@ C<--no-git> disables all Git interaction. Git is never required.
 =head1 PLATFORM NOTES
 
 Runs on Windows 10 and Windows 11 with Strawberry Perl, and on OpenBSD, Linux
-and macOS. Symbolic link tests are skipped on Windows. File names are handled
-as character strings; on Unix, names that are not valid UTF-8 are left
-unrenamed. Ownership, ACLs and extended attributes are not preserved or
-copied. Long paths are used as given; no C<\\?> prefix is added.
+and macOS. Windows requires the bundled C<Win32> module to query the active
+ANSI code page. Symbolic link tests are skipped on Windows. Names are decoded
+strictly from the native Windows code page or from UTF-8 on Unix; names that
+cannot be decoded are left unrenamed. Ownership, ACLs and extended attributes
+are not preserved or copied. Long paths are used as given; no C<\\?> prefix
+is added.
 
 On OpenBSD the program unveils the processed tree (read/write/create), the
 repository metadata when git is used, the VERSION file and I<@INC>, then
@@ -2312,9 +2339,10 @@ view in the helpers. Sandbox setup remains best-effort.
 
 =head1 DEPENDENCIES
 
-Core modules only: L<Encode>, L<Unicode::Normalize>, L<File::Spec>,
+Core modules: L<Encode>, L<Unicode::Normalize>, L<File::Spec>,
 L<File::Basename>, L<File::Temp>, L<Getopt::Long>, L<Pod::Usage>,
-L<Digest::SHA>, L<Cwd>, L<Fcntl>, L<Errno>. L<Text::Unidecode> and
+L<Digest::SHA>, L<Cwd>, L<Fcntl>, L<Errno>. On Windows, the bundled L<Win32>
+module is also used to query the active ANSI code page. L<Text::Unidecode> and
 L<Encode::Guess> are intentionally not required.
 
 =head1 EXAMPLES

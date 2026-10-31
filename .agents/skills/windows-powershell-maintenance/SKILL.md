@@ -42,6 +42,8 @@ without one.
    - install only under the per-user root by default;
    - update only `HKCU\Environment\Path`, idempotently;
    - preserve unknown files and update the manifest;
+   - keep `PERL_MODULES` aligned with the runtime modules required by the
+     installed Perl programs, including Windows-specific bundled modules;
    - keep the dry-run path free of writes, packaging, and PATH changes.
 3. For a new top-level `windows/*.ps1`, the installer picks it up
    automatically and creates `<name>.cmd`. For a new public Perl program,

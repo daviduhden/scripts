@@ -39,7 +39,7 @@ set "MANIFEST_BAD="
 set "INSTALL_FAIL="
 set "VERIFY_FAIL="
 set "WINGET_ID=StrawberryPerl.StrawberryPerl"
-set "PERL_MODULES=-M5.010001 -MEncode -MUnicode::Normalize -MFile::Spec -MFile::Basename -MFile::Temp -MFile::Path -MGetopt::Long -MPod::Usage -MDigest::SHA -MCwd"
+set "PERL_MODULES=-M5.010001 -MEncode -MUnicode::Normalize -MFile::Spec -MFile::Basename -MFile::Temp -MFile::Path -MGetopt::Long -MPod::Usage -MDigest::SHA -MCwd -MWin32"
 
 rem --------------------------------------------------------------------
 rem Argument parsing (only a few options on purpose)
