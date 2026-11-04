@@ -67,12 +67,12 @@ filter_site_tree() {
 		.DS_Store; do
 		path="$dir/$name"
 		if [ -e "$path" ] || [ -L "$path" ]; then
-			rm -rf "$path"
+			rm -rf -- "$path" || return 1
 		fi
 	done
 	if [ "$preserve_lock" -eq 0 ] &&
 		{ [ -e "$dir/.sync.lock" ] || [ -L "$dir/.sync.lock" ]; }; then
-		rm -rf "$dir/.sync.lock"
+		rm -rf -- "$dir/.sync.lock" || return 1
 	fi
 
 	for name in \
@@ -81,7 +81,7 @@ filter_site_tree() {
 		.htmltest node_modules t tests docs tmp tmp_archive build dist; do
 		path="$dir/$name"
 		if [ -e "$path" ] || [ -L "$path" ]; then
-			rm -rf "$path"
+			rm -rf -- "$path" || return 1
 		fi
 	done
 
@@ -95,7 +95,7 @@ filter_site_tree() {
 		-o -name .devcontainer -o -name .zed -o -name .cache \
 		-o -name .pytest_cache -o -name .ruff_cache -o -name .mypy_cache \
 		-o -name .htmltest -o -name node_modules -o -name __pycache__ \) \
-		-prune -exec rm -rf {} +
+		-prune -exec rm -rf {} + || return 1
 	find "$dir" -mindepth 1 \
 		\( -path "$dir/.sync.lock" -o -path "$dir/.sync.lock/*" \) -prune -o \
 		\( -type f -o -type l \) \
@@ -112,14 +112,14 @@ filter_site_tree() {
 		-o -name .editorconfig -o -name .DS_Store \
 		-o -name '*.swp' -o -name '*.swo' -o -name '*~' \
 		-o -name '*.bak' -o -name '*.orig' -o -name '*.rej' \) \
-		-exec rm -f {} +
+		-exec rm -f {} + || return 1
 	if [ -e "$dir/scripts/openbsd-tools.txt" ] ||
 		[ -L "$dir/scripts/openbsd-tools.txt" ]; then
-		rm -f "$dir/scripts/openbsd-tools.txt"
+		rm -f -- "$dir/scripts/openbsd-tools.txt" || return 1
 	fi
 	if [ -e "$dir/scripts/validate-agent-knowledge.py" ] ||
 		[ -L "$dir/scripts/validate-agent-knowledge.py" ]; then
-		rm -f "$dir/scripts/validate-agent-knowledge.py"
+		rm -f -- "$dir/scripts/validate-agent-knowledge.py" || return 1
 	fi
 }
 
@@ -137,7 +137,7 @@ has_repo_content() {
 		-o -path "$dir/.git/*" \
 		-o -path "$dir/.github" \
 		-o -path "$dir/.github/*" \) \
-		-prune -o -mindepth 1 -print 2>/dev/null)"
+		-prune -o -mindepth 1 -print -quit 2>/dev/null)"
 	[ -n "$listing" ]
 }
 
@@ -159,7 +159,9 @@ fetch_lfs_files() {
 	fi
 	if [ -d "$dir/.git" ]; then
 		log "Fetching Git LFS files in $dir..."
-		git -C "$dir" lfs pull >/dev/null 2>&1 ||
+		# The clone may belong to GH_USER while this process runs as root;
+		# trust only this exact path instead of disabling ownership checks.
+		git -c safe.directory="$dir" -C "$dir" lfs pull >/dev/null 2>&1 ||
 			warn "git lfs pull failed in $dir"
 	fi
 }
@@ -175,10 +177,16 @@ REPO_SLUG="${REPO_SLUG:-daviduhden/daviduhden-website}"
 # because the home may differ from /home/<user>; the fallback is only
 # a guess when getent is unavailable.
 if command -v getent >/dev/null 2>&1; then
-	GH_HOME="$(getent passwd "$GH_USER" |
-		awk -F: '{print $6}')"
+	if ! GH_HOME="$(getent passwd "$GH_USER" |
+		awk -F: '{print $6}')"; then
+		GH_HOME=""
+	fi
 else
 	GH_HOME="/home/$GH_USER"
+fi
+if [ -z "$GH_HOME" ] || [ ! -d "$GH_HOME" ]; then
+	error "Cannot determine a usable home directory for user '$GH_USER'."
+	exit 1
 fi
 
 GH_CONFIG_DIR="${GH_HOME}/.config/gh"
@@ -194,21 +202,35 @@ run_as_gh_user() {
 	fi
 }
 
+# A static site should not publish symbolic links: a symlink to a local file
+# can expose that file if the web server follows links. Reject the deployment
+# instead of trying to guess which links are safe.
+reject_source_symlinks() {
+	local dir="$1" links
+	links=$(find "$dir" -type l -print 2>/dev/null)
+	if [ -n "$links" ]; then
+		error "Refusing to publish symbolic links from $dir:"
+		printf '%s\n' "$links" >&2
+		return 1
+	fi
+}
+
 # Replace the deployed content with a filtered checkout. rsync and the cp
 # fallback receive the same sanitized source; known excluded paths are also
 # removed from the old destination before --delete can preserve stale excludes.
 # The synchronization lock remains in place for the duration of this run.
-stage_from_source() {
+copy_from_source() {
 	local srcdir="$1"
-	filter_site_tree "$srcdir"
-	filter_site_tree "$WWW_DIR" preserve-lock
+	filter_site_tree "$srcdir" || return 1
+	reject_source_symlinks "$srcdir" || return 1
+	filter_site_tree "$WWW_DIR" preserve-lock || return 1
 	if ! has_repo_content "$srcdir"; then
 		warn "staged source has no publishable website files"
 		return 1
 	fi
 
 	if command -v rsync >/dev/null 2>&1; then
-		if ! rsync -a --delete \
+		if ! rsync -a --delete --safe-links \
 			--exclude="/.git" \
 			--exclude="/.github" \
 			--exclude="/.agents" \
@@ -278,8 +300,90 @@ stage_from_source() {
 		fi
 	fi
 
-	filter_site_tree "$WWW_DIR" preserve-lock
+	filter_site_tree "$WWW_DIR" preserve-lock || return 1
 	return 0
+}
+
+# Atomic publication is opt-in and requires an already configured symlink
+# docroot. The compatible copy path remains the default.
+ATOMIC_DEPLOY=0
+ATOMIC_RELEASE=""
+ATOMIC_PREVIOUS=""
+
+check_atomic_target() {
+	[ -L "$WWW_DIR" ] && [ -d "$WWW_DIR" ] || {
+		error 'Atomic mode requires an existing symlink docroot.'
+		return 1
+	}
+}
+
+replace_public_link() {
+	local target="$1" parent linkdir
+	parent="${WWW_DIR%/*}"
+	linkdir=$(mktemp -d "$parent/.site-link.XXXXXX") || return 1
+	if ! ln -s "$target" "$linkdir/current"; then
+		rmdir "$linkdir"
+		return 1
+	fi
+	if ! mv -Tf -- "$linkdir/current" "$WWW_DIR"; then
+		rm -f "$linkdir/current"
+		rmdir "$linkdir"
+		return 1
+	fi
+	rmdir "$linkdir"
+}
+
+restart_web_service() {
+	systemctl restart "$SERVICE_NAME"
+}
+
+rollback_publication() {
+	if [ -n "$ATOMIC_PREVIOUS" ]; then
+		if replace_public_link "$ATOMIC_PREVIOUS"; then
+			ATOMIC_PREVIOUS=""
+			restart_web_service || error 'Could not restart restored website'
+		else
+			error "Could not roll back public link to $ATOMIC_PREVIOUS"
+		fi
+	fi
+}
+
+stage_from_source() {
+	local srcdir="$1" destination status
+	if [ "${ATOMIC_DEPLOY:-0}" -eq 0 ]; then
+		copy_from_source "$srcdir"
+		return $?
+	fi
+	check_atomic_target || return 1
+	destination="$WWW_DIR"
+	ATOMIC_RELEASE=$(mktemp -d "${WWW_DIR%/*}/.site-release.XXXXXX") || return 1
+	WWW_DIR="$ATOMIC_RELEASE"
+	status=0
+	copy_from_source "$srcdir" || status=$?
+	WWW_DIR="$destination"
+	if [ "$status" -ne 0 ]; then
+		rm -rf "$ATOMIC_RELEASE"
+		ATOMIC_RELEASE=""
+		return "$status"
+	fi
+	if ! chown -R "$OWNER_USER:$OWNER_GROUP" "$ATOMIC_RELEASE" ||
+		! find "$ATOMIC_RELEASE" -type d -exec chmod 755 {} + ||
+		! find "$ATOMIC_RELEASE" -type f -exec chmod 644 {} +; then
+		rm -rf -- "$ATOMIC_RELEASE"
+		ATOMIC_RELEASE=""
+		return 1
+	fi
+	ATOMIC_PREVIOUS=$(cd "$WWW_DIR" && pwd -P) || {
+		rm -rf -- "$ATOMIC_RELEASE"
+		ATOMIC_RELEASE=""
+		return 1
+	}
+	if ! replace_public_link "$ATOMIC_RELEASE"; then
+		rm -rf -- "$ATOMIC_RELEASE"
+		ATOMIC_RELEASE=""
+		return 1
+	fi
+	log "Published $ATOMIC_RELEASE; previous release retained at $ATOMIC_PREVIOUS"
 }
 
 ######################
@@ -412,13 +516,13 @@ sync_with_git() {
 # curl is preferred over wget. GitHub archives contain one top-level
 # directory, which is used as the staging source.
 sync_with_github_zip() {
-	local tmpdir zipfile unpack_dir srcdir
+	local tmpdir zipfile unpack_dir srcdir listfile
 	tmpdir=$(mktemp -d "/tmp/site-sync.XXXXXX") || return 1
 	zipfile="$tmpdir/source.zip"
 
 	if command -v curl >/dev/null 2>&1; then
-		if ! curl -fLsS --retry 5 "$ZIP_URL" \
-			-o "$zipfile"; then
+		if ! curl -fLsS --retry 5 --proto '=https' \
+			--proto-redir '=https' "$ZIP_URL" -o "$zipfile"; then
 			rm -rf "$tmpdir"
 			return 1
 		fi
@@ -434,7 +538,29 @@ sync_with_github_zip() {
 		rm -rf "$tmpdir"
 		return 1
 	fi
+	# Reject absolute and parent-relative archive names before extraction.
+	listfile="$tmpdir/entries.txt"
+	if ! unzip -Z1 "$zipfile" >"$listfile"; then
+		rm -rf "$tmpdir"
+		return 1
+	fi
+	if awk 'BEGIN { bad=0 } /^\// || /(^|\/)\.\.(\/|$)/ { bad=1 } END { exit bad }' \
+		"$listfile" || [ "$(wc -l <"$listfile")" -gt 200000 ]; then
+		error "Refusing an archive with unsafe or excessive entries."
+		rm -rf "$tmpdir"
+		return 1
+	fi
 	if ! unzip -q "$zipfile" -d "$unpack_dir"; then
+		rm -rf "$tmpdir"
+		return 1
+	fi
+	if [ -n "$(find "$unpack_dir" -type l -print 2>/dev/null)" ]; then
+		error "Refusing an archive that contains symbolic links."
+		rm -rf "$tmpdir"
+		return 1
+	fi
+	if ! du -sk "$unpack_dir" | awk '$1 > 2097152 { exit 1 }'; then
+		error "Refusing an archive larger than 2 GiB."
 		rm -rf "$tmpdir"
 		return 1
 	fi
@@ -470,11 +596,14 @@ post_update_steps() {
 
 	log "Setting ownership to $OWNER_USER:$OWNER_GROUP..."
 	chown -R "$OWNER_USER":"$OWNER_GROUP" "$WWW_DIR" ||
-		warn "failed ownership"
+		{
+			error "Failed to set website ownership."
+			return 1
+		}
 
 	log "Setting file permissions..."
-	find . -type d -exec chmod 755 {} +
-	find . -type f -exec chmod 644 {} +
+	find . -type d -exec chmod 755 {} + || return 1
+	find . -type f -exec chmod 644 {} + || return 1
 
 	log "Restarting web service ($SERVICE_NAME)..."
 	if ! systemctl restart "$SERVICE_NAME"; then
@@ -523,32 +652,51 @@ LOCKDIR=""
 # a recorded PID whose process no longer exists is treated as stale and
 # reacquired. A lock without a PID is left in place (fail closed) and
 # causes this run to skip syncing.
-acquire_lock() {
-	local lock_pid
-
-	LOCKDIR="$WWW_DIR/.sync.lock"
-	if mkdir "$LOCKDIR" 2>/dev/null; then
-		printf '%s\n' "$$" >"$LOCKDIR/pid" 2>/dev/null || true
-		return 0
-	fi
-
-	# An old lock without a PID is left alone (fail closed). A lock
-	# whose recorded process is gone is removed and reacquired.
-	lock_pid="$(cat "$LOCKDIR/pid" 2>/dev/null || true)"
-	if [[ -n $lock_pid ]] && ! kill -0 "$lock_pid" 2>/dev/null; then
-		warn "Removing stale sync lock from PID $lock_pid."
+cleanup_lock() {
+	rollback_publication
+	if [ "${LOCK_OWNED:-0}" -eq 1 ] && [ ! -L "$LOCKDIR" ] &&
+		[ "$(cat "$LOCKDIR/pid" 2>/dev/null)" = "$$" ]; then
 		rm -f "$LOCKDIR/pid"
 		rmdir "$LOCKDIR" 2>/dev/null || true
-		if mkdir "$LOCKDIR" 2>/dev/null; then
-			printf '%s\n' "$$" >"$LOCKDIR/pid" 2>/dev/null || true
-			return 0
-		fi
+		LOCK_OWNED=0
 	fi
+}
 
-	return 1
+acquire_lock() {
+	# Respect a lock left by the previous in-docroot locking scheme.
+	if [ -e "$WWW_DIR/.sync.lock" ] || [ -L "$WWW_DIR/.sync.lock" ]; then
+		warn 'Legacy in-docroot lock exists; verify its owner before removing it.'
+		return 1
+	fi
+	LOCKDIR="${WWW_DIR%/*}/.${WWW_DIR##*/}.sync.lock"
+	# Never steal locks automatically: PID reuse and concurrent stale-lock
+	# recovery cannot be made safe with a PID file alone.
+	if ! mkdir -m 0700 "$LOCKDIR" 2>/dev/null; then return 1; fi
+	LOCK_OWNED=1
+	if ! printf '%s\n' "$$" >"$LOCKDIR/pid"; then
+		rmdir "$LOCKDIR" 2>/dev/null || true
+		LOCK_OWNED=0
+		return 1
+	fi
+	return 0
 }
 
 main() {
+	case "${1:-}" in
+	--atomic)
+		ATOMIC_DEPLOY=1
+		shift
+		;;
+	--check-atomic)
+		check_atomic_target
+		return $?
+		;;
+	esac
+	[ "$#" -eq 0 ] || {
+		error 'Usage: sync-website [--atomic|--check-atomic]'
+		exit 1
+	}
+	if [ "$ATOMIC_DEPLOY" -eq 1 ]; then check_atomic_target || exit 1; fi
 	log "----------------------------------------"
 	log "Sync started (user: $GH_USER)"
 
@@ -568,7 +716,9 @@ main() {
 		exit 0
 	fi
 	# Always release the lock, including on interruption or failure.
-	trap 'rm -rf "$LOCKDIR"' EXIT INT TERM
+	trap 'cleanup_lock' EXIT
+	trap 'exit 130' INT
+	trap 'exit 143' TERM
 
 	# Try the methods in order and stop at the first success. A sync
 	# method stages content into WWW_DIR; post_update_steps then
@@ -585,6 +735,7 @@ main() {
 		exit 1
 	fi
 
+	ATOMIC_PREVIOUS=""
 	log "Sync completed"
 	log "----------------------------------------"
 }

@@ -10,7 +10,9 @@
 # and license details.
 set -euo pipefail
 export PATH="${HOME}/.local/bin:/home/linuxbrew/.linuxbrew/bin:/usr/local/bin:/usr/bin:/bin"
+PERL_CMD="${PERL_CMD:-perl}"
 TMP_DIR=''
+BINARY_STAGE=''
 VERSION=''
 NODE_URL='http://127.0.0.1:9200'
 CLIENTS=()
@@ -51,11 +53,11 @@ EOF
 parse_args() {
 	while (($#)); do
 		case "$1" in
-		--codex|--crush|--opencode)
+		--codex | --crush | --opencode)
 			CLIENTS+=("${1#--}")
 			shift
 			;;
-		--version|--url)
+		--version | --url)
 			(($# >= 2)) || error "Missing value for $1"
 			case "$1" in
 			--version) VERSION="$2" ;;
@@ -63,7 +65,7 @@ parse_args() {
 			esac
 			shift 2
 			;;
-		--help|-h)
+		--help | -h)
 			usage
 			exit 0
 			;;
@@ -78,20 +80,27 @@ install_xerj() {
 	local binary="$HOME/.local/bin/xerj"
 	case "$(uname -m)" in
 	x86_64) arch=x86_64 ;;
-	aarch64|arm64) arch=aarch64 ;;
+	aarch64 | arm64) arch=aarch64 ;;
 	*) error 'Unsupported architecture' ;;
 	esac
 	if [[ -z $version ]]; then
+		# shellcheck disable=SC2016
 		version=$(curl --fail --silent --show-error --location --proto '=https' \
 			https://api.github.com/repos/xerj-org/xerj/releases/latest |
-			python3 -c 'import json,sys; print(json.load(sys.stdin)["tag_name"])')
+			"$PERL_CMD" -MJSON::PP -e '
+				local $/;
+				my $data = decode_json(<STDIN>);
+				die "missing tag_name\n"
+					unless defined $data->{tag_name} && length $data->{tag_name};
+				print $data->{tag_name}, "\n";
+			')
 	fi
 	tag="v${version#v}"
 	[[ $tag =~ ^v[0-9][A-Za-z0-9.+-]*$ ]] || error 'Invalid release tag'
 	asset="xerj-${tag#v}-${arch}-unknown-linux-musl.tar.gz"
 	base="https://github.com/xerj-org/xerj/releases/download/$tag"
 	TMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/update-xerj.XXXXXX")
-	trap 'if [[ -n $TMP_DIR && -d $TMP_DIR ]]; then rm -rf -- "$TMP_DIR"; fi' EXIT
+	trap 'if [[ -n $BINARY_STAGE ]]; then rm -f -- "$BINARY_STAGE"; fi; if [[ -n $TMP_DIR && -d $TMP_DIR ]]; then rm -rf -- "$TMP_DIR"; fi' EXIT
 	for client in "$asset" "$asset.sha256"; do
 		curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
 			"$base/$client" -o "$TMP_DIR/$client"
@@ -101,18 +110,24 @@ install_xerj() {
 	[[ $digest =~ ^[0-9a-f]{64}$ ]] || error 'Invalid SHA-256 digest'
 	tr -d '\r' <"$TMP_DIR/$asset.sha256" | grep -xF -e "$digest  $asset" -e "$digest *$asset" >/dev/null || error 'SHA-256 mismatch'
 	# Extract only the expected regular binary, never archive paths or links.
-	python3 - "$TMP_DIR/$asset" "$TMP_DIR/xerj" "${asset%.tar.gz}/xerj" <<'PY'
-import shutil, sys, tarfile
-with tarfile.open(sys.argv[1]) as archive:
-    member = archive.getmember(sys.argv[3])
-    if not member.isfile():
-        raise ValueError("Expected a regular binary")
-    with archive.extractfile(member) as source, open(sys.argv[2], "wb") as target:
-        shutil.copyfileobj(source, target)
-PY
+	# shellcheck disable=SC2016
+	"$PERL_CMD" -MArchive::Tar -e '
+		my ($archive, $output, $expected) = @ARGV;
+		my $tar = Archive::Tar->new($archive, 1)
+			or die "cannot read archive: $!\n";
+		my @entries = $tar->get_files($expected);
+		die "expected exactly one regular binary\n"
+			unless @entries == 1 && $entries[0]->is_file
+			&& $entries[0]->size > 0;
+		$tar->extract_file($expected, $output)
+			or die "cannot extract binary: $!\n";
+	' "$TMP_DIR/$asset" "$TMP_DIR/xerj" "${asset%.tar.gz}/xerj" || error 'Invalid release archive'
 	mkdir -p -- "${binary%/*}"
-	install -m 0755 "$TMP_DIR/xerj" "$binary.new"
-	mv -f -- "$binary.new" "$binary"
+	[[ -s $TMP_DIR/xerj ]] || error 'Empty release executable'
+	BINARY_STAGE=$(mktemp "${binary}.new.XXXXXX")
+	install -m 0755 "$TMP_DIR/xerj" "$BINARY_STAGE"
+	mv -f -- "$BINARY_STAGE" "$binary"
+	BINARY_STAGE=''
 	log "Installed $tag: $binary"
 }
 
@@ -126,38 +141,76 @@ configure_clients() {
 			if [[ -f $config ]]; then cp -p -- "$config" "$config.bak.$(date +%s%N)"; fi
 			codex mcp add xerj -- "$binary" mcp --url "$url"
 		else
-			python3 - "$client" "$binary" "$url" <<'PY'
-import datetime, json, os, pathlib, shlex, shutil, sys, tempfile
-client, binary, url = sys.argv[1:]
-root = pathlib.Path(os.environ.get("XDG_CONFIG_HOME") or pathlib.Path.home() / ".config")
-path = root / client / ("crushrc" if client == "crush" else "opencode.json")
-old = path.read_text() if path.exists() else ""
-if client == "crush":
-    begin, end = "# BEGIN xerj managed", "# END xerj managed"
-    import re
-    if old.count(begin) != old.count(end) or old.count(begin) > 1:
-        raise ValueError("Malformed xerj managed block")
-    text = re.sub(re.escape(begin) + r".*?" + re.escape(end) + r"\n?", "", old, flags=re.S)
-    text = text.rstrip() + "\n" + begin + "\n" + "mcp add xerj --type stdio --command " + shlex.quote(binary) + " --args mcp --args --url --args " + shlex.quote(url) + "\n" + end + "\n"
-else:
-    if path.with_suffix(".jsonc").exists():
-        raise ValueError("Merge xerj into existing opencode.jsonc manually; refusing ambiguous configuration")
-    data = json.loads(old) if old.strip() else {}
-    data.setdefault("mcp", {})["xerj"] = {"type": "local", "command": [binary, "mcp", "--url", url], "enabled": True}
-    text = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
-path.parent.mkdir(parents=True, exist_ok=True)
-if path.exists():
-    shutil.copy2(path, str(path) + ".bak." + datetime.datetime.now().strftime("%Y%m%d%H%M%S%f"))
-fd, name = tempfile.mkstemp(prefix=".xerj-", dir=path.parent)
-try:
-    with os.fdopen(fd, "w", encoding="utf-8") as output:
-        output.write(text)
-    os.replace(name, path)
-finally:
-    if os.path.exists(name):
-        os.unlink(name)
-print("Configured " + str(path))
-PY
+			"$PERL_CMD" -MJSON::PP -MFile::Path -MFile::Basename -MFile::Copy \
+				-MFile::Temp - "$client" "$binary" "$url" <<'PERL'
+use strict;
+use warnings;
+
+my ($client, $binary, $url) = @ARGV;
+my $root = $ENV{XDG_CONFIG_HOME} || "$ENV{HOME}/.config";
+my $path = "$root/$client/" .
+	($client eq "crush" ? "crushrc" : "opencode.json");
+my $old = "";
+if (-f $path) {
+	open my $in, "<:raw", $path or die "cannot read $path: $!\n";
+	local $/;
+	$old = <$in>;
+	close $in or die "cannot close $path: $!\n";
+}
+
+sub shell_quote {
+	my ($value) = @_;
+	$value =~ s/'/'\\''/g;
+	return "'$value'";
+}
+
+my $text;
+if ($client eq "crush") {
+	my $begin = "# BEGIN xerj managed";
+	my $end = "# END xerj managed";
+	my $starts = () = $old =~ /\Q$begin\E/g;
+	my $ends = () = $old =~ /\Q$end\E/g;
+	die "Malformed xerj managed block\n"
+		if $starts != $ends || $starts > 1;
+	$old =~ s/\Q$begin\E.*?\Q$end\E\n?//s;
+	$old =~ s/\s+\z//;
+	$old .= "\n" if length $old;
+	$text = $old . $begin . "\n" .
+		"mcp add xerj --type stdio --command " . shell_quote($binary) .
+		" --args mcp --args --url --args " . shell_quote($url) .
+		"\n" . $end . "\n";
+}
+else {
+	my $jsonc = "$root/$client/opencode.jsonc";
+	die "Merge xerj into existing opencode.jsonc manually; refusing ambiguous configuration\n"
+		if -e $jsonc;
+	my $data = length($old) && $old =~ /\S/ ? decode_json($old) : {};
+	die "OpenCode configuration must be a JSON object\n"
+		unless ref($data) eq "HASH";
+	$data->{mcp} = {} unless exists $data->{mcp};
+	die "OpenCode mcp must be a JSON object\n"
+		unless ref($data->{mcp}) eq "HASH";
+	$data->{mcp}{xerj} = {
+		type    => "local",
+		command => [ $binary, "mcp", "--url", $url ],
+		enabled => JSON::PP::true,
+	};
+	$text = JSON::PP->new->pretty->canonical->encode($data);
+	$text .= "\n" unless $text =~ /\n\z/;
+}
+
+File::Path::make_path(File::Basename::dirname($path));
+if (-f $path) {
+	my $backup = "$path.bak.$$." . time;
+	File::Copy::copy($path, $backup) or die "cannot back up $path: $!\n";
+}
+my ($out, $temporary) = File::Temp::tempfile(
+	".xerj-XXXXXX", DIR => File::Basename::dirname($path), UNLINK => 0);
+print {$out} $text or die "cannot write $temporary: $!\n";
+close $out or die "cannot close $temporary: $!\n";
+rename $temporary, $path or die "cannot publish $path: $!\n";
+print "Configured $path\n";
+PERL
 		fi
 	done
 }
@@ -166,7 +219,7 @@ main() {
 	local client
 	parse_args "$@"
 	[[ $EUID -ne 0 ]] || error 'Run as the desktop user, without run0.'
-	for client in curl python3 sha256sum install; do
+	for client in curl "$PERL_CMD" sha256sum install; do
 		require_cmd "$client"
 	done
 	for client in "${CLIENTS[@]}"; do

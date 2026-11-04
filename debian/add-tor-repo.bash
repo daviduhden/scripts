@@ -136,14 +136,30 @@ log_detected_platform() {
 # into the APT keyring. pipefail makes a failed download or a failed
 # gpg run fail the pipeline; no temporary key file is kept.
 install_tor_key() {
-	log "Importing Tor Project signing key..."
-	install -d -m 0755 /usr/share/keyrings
-	local key_url
+	local key_url key_tmp fpr
 	key_url="https://deb.torproject.org/torproject.org"
 	key_url="${key_url}/A3C4F0F979CAA22CDBA8F512EE8CBC9E886DDD89.asc"
-	net_curl "$key_url" |
-		gpg --batch --yes --dearmor \
-			-o /usr/share/keyrings/deb.torproject.org-keyring.gpg
+	install -d -m 0755 /usr/share/keyrings
+	key_tmp=$(mktemp "${TMPDIR:-/tmp}/tor-key.XXXXXX") || {
+		error "Cannot create a temporary key file."
+	}
+	if ! net_curl "$key_url" -o "$key_tmp"; then
+		rm -f -- "$key_tmp"
+		error "Cannot download the Tor Project signing key."
+	fi
+	fpr=$(gpg --show-keys --with-colons "$key_tmp" 2>/dev/null |
+		awk -F: '$1 == "fpr" { print $10; exit }')
+	if [ "$fpr" != "A3C4F0F979CAA22CDBA8F512EE8CBC9E886DDD89" ]; then
+		rm -f -- "$key_tmp"
+		error "Tor signing key fingerprint mismatch: ${fpr:-missing}."
+	fi
+	if ! gpg --batch --yes --dearmor \
+		-o /usr/share/keyrings/deb.torproject.org-keyring.gpg \
+		<"$key_tmp"; then
+		rm -f -- "$key_tmp"
+		error "Cannot dearmor the Tor signing key."
+	fi
+	rm -f -- "$key_tmp"
 }
 
 # Write the selected repository transport as a deb822 source. The

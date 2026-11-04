@@ -38,6 +38,9 @@ SKIP_SERVICE_AND_USER_SETUP=0
 # The unit template is installed next to the scripts as systemd/xd.service.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SERVICE_SRC="${SCRIPT_DIR}/systemd/xd.service"
+if [ ! -f "$SERVICE_SRC" ]; then
+	SERVICE_SRC="${SCRIPT_DIR}/../lib/systemd/user/xd.service"
+fi
 
 usage() {
 	cat <<'EOF'
@@ -343,8 +346,20 @@ maybe_setup_service() {
 	fi
 }
 
+stop_xd_before_build() {
+	# A running executable cannot be replaced reliably; stop it before the
+	# build/install step and let install_user_service restart it afterwards.
+	if [ "$SKIP_SERVICE_AND_USER_SETUP" -eq 0 ] &&
+		systemctl --user is-active --quiet xd.service; then
+		WAS_ACTIVE=1
+		systemctl --user stop xd.service ||
+			error "failed to stop xd.service"
+	fi
+}
+
 run_update() {
 	clone_or_update_repo
+	stop_xd_before_build
 	build_if_needed
 	maybe_setup_service
 	log "Done. Make sure /usr/local/bin is in your PATH."

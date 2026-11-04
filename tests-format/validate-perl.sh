@@ -2,9 +2,14 @@
 set -eu
 
 # Announce the log path on descriptor 3, then send normal output to the log.
-# The failure list is created later, so the trap is installed after that point.
+# The log is retained; temporary result lists are cleaned on exit.
 exec 3>&1 4>&2
-TMPLOG="${TMPDIR:-/tmp}/validate-perl-$$.log"
+TMPLOG=$(mktemp "${TMPDIR:-/tmp}/validate-perl-XXXXXX")
+TMP_FAILS=
+UNFMT=
+TMP_SKIPS=
+trap '[ -z "$TMP_FAILS" ] || rm -f "$TMP_FAILS"; [ -z "$UNFMT" ] || rm -f "$UNFMT"; [ -z "$TMP_SKIPS" ] || rm -f "$TMP_SKIPS"' EXIT
+trap 'exit 1' HUP INT TERM
 printf '%s\n' "[INFO] Logging to: $TMPLOG" >&3
 exec >"$TMPLOG" 2>&1
 
@@ -12,7 +17,7 @@ exec >"$TMPLOG" 2>&1
 # - Recursively finds all Perl files under ROOT_DIR
 #   (default: current directory) and checks formatting
 #   with perltidy, Perl syntax and Perl::Critic.
-# - Usage: ./validate-perl.sh [ROOT_DIR]
+# - Usage: ./validate-perl.sh [--check|--format] [--strict] [ROOT_DIR]
 # - Requires: perl in PATH
 # - Optional: perltidy in PATH (formatting is skipped when absent);
 #   perlcritic, either in PATH or in the local::lib
@@ -23,7 +28,7 @@ exec >"$TMPLOG" 2>&1
 # and license details.
 
 usage() {
-	printf '%s\n' "Usage: $0 [ROOT_DIR]" >&2
+	printf '%s\n' "Usage: $0 [--check|--format] [--strict] [ROOT_DIR]" >&2
 	exit 2
 }
 
@@ -38,6 +43,22 @@ run_validate_perl() {
 
 	# One optional ROOT_DIR; reject option-looking paths and nonexistent
 	# directories before creating temporary files.
+	MODE=check
+	STRICT=0
+	while [ "$#" -gt 0 ]; do
+		case "$1" in
+		--check) MODE=check ;;
+		--format) MODE=format ;;
+		--strict) STRICT=1 ;;
+		--)
+			shift
+			break
+			;;
+		-*) usage ;;
+		*) break ;;
+		esac
+		shift
+	done
 	ROOT_DIR=${1:-.}
 	[ "$#" -le 1 ] || usage
 	[ "${ROOT_DIR#-}" = "$ROOT_DIR" ] || usage
@@ -55,22 +76,27 @@ run_validate_perl() {
 	fi
 
 	TMPDIR_BASE="${TMPDIR:-/tmp}"
-	TMP_FAILS="$TMPDIR_BASE/validate-perl-fails-$$.txt"
-	trap 'rm -f "$TMP_FAILS"' EXIT
+	TMP_FAILS=$(mktemp "$TMPDIR_BASE/validate-perl-fails-XXXXXX")
+	TMP_SKIPS=$(mktemp "$TMPDIR_BASE/validate-perl-skips-XXXXXX")
 
 	# The loops below run in pipeline subshells, so record findings in a file
 	# instead of a parent-shell counter.
 	note_fail() { printf '%s\n' "$1" >>"$TMP_FAILS"; }
+	note_skip() {
+		printf '[SKIP] %s\n' "$1" >&2
+		printf '%s\n' "$1" >>"$TMP_SKIPS"
+		if [ "$STRICT" -eq 1 ]; then note_fail "missing: $1"; fi
+	}
 
 	printf '%s\n' "[INFO] Formatting Perl files with perltidy..."
 	if command -v perltidy >/dev/null 2>&1; then
-		UNFMT="$TMPDIR_BASE/unformatted-perl-$$.txt"
+		UNFMT=$(mktemp "$TMPDIR_BASE/unformatted-perl-XXXXXX")
 
 		# Detection rewrites nothing: -o /dev/null discards the formatted
 		# output and -ast (--assert-tidy) returns nonzero when the file
 		# would change.
 		find "$ROOT_DIR" \
-			\( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) \
+			\( -name .git \) \
 			-prune -o -type f \
 			\( -name '*.pl' -o -name '*.pm' \
 			-o -name '*.t' -o -name '*.psgi' \) \
@@ -90,6 +116,10 @@ run_validate_perl() {
 			# is a validation failure so the resulting diff must be reviewed.
 			while IFS= read -r file; do
 				[ -n "$file" ] || continue
+				if [ "$MODE" = check ]; then
+					note_fail "$file"
+					continue
+				fi
 				# Ignore user/global profiles so validation is
 				# reproducible. "/" makes the temporary backup
 				# extension unusable; perltidy removes the backup
@@ -109,9 +139,7 @@ run_validate_perl() {
 
 		rm -f "$UNFMT"
 	else
-		printf '%s\n' \
-			"[INFO] perltidy not installed;" \
-			" skipping Perl formatting"
+		note_skip "perltidy not installed; skipping Perl formatting"
 	fi
 
 	printf '%s\n' "[INFO] Running Perl syntax checks..."
@@ -119,7 +147,7 @@ run_validate_perl() {
 	# than a syntax failure so the validator can run in a minimal install.
 	# The apostrophe is matched as . so quoting stays simple.
 	find "$ROOT_DIR" \
-		\( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) \
+		\( -name .git \) \
 		-prune -o -type f \
 		\( -name '*.pl' -o -name '*.pm' \
 		-o -name '*.t' -o -name '*.psgi' \) \
@@ -132,9 +160,7 @@ run_validate_perl() {
 			set -e
 			if [ "${perlc_rc:-0}" -ne 0 ]; then
 				if printf "%s" "$perlc_out" | grep -qi "Can.t locate"; then
-					printf '%s\n' \
-						"[WARN] Skipping syntax check for $f" \
-						" due to missing modules" 1>&2
+					note_skip "syntax check for $f: missing modules"
 				else
 					printf '%s\n' "[ERROR] Perl syntax error in: $f" 1>&2
 					printf "%s\n" "$f"
@@ -162,7 +188,7 @@ run_validate_perl() {
 	if [ -n "$PERLCRITIC" ]; then
 		PERLCRITIC_SEVERITY=${PERLCRITIC_SEVERITY:-5}
 		find "$ROOT_DIR" \
-			\( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) \
+			\( -name .git \) \
 			-prune -o -type f \
 			\( -name '*.pl' -o -name '*.pm' \
 			-o -name '*.t' -o -name '*.psgi' \) \
@@ -184,11 +210,10 @@ run_validate_perl() {
 				fi
 			done
 	else
-		printf '%s\n' \
-			"[INFO] perlcritic not installed (PATH or $PERL_LOCAL_LIB/bin);" \
-			" skipping Perl::Critic"
+		note_skip "perlcritic not installed (PATH or $PERL_LOCAL_LIB/bin); skipping Perl::Critic"
 	fi
 
+	printf '[INFO] Skipped checks: %s\n' "$(wc -l <"$TMP_SKIPS" | tr -d ' ')"
 	issues=0
 	if [ -f "$TMP_FAILS" ]; then
 		issues=$(sort -u "$TMP_FAILS" | wc -l | tr -d ' ')
@@ -205,11 +230,12 @@ run_validate_perl() {
 		exit 2
 	fi
 
-	printf '%s\n' "[INFO] Perl checks passed"
+	printf '%s\n' "[INFO] Perl checks completed; inspect skipped-check summary"
 	exit 0
 }
 
 main() {
+	require_cmd mktemp
 	require_cmd uname
 	require_cmd find
 	require_cmd sed

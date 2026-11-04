@@ -9,8 +9,8 @@ set -euo pipefail
 # - Install the .deb package via apt/apt-get
 #
 # Requirements: root privileges, network access, curl, awk, uname,
-# find, mktemp, and head, plus either apt-get or apt. gh and git are
-# optional; gh can also download the release asset when available.
+# find, and mktemp, plus either apt-get or apt. gh and git are optional;
+# gh can also download the release asset when available.
 #
 # Side effects:
 #  - Downloads the release .deb into a temporary directory under /tmp
@@ -225,7 +225,6 @@ check_prereqs() {
 	require_cmd uname
 	require_cmd find
 	require_cmd mktemp
-	require_cmd head
 	ensure_apt
 }
 

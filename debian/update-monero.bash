@@ -90,6 +90,8 @@ LWS_SERVICE_FILE="/etc/systemd/system/monero-lws.service"
 LWS_DATA_DIR="${LWS_DATA_DIR:-/var/lib/monero-lws/light_wallet_server}"
 LWS_LOG_DIR="/var/log/monero-lws"
 LWS_STATE_FILE="/var/lib/monero-lws/.installed-release-ref"
+BINARYFATE_FPR="${BINARYFATE_FPR:-81AC591FE9C4B65C5806AFC3F0AF4D462A0BDF92}"
+MONEROD_UNIT_SHA256="${MONEROD_UNIT_SHA256:-c8f53f448e59710f7bbed193c2f80523489aabc4a84002fbf29817f27e83dcbe}"
 LWS_REST_ADDR="${LWS_REST_ADDR:-http://0.0.0.0:8443}"
 LWS_REST_ADDR_V6="${LWS_REST_ADDR_V6:-}"
 LWS_ADMIN_REST_ADDR="${LWS_ADMIN_REST_ADDR:-http://127.0.0.1:8444}"
@@ -347,14 +349,22 @@ has_cmd() {
 # or append a new one. The file is edited in place with no backup, and
 # a key with a suffix such as "key2" is not matched.
 set_config_value() {
-	local file key value
+	local file key value escaped
 	file="$1"
 	key="$2"
 	value="$3"
 
+	case "$value" in
+	*$'\n'* | *$'\r'*)
+		error "Configuration value for ${key} contains a newline."
+		;;
+	esac
+	# Escape sed replacement metacharacters. '#' is the delimiter used below.
+	escaped=$(printf '%s' "$value" | sed 's/[&#\\]/\\&/g')
+
 	if grep -Eq "^[[:space:]]*${key}=" "$file"; then
 		sed -i -E \
-			"s#^[[:space:]]*${key}=.*#${key}=${value}#" \
+			"s#^[[:space:]]*${key}=.*#${key}=${escaped}#" \
 			"$file"
 	else
 		printf '%s=%s\n' "$key" "$value" >>"$file"
@@ -580,7 +590,11 @@ EOF
 configure_monero_privacy_transports() {
 	if [[ -f $TOR_CONF_FILE ]] &&
 		command -v tor >/dev/null 2>&1; then
-		local key_line_8443 key_line_18081
+		local key_line_8443 key_line_18081 tor_backup
+		tor_backup=$(mktemp "${TMPDIR:-/tmp}/torrc-monero.XXXXXX") ||
+			error "Cannot back up torrc before modification."
+		cp -a "$TOR_CONF_FILE" "$tor_backup" ||
+			error "Cannot back up $TOR_CONF_FILE."
 		key_line_8443="^HiddenServiceDir"
 		key_line_8443="${key_line_8443}"' \/var\/lib\/tor\/monero\/?$'
 		key_line_18081="^HiddenServiceDir"
@@ -603,8 +617,13 @@ configure_monero_privacy_transports() {
 				"/${key_line_18081}/a HiddenServicePort 18081 127.0.0.1:18081" \
 				"$TOR_CONF_FILE"
 		fi
-		tor --verify-config -f "$TOR_CONF_FILE" \
-			--User debian-tor >/dev/null
+		if ! tor --verify-config -f "$TOR_CONF_FILE" \
+			--User debian-tor >/dev/null; then
+			cp -a "$tor_backup" "$TOR_CONF_FILE"
+			rm -f -- "$tor_backup"
+			error "torrc validation failed; the previous file was restored."
+		fi
+		rm -f -- "$tor_backup"
 		systemctl restart tor
 	fi
 
@@ -868,9 +887,16 @@ run_update() {
 			if [[ ${SKIP_SERVICE_AND_USER_SETUP} -eq 0 ]]; then
 				configure_monerod_for_lws
 				configure_lws_service
+				configure_monero_privacy_transports
 				open_firewall_ports
 				systemctl daemon-reload
-				systemctl restart monerod
+				if systemctl is-active --quiet monerod; then
+					systemctl restart monerod
+				else
+					log "Starting monerod for monero-lws integration..."
+					systemctl start monerod ||
+						warn "Could not start monerod."
+				fi
 				systemctl enable monero-lws \
 					>/dev/null 2>&1 || true
 				systemctl restart monero-lws
@@ -953,6 +979,13 @@ run_update() {
 			"binaryFate GPG key"
 	fi
 
+	KEY_FPR=$(gpg --show-keys --with-colons "$BINARYFATE_KEY" \
+		2>/dev/null | awk -F: '$1 == "fpr" { print $10; exit }')
+	if [[ ${KEY_FPR:-} != "$BINARYFATE_FPR" ]]; then
+		error "binaryFate key fingerprint mismatch:" \
+			"expected $BINARYFATE_FPR, got ${KEY_FPR:-missing}"
+	fi
+
 	if ! gpg --homedir "$GPG_HOME" --batch \
 		--import "${BINARYFATE_KEY}" \
 		>/dev/null 2>&1; then
@@ -961,11 +994,14 @@ run_update() {
 	fi
 
 	log "Verifying hashes file signature..."
-	if ! gpg --homedir "$GPG_HOME" --batch \
-		--verify "${HASHES_ASC}" \
-		>/dev/null 2>&1; then
+	if ! VERIFY_STATUS=$(gpg --homedir "$GPG_HOME" --batch \
+		--status-fd 1 --verify "${HASHES_ASC}" 2>/dev/null); then
 		error "hash file signature" \
 			"verification failed"
+	fi
+	if ! printf '%s\n' "$VERIFY_STATUS" |
+		grep -Fq -- "[GNUPG:] VALIDSIG $BINARYFATE_FPR"; then
+		error "hash file signature is not from the pinned binaryFate key"
 	fi
 
 	if ! gpg --homedir "$GPG_HOME" --batch \
@@ -1162,6 +1198,12 @@ EOF
 				"unit (git/curl chain)"
 		fi
 
+		UNIT_HASH=$(sha256sum "${UNIT_TMP}" | awk '{print $1}')
+		if [[ ${UNIT_HASH} != "$MONEROD_UNIT_SHA256" ]]; then
+			error "monerod.service checksum mismatch:" \
+				"expected $MONEROD_UNIT_SHA256, got $UNIT_HASH"
+		fi
+
 		# The upstream unit ships Debian-repo paths; rewrite them to the
 		# locations this script installs into (/usr/bin + /etc/monerod.conf).
 		sed -i \
@@ -1169,8 +1211,12 @@ EOF
 			-e "s#/etc/monero/monerod.conf#${MONEROD_CONF}#g" \
 			"${UNIT_TMP}"
 
-		install -m 0644 "${UNIT_TMP}" \
-			/etc/systemd/system/monerod.service
+		if ! install -m 0644 "${UNIT_TMP}" \
+			"/etc/systemd/system/.monerod.service.new" ||
+			! mv -f "/etc/systemd/system/.monerod.service.new" \
+				/etc/systemd/system/monerod.service; then
+			error "cannot publish monerod.service"
+		fi
 
 		log "Reloading systemd daemon..."
 		systemctl daemon-reload

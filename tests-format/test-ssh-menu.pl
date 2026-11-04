@@ -28,7 +28,7 @@ my $fail = 0;
 sub fail_test {
     my ($msg) = @_;
     print STDERR "[FAIL] $msg\n";
-    $fail = 1;
+    return $fail = 1;
 }
 
 # Locate perl/ssh-menu.pl relative to this test (one level up). A missing
@@ -212,6 +212,70 @@ for my $port ( '', '2222' ) {
       || $config !~ /^hostname example\.com\r?$/m
       || $config !~ /^user testuser\r?$/m
       || $config !~ /^port $expected_port\r?$/m;
+}
+
+# Simulate only Windows rename failures in a child interpreter. This exercises
+# recovery on every platform; it is not a substitute for native Windows tests.
+my $recovery_driver = File::Spec->catfile( $tmp, 'state-recovery.pl' );
+open my $recovery_fh, '>', $recovery_driver
+  or die "write $recovery_driver: $!";
+print {$recovery_fh} <<'RECOVERY';
+use strict;
+use warnings;
+our ( $rename_calls, $fail_restore );
+BEGIN {
+    *CORE::GLOBAL::rename = sub {
+        my ( $from, $to ) = @_;
+        $rename_calls++;
+        if ( $rename_calls == 1 || $rename_calls == 3
+            || ( $rename_calls == 4 && $fail_restore ) )
+        {
+            $! = 13;
+            return 0;
+        }
+        return CORE::rename( $from, $to );
+    };
+}
+require shift;
+{
+    no warnings qw(redefine once);
+    *is_windows = sub { return 1; };
+}
+my ( $path, $pending, $fail ) = @ARGV;
+$fail_restore = $fail;
+exit( replace_state_file( $path, $pending ) ? 1 : 0 );
+RECOVERY
+close $recovery_fh or die "close $recovery_driver: $!";
+for my $fail_restore ( 0, 1 ) {
+    my $recovery_dir = File::Spec->catdir( $tmp, "recovery-$fail_restore" );
+    make_path($recovery_dir);
+    my $path    = File::Spec->catfile( $recovery_dir, 'state' );
+    my $pending = File::Spec->catfile( $recovery_dir, 'pending' );
+    for my $fixture ( $path, "$path.bak", $pending ) {
+        open my $fh, '>', $fixture or die "write $fixture: $!";
+        print {$fh} $fixture eq $pending ? 'new' : 'original';
+        close $fh or die "close $fixture: $!";
+    }
+    my ( $output, $status ) =
+      run_perl( '', $recovery_driver, $script, $path, $pending, $fail_restore );
+    fail_test('state replacement did not report installation failure')
+      if $status;
+    fail_test('preexisting .bak file was removed') unless -f "$path.bak";
+    if ($fail_restore) {
+        fail_test('failed restoration did not identify recovery copy')
+          unless $output =~ /recovery copy:/;
+        my @copies =
+          glob File::Spec->catfile( $recovery_dir, 'ssh-menu-backup.*' );
+        fail_test('original recovery copy lost') unless @copies == 1;
+    }
+    else {
+        open my $fh, '<', $path or die "read restored $path: $!";
+        local $/ = undef;
+        my $restored = <$fh>;
+        close $fh;
+        fail_test('original state was not restored')
+          unless $restored eq 'original';
+    }
 }
 
 # Report one line; failures go to stderr and set a nonzero exit status.

@@ -344,7 +344,9 @@ tmpdir=$(mktemp -d /tmp/crush-update.XXXXXX) || {
 	error "Cannot create temporary directory."
 	exit 1
 }
-trap 'rm -rf "$tmpdir"' EXIT INT TERM
+trap 'rm -rf "$tmpdir"' EXIT
+trap 'rm -rf "$tmpdir"; exit 130' INT
+trap 'rm -rf "$tmpdir"; exit 143' TERM
 
 # Ask the GitHub API for the latest release and read the tag name from the
 # JSON. Network access and a CA bundle are required for this request.

@@ -115,9 +115,26 @@ build_lyrebird() {
 # Copy the built binary into /usr/local/bin. cp preserves the source
 # mode, and chmod +x makes the installed file executable explicitly.
 install_lyrebird() {
+	local staged backup
 	log "Installing lyrebird to /usr/local/bin..."
-	cp ./lyrebird /usr/local/bin/
-	chmod +x /usr/local/bin/lyrebird
+	# Stage beside the destination and rename atomically. A plain cp over a
+	# running transport fails with ETXTBSY on Linux.
+	staged=$(mktemp /usr/local/bin/.lyrebird.XXXXXX) || {
+		error "Cannot create a staging file for lyrebird."
+	}
+	if ! install -m 0755 ./lyrebird "$staged"; then
+		rm -f "$staged"
+		error "Cannot stage lyrebird."
+	fi
+	if [ -e /usr/local/bin/lyrebird ]; then
+		backup="/usr/local/bin/lyrebird.bak.$(date +%Y%m%d%H%M%S)"
+		cp -p /usr/local/bin/lyrebird "$backup" ||
+			warn "Could not back up the previous lyrebird binary."
+	fi
+	if ! mv -f "$staged" /usr/local/bin/lyrebird; then
+		rm -f "$staged"
+		error "Cannot activate lyrebird."
+	fi
 	log "Lyrebird installed successfully."
 }
 

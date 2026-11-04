@@ -499,8 +499,11 @@ subtest '--report writes UTF-8 with LF' => sub {
     ok( -e $report, 'report written' );
     my $bytes = slurp_raw($report);
     unlike( $bytes, qr/\r/, 'report uses LF only' );
-    ok( eval { decode( 'UTF-8', $bytes, Encode::FB_CROAK() ); 1 },
-        'report is valid UTF-8' );
+    my $valid_utf8 = eval {
+        decode( 'UTF-8', $bytes, Encode::FB_CROAK() );
+        1;
+    };
+    ok( $valid_utf8, 'report is valid UTF-8' );
     done_testing();
 };
 
@@ -694,6 +697,186 @@ subtest '--version reports the project version' => sub {
         $v =~ s/\s+\z//;
         like( $out, qr/\Q$v\E/, 'matches the VERSION file' );
     }
+    done_testing();
+};
+
+# Exercise the bounded reader directly so the exact size boundary and empty
+# files are distinguished from I/O failure without relying on filesystem ACLs.
+subtest 'bounded reads distinguish empty, oversized and invalid inputs' => sub {
+    my $tmp  = newtmp();
+    my $path = File::Spec->catfile( $tmp, 'input.txt' );
+    write_raw( $path, '' );
+    is( NormalizeFiles::read_all( $path, 0 ), '', 'empty file at zero limit' );
+    write_raw( $path, 'abcd' );
+    my @snapshot;
+    is( NormalizeFiles::read_all( $path, 4, \@snapshot ),
+        'abcd', 'exact limit accepted' );
+    ok( @snapshot, 'pre-read identity returned' );
+    ok( !defined NormalizeFiles::read_all( $path, 3 ),
+        'oversized file rejected' );
+    ok(
+        !defined NormalizeFiles::read_all( $tmp, 100 ),
+        'directory rejected rather than treated as empty'
+    );
+    ok(
+        !defined NormalizeFiles::read_sniff( $tmp, 100 ),
+        'failed sniff read is not treated as empty content'
+    );
+    ok( !defined NormalizeFiles::read_all( "$path.missing", 100 ),
+        'missing file reports failure' );
+    my $link = File::Spec->catfile( $tmp, 'link.txt' );
+
+    if ( symlink( $path, $link ) ) {
+        ok( !defined NormalizeFiles::read_all( $link, 100 ),
+            'symlink rejected' );
+    }
+    done_testing();
+};
+
+subtest 'changed source is not replaced after conversion' => sub {
+    my $tmp  = newtmp();
+    my $path = File::Spec->catfile( $tmp, 'input.txt' );
+    write_raw( $path, "old\r\n" );
+    my @snapshot;
+    NormalizeFiles::read_all( $path, 100, \@snapshot );
+    write_raw( $path, 'concurrent writer changed this file' );
+    my $cfg    = NormalizeFiles::default_config();
+    my $result = { errors => 0 };
+    ok(
+        !NormalizeFiles::atomic_write(
+            $cfg, $path, "old\n", $result, \@snapshot
+        ),
+        'replacement rejected after source change'
+    );
+    is(
+        slurp_raw($path),
+        'concurrent writer changed this file',
+        'concurrent contents preserved'
+    );
+    is( $result->{errors}, 1, 'failure counted' );
+    done_testing();
+};
+
+subtest 'metadata failure preserves original and cleans temporary output' =>
+  sub {
+    my $tmp  = newtmp();
+    my $path = File::Spec->catfile( $tmp, 'input.txt' );
+    write_raw( $path, 'original' );
+    my $cfg    = NormalizeFiles::default_config();
+    my $result = { errors => 0 };
+    {
+        no warnings qw(redefine once);
+        local *NormalizeFiles::preserve_metadata = sub { return 0; };
+        ok(
+            !NormalizeFiles::atomic_write(
+                $cfg, $path, 'replacement', $result
+            ),
+            'metadata failure stops replacement'
+        );
+    }
+    is( slurp_raw($path),  'original', 'original content survives' );
+    is( $result->{errors}, 1,          'failure counted' );
+    opendir my $dh, $tmp or die "opendir $tmp: $!";
+    my @temporary = grep { /^\.norm-tmp-/ } readdir $dh;
+    closedir $dh;
+    is( scalar @temporary, 0, 'temporary output removed' );
+    done_testing();
+  };
+
+subtest 'report write failures count as errors' => sub {
+    no warnings 'once';
+    plan skip_all => '/dev/full is not available' unless -c '/dev/full';
+    my $result = { errors => 0 };
+    my $cfg    = { report => '/dev/full' };
+    local @NormalizeFiles::LOG = ('nonempty report');
+    NormalizeFiles::write_report( $cfg, $result );
+    is( $result->{errors}, 1, 'buffered report failure counted' );
+    done_testing();
+};
+
+subtest
+  'replacement recovery retains original on simulated Windows failures' => sub {
+    my $tmp    = newtmp();
+    my $driver = File::Spec->catfile( $tmp, 'recovery.pl' );
+    write_raw( $driver, <<'RECOVERY' );
+use strict;
+use warnings;
+our ( $rename_calls, $fail_restore );
+BEGIN {
+    *CORE::GLOBAL::rename = sub {
+        my ( $from, $to ) = @_;
+        $rename_calls++;
+        if ( $rename_calls == 1 || $rename_calls == 3
+            || ( $rename_calls == 4 && $fail_restore ) )
+        {
+            $! = 13;
+            return 0;
+        }
+        return CORE::rename( $from, $to );
+    };
+}
+require shift;
+{
+    no warnings qw(redefine once);
+    *NormalizeFiles::is_windows = sub { return 1; };
+}
+my ( $path, $pending, $fail ) = @ARGV;
+$fail_restore = $fail;
+exit( NormalizeFiles::safe_replace( $pending, $path ) ? 1 : 0 );
+RECOVERY
+    for my $fail_restore ( 0, 1 ) {
+        my $dir = File::Spec->catdir( $tmp, "case-$fail_restore" );
+        make_path($dir);
+        my $path    = File::Spec->catfile( $dir, 'source' );
+        my $pending = File::Spec->catfile( $dir, 'pending' );
+        write_raw( $path,    'original' );
+        write_raw( $pending, 'converted' );
+        open my $child, '-|', $^X, $driver, $SCRIPT, $path, $pending,
+          $fail_restore
+          or die "cannot run recovery driver: $!";
+        { local $/ = undef; my $output = <$child>; }
+        close $child;
+        is( $? >> 8, 0, 'replacement failure reported to caller' );
+
+        if ($fail_restore) {
+            opendir my $dh, $dir or die "opendir $dir: $!";
+            my @copies = grep { /^\.norm-bak-/ } readdir $dh;
+            closedir $dh;
+            is( scalar @copies, 1, 'recovery copy kept on restore failure' );
+            is( slurp_raw( File::Spec->catfile( $dir, $copies[0] ) ),
+                'original', 'original bytes recoverable' )
+              if @copies;
+        }
+        else {
+            is( slurp_raw($path), 'original', 'original restored' );
+        }
+    }
+    done_testing();
+  };
+
+subtest 'successful replacement preserves requested POSIX metadata' => sub {
+    plan skip_all => 'POSIX mode semantics required' if $WINDOWS;
+    my $tmp  = newtmp();
+    my $path = File::Spec->catfile( $tmp, 'input.txt' );
+    write_raw( $path, 'original' );
+    chmod 0640, $path or die "chmod $path: $!";
+    utime 1_000_000_000, 1_000_000_001, $path
+      or die "utime $path: $!";
+    my @snapshot;
+    NormalizeFiles::read_all( $path, 100, \@snapshot );
+    my $cfg = NormalizeFiles::default_config();
+    $cfg->{preserve_times} = 1;
+    my $result = { errors => 0 };
+    ok(
+        NormalizeFiles::atomic_write(
+            $cfg, $path, 'converted', $result, \@snapshot
+        ),
+        'replacement succeeded'
+    );
+    my @after = stat($path);
+    is( $after[2] & oct(7777), oct(640),     'permissions preserved' );
+    is( $after[8],             $snapshot[8], 'pre-read access time preserved' );
+    is( $after[9],             $snapshot[9], 'modification time preserved' );
     done_testing();
 };
 

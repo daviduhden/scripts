@@ -4,8 +4,12 @@ set -eu
 # Announce the log path on descriptor 3, then send normal output to the log.
 # mandoc diagnostics also land there; only the initial log path is printed to
 # the terminal.
+umask 077
 exec 3>&1 4>&2
-TMPLOG="${TMPDIR:-/tmp}/validate-manpages-$$.log"
+TMPLOG=$(mktemp "${TMPDIR:-/tmp}/validate-manpages.XXXXXX") || {
+	printf '%s\n' "[ERROR] cannot create log file" >&3
+	exit 1
+}
 printf '%s\n' "[INFO] Logging to: $TMPLOG" >&3
 exec >"$TMPLOG" 2>&1
 

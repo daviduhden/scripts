@@ -365,6 +365,30 @@ end..."
 }
 
 main() {
+	local assume_yes=0
+	case "${1:-}" in
+	--yes)
+		assume_yes=1
+		shift
+		;;
+	--help | -h)
+		printf '%s\n' \
+			"Usage: postinstall.bash [--yes]" \
+			"Runs the interactive SecureBlue post-install sequence." \
+			"--yes permits a non-interactive run; it can reboot the host."
+		return 0
+		;;
+	"") : ;;
+	*)
+		printf '%s\n' "[ERROR] unknown option: $1" >&2
+		return 2
+		;;
+	esac
+	if [ ! -t 0 ] && [ "$assume_yes" -ne 1 ]; then
+		printf '%s\n' \
+			"[ERROR] non-interactive input requires --yes." >&2
+		return 1
+	fi
 	require_cmd bash
 	require_cmd tee
 	require_cmd systemctl

@@ -14,9 +14,9 @@ set -euo pipefail
 #     rustc or build scripts.
 #
 # Network trust is Git/HTTPS only: cargo builds tagged upstream commits and no
-# separate checksum or tag signature is verified. The rustup fallback downloads
-# and executes https://sh.rustup.rs without an independent checksum. The
-# downloaded script is kept in a temporary file removed by the EXIT trap.
+# separate tag signature is verified. The rustup fallback downloads a pinned
+# native installer and checks its published SHA-256 over HTTPS. This is an
+# integrity check, not an independent signature. Temporaries use the EXIT trap.
 #
 # OpenSSL handling: Homebrew's keg-only openssl@4/openssl is preferred and
 # patched into the binary's rpath with patchelf because cargo does not emit an
@@ -171,16 +171,38 @@ ensure_rust() {
 		error "curl is required to install rustup but is not installed."
 		exit 1
 	fi
-	# Register the installer with the EXIT trap before downloading so an
-	# interrupted download is also cleaned up.
-	local rustup_script
-	rustup_script="$(mktemp "${TMPDIR:-/tmp}/rustup-init.XXXXXX.sh")"
-	TMP_FILES+=("$rustup_script")
-	log "Downloading rustup installer..."
-	curl --proto '=https' --tlsv1.2 -sSf \
-		https://sh.rustup.rs -o "$rustup_script"
-	log "Running rustup installer..."
-	sh "$rustup_script" -y
+	# Use the documented native installer plus its published digest. No shell
+	# bootstrap is executed, and the rustup release is pinned independently of
+	# the Rust toolchain selected by rustup.
+	local rustup_binary rustup_digest arch expected
+	local rustup_version="${RUSTUP_VERSION:-1.29.3}"
+	[[ $rustup_version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+		error 'Invalid RUSTUP_VERSION'
+		exit 1
+	}
+	case "$(uname -m)" in
+	x86_64) arch=x86_64 ;;
+	aarch64) arch=aarch64 ;;
+	*)
+		error 'Install a Rust toolchain manually on this architecture'
+		exit 1
+		;;
+	esac
+	require_cmd sha256sum
+	rustup_binary=$(mktemp "${TMPDIR:-/tmp}/rustup-init.XXXXXX")
+	rustup_digest=$(mktemp "${TMPDIR:-/tmp}/rustup-digest.XXXXXX")
+	TMP_FILES+=("$rustup_binary" "$rustup_digest")
+	local base="https://static.rust-lang.org/rustup/archive/$rustup_version/$arch-unknown-linux-gnu/rustup-init"
+	curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' "$base" -o "$rustup_binary"
+	curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' "$base.sha256" -o "$rustup_digest"
+	expected=$(awk 'NR == 1 {print $1}' "$rustup_digest")
+	[[ $expected =~ ^[[:xdigit:]]{64}$ ]] || {
+		error 'Invalid rustup SHA-256'
+		exit 1
+	}
+	printf '%s  %s\n' "${expected,,}" "$rustup_binary" | sha256sum -c -
+	chmod 0700 "$rustup_binary"
+	"$rustup_binary" -y
 
 	if [ -f "$HOME/.cargo/env" ]; then
 		# shellcheck source=/dev/null

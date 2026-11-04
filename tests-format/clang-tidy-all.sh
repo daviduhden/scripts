@@ -4,8 +4,12 @@ set -eu
 # Keep the original streams on descriptors 3 and 4 and send normal output to a
 # per-run log. Descriptor 3 is used to announce the log path before the
 # redirection; the log remains available after the script exits.
+umask 077
 exec 3>&1 4>&2
-TMPLOG="${TMPDIR:-/tmp}/clang-tidy-all-$$.log"
+TMPLOG=$(mktemp "${TMPDIR:-/tmp}/clang-tidy-all.XXXXXX") || {
+	printf '%s\n' "[ERROR] cannot create log file" >&3
+	exit 1
+}
 printf '%s\n' "[INFO] Logging to: $TMPLOG" >&3
 exec >"$TMPLOG" 2>&1
 
@@ -106,7 +110,10 @@ run_clang_tidy_all() {
 	# clang-tidy runs in a pipeline subshell, so a failure counter cannot be
 	# updated in the parent shell. Record each failing file in a temporary
 	# file instead and clean it up on every exit path.
-	TMP_FAILS="${TMPDIR:-/tmp}/clang-tidy-all-fails-$$.txt"
+	TMP_FAILS=$(mktemp "${TMPDIR:-/tmp}/clang-tidy-all-fails.XXXXXX") || {
+		printf '%s\n' "[ERROR] cannot create failure list" >&2
+		exit 1
+	}
 	trap 'rm -f "$TMP_FAILS"' EXIT HUP INT TERM
 	: >"$TMP_FAILS"
 

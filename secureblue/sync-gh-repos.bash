@@ -230,7 +230,7 @@ sync_single_repo() {
 	log "Cloning $name -> $target"
 	git clone "$ssh_url" "$target"
 	if [ -n "${default_branch:-}" ]; then
-		git -C "$target" checkout "$default_branch"
+		git -C "$target" checkout -- "$default_branch"
 	fi
 
 	if ! repo_has_content "$target"; then
@@ -264,15 +264,25 @@ sync_single_repo() {
 }
 
 sync_repositories() {
+	local listing
 	log "Listing repositories for $OWNER"
-	# --paginate walks every API page; jq emits one tab-separated record per
-	# repository so the while loop does not need to parse JSON.
+	# Capture the complete listing first. Process substitution does not
+	# propagate the producer's failure, so a rate limit or expired token
+	# would otherwise look like a successful empty run.
+	if ! listing=$(gh api --paginate \
+		"users/${OWNER}/repos" \
+		--jq '.[] | [.name, .ssh_url, .default_branch] | @tsv'); then
+		error "could not list repositories for ${OWNER}; refusing to continue."
+		return 1
+	fi
+	if [ -z "$listing" ]; then
+		error "GitHub returned no repositories for ${OWNER}."
+		return 1
+	fi
 	while IFS=$'\t' read -r name ssh_url default_branch; do
 		[ -n "$name" ] || continue
 		sync_single_repo "$name" "$ssh_url" "$default_branch"
-	done < <(gh api --paginate \
-		"users/${OWNER}/repos" \
-		--jq '.[] | [.name, .ssh_url, .default_branch] | @tsv')
+	done <<<"$listing"
 
 	log "Sync complete"
 }

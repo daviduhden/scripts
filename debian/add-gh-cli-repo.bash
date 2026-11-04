@@ -191,6 +191,7 @@ ensure_https_transport() {
 # keyring. The temporary download is removed after install or when the
 # download fails.
 install_keyring() {
+	local fpr
 	mkdir -p /etc/apt/keyrings &&
 		chmod 0755 /etc/apt/keyrings
 	KEYRING="/etc/apt/keyrings/githubcli-archive-keyring.gpg"
@@ -202,7 +203,16 @@ install_keyring() {
 		error "failed to download GitHub CLI archive key" \
 			"(curl/wget)."
 	fi
-	install -m 0644 "$TMPKEY" "$KEYRING"
+	fpr=$(gpg --show-keys --with-colons "$TMPKEY" 2>/dev/null |
+		awk -F: '$1 == "fpr" { print $10; exit }')
+	if [ "$fpr" != "2C6106201985B60E6C7AC87323F3D4EA75716059" ]; then
+		rm -f "$TMPKEY"
+		error "GitHub CLI signing key fingerprint mismatch: ${fpr:-missing}."
+	fi
+	install -m 0644 "$TMPKEY" "${KEYRING}.new" ||
+		error "Cannot stage $KEYRING."
+	mv -f "${KEYRING}.new" "$KEYRING" ||
+		error "Cannot publish $KEYRING."
 	rm -f "$TMPKEY"
 	chmod go+r "$KEYRING"
 }

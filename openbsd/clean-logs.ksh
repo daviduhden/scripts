@@ -21,12 +21,15 @@ export PATH
 # If DRY_RUN=1 is set in the environment, the script will only show
 # what would be deleted, without actually removing files. Common truthy
 # spellings are accepted; anything else means a real run.
-typeset DRY_RUN
+typeset DRY_RUN OLDER_THAN FORCE OLD_ROOTS
 DRY_RUN="${DRY_RUN:-0}"
 case "$DRY_RUN" in
 1 | true | TRUE | yes | YES | on | ON) DRY_RUN=1 ;;
 *) DRY_RUN=0 ;;
 esac
+OLDER_THAN="${OLDER_THAN:-7}"
+FORCE="${FORCE:-0}"
+OLD_ROOTS="${OLD_ROOTS:-/var/log /var/tmp /tmp /etc}"
 
 # Timestamped message helpers. All output goes through ksh's print builtin;
 # warnings and errors are sent to stderr, progress to stdout.
@@ -51,9 +54,22 @@ parse_args() {
 				"using non-default options instead of standard behavior."
 			shift
 			;;
+		--older-than)
+			if [ "$#" -lt 2 ] || ! print -r -- "$2" |
+				grep -Eq '^[0-9]+$'; then
+				error "--older-than requires a non-negative day count."
+				exit 2
+			fi
+			OLDER_THAN=$2
+			shift 2
+			;;
+		--force)
+			FORCE=1
+			shift
+			;;
 		*)
 			error "Unknown option: $1"
-			error "Try: $0 --dry-run"
+			error "Try: $0 --dry-run | --force [--older-than DAYS]"
 			exit 1
 			;;
 		esac
@@ -89,23 +105,32 @@ clean_gz_logs() {
 # systems such as /home, /tmp, /usr, and /var, but it still walks every
 # directory that lives on the root file system.
 clean_old_files() {
+	typeset root
 	if [ "$DRY_RUN" -eq 1 ]; then
-		log "DRY RUN: listing *.old files under /"
-		log "(no deletion will occur):"
-		if ! find / -xdev -type f -name '*.old' -print; then
-			error "Failed to list *.old files under /."
-			return 1
-		fi
+		log "DRY RUN: listing *.old files older than ${OLDER_THAN} day(s)"
+		log "under: ${OLD_ROOTS}"
+		for root in $OLD_ROOTS; do
+			[ -d "$root" ] || continue
+			if ! find "$root" -xdev -type f -name '*.old' \
+				-mtime +"$OLDER_THAN" -print; then
+				error "Failed to list *.old files under ${root}."
+				return 1
+			fi
+		done
 		return
 	fi
 
-	log "Deleting *.old files under / (use with care)..."
-	# -xdev keeps us on the root filesystem only
-	if ! find / -xdev -type f -name '*.old' \
-		-print -exec rm -f {} +; then
-		error "Failed while deleting *.old files under /."
-		return 1
-	fi
+	log "Deleting *.old files older than ${OLDER_THAN} day(s)"
+	log "under: ${OLD_ROOTS}"
+	for root in $OLD_ROOTS; do
+		[ -d "$root" ] || continue
+		# -xdev keeps each walk on the filesystem containing the root.
+		if ! find "$root" -xdev -type f -name '*.old' \
+			-mtime +"$OLDER_THAN" -print -exec rm -f {} +; then
+			error "Failed while deleting *.old files under ${root}."
+			return 1
+		fi
+	done
 }
 
 main() {
@@ -116,6 +141,10 @@ main() {
 	# one fails, and the exit status reports whether either had errors.
 	if [ "$DRY_RUN" -ne 1 ] && [ "$(id -u)" -ne 0 ]; then
 		error "This script must be run as root unless --dry-run is used."
+		exit 1
+	fi
+	if [ "$DRY_RUN" -ne 1 ] && [ "$FORCE" -ne 1 ]; then
+		error "Real deletion requires --force; use --dry-run to preview."
 		exit 1
 	fi
 

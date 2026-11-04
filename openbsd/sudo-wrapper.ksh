@@ -110,8 +110,11 @@ handle_sudoedit() {
 
 	# Split the editor string on whitespace so values such as
 	# "vi -u NONE" or "code --wait" work, matching the Bash wrapper.
+	# Disable globbing while splitting so EDITOR='vim *' stays literal.
+	set -f
 	# shellcheck disable=SC2086
 	set -A editor_cmd -- $editor
+	set +f
 
 	if [ -z "${editor_cmd[0]:-}" ]; then
 		error "sudo-wrapper error: editor is empty."

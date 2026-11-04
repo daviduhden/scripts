@@ -325,34 +325,41 @@ restart_services() {
 # restrict the resulting files to the owner, then delete audit files
 # older than seven days. Missing tools are skipped with a warning.
 run_security_audit() {
-	local audit_ts audit_log audit_report syscheck_log
+	local audit_ts audit_dir audit_log audit_report syscheck_log
 	audit_ts="$(date +%Y%m%d-%H%M%S)"
 
 	if command -v lynis >/dev/null 2>&1; then
-		mkdir -p /tmp/lynis-audit
-		audit_log="/tmp/lynis-audit/lynis-${audit_ts}.log"
-		audit_report="/tmp/lynis-audit/lynis-${audit_ts}.dat"
+		umask 077
+		audit_dir=$(mktemp -d "${TMPDIR:-/tmp}/lynis-audit.XXXXXX") || {
+			warn "Cannot create a private Lynis log directory."
+			return
+		}
+		audit_log="$audit_dir/lynis-${audit_ts}.log"
+		audit_report="$audit_dir/lynis-${audit_ts}.dat"
 		log "Running Lynis security audit..."
 		set -o pipefail
 		if lynis audit system --quiet \
 			--logfile "$audit_log" \
 			--report-file "$audit_report" 2>&1 |
-			tee "/tmp/lynis-audit/terminal-${audit_ts}.log"; then
+			tee "$audit_dir/terminal-${audit_ts}.log"; then
 			set +o pipefail
-			chmod 0600 "$audit_log" "$audit_report" 2>/dev/null || true
-			chmod 0600 "/tmp/lynis-audit/terminal-${audit_ts}.log" \
-				2>/dev/null || true
-			log "Lynis audit saved to /tmp/lynis-audit/lynis-${audit_ts}.log"
+			chmod 0600 "$audit_log" "$audit_report" \
+				"$audit_dir/terminal-${audit_ts}.log" 2>/dev/null || true
+			log "Lynis audit saved to $audit_log"
 		else
 			set +o pipefail
-			warn "Lynis audit had errors; see /tmp/lynis-audit/."
+			warn "Lynis audit had errors; see $audit_dir/."
 		fi
 	else
 		warn "lynis not installed; skipping security audit."
 	fi
 
 	if command -v systemcheck >/dev/null 2>&1; then
-		syscheck_log="/tmp/systemcheck-${audit_ts}.log"
+		umask 077
+		syscheck_log=$(mktemp "${TMPDIR:-/tmp}/systemcheck.XXXXXX") || {
+			warn "Cannot create a private systemcheck log."
+			return
+		}
 		local audit_user
 		audit_user="${SUDO_USER:-$(logname 2>/dev/null || true)}"
 		log "Running systemcheck as ${audit_user:-unknown}..."
@@ -370,22 +377,19 @@ run_security_audit() {
 		warn "systemcheck not found; skipping systemcheck run."
 	fi
 
-	if find /tmp -maxdepth 1 -type f \
-		-name 'systemcheck-*.log' \
+	if find "${TMPDIR:-/tmp}" -maxdepth 1 -type f \
+		-name 'systemcheck.*' \
 		-mtime +7 -print0 2>/dev/null |
 		xargs -0r rm -f; then
 		log "Old systemcheck logs older than 7 days removed (if any)."
 	else
-		warn "Failed to clean old systemcheck logs in /tmp."
+		warn "Failed to clean old systemcheck logs."
 	fi
 
-	if [ -d /tmp/lynis-audit ] &&
-		find /tmp/lynis-audit -type f \
-			\( -name 'lynis-*.log' -o -name 'lynis-*.dat' \
-			-o -name 'terminal-*.log' \) \
-			-mtime +7 -print0 2>/dev/null |
-		xargs -0r rm -f; then
-		log "Old Lynis audit logs older than 7 days removed (if any)."
+	if find "${TMPDIR:-/tmp}" -maxdepth 1 -type d \
+		-name 'lynis-audit.*' -mtime +7 -print0 2>/dev/null |
+		xargs -0r rm -rf --; then
+		log "Old Lynis audit directories older than 7 days removed (if any)."
 	fi
 }
 
@@ -437,7 +441,12 @@ collect_system_info_and_upload() {
 	local info_ts info_log
 	local rc=0
 	info_ts="$(date +%Y%m%d-%H%M%S)"
-	info_log="/tmp/debian-info-${info_ts}.log"
+	umask 077
+	info_log=$(mktemp "${TMPDIR:-/tmp}/debian-info.XXXXXX") || {
+		warn "Cannot create a private system information log."
+		return 1
+	}
+	log "System information timestamp: $info_ts"
 
 	log "Collecting system info..."
 
@@ -520,12 +529,12 @@ collect_system_info_and_upload() {
 		warn "System info collection had errors; see ${info_log}."
 	fi
 
-	if find /tmp -maxdepth 1 -type f \
-		-name 'debian-info-*.log' \
+	if find "${TMPDIR:-/tmp}" -maxdepth 1 -type f \
+		-name 'debian-info.*' \
 		-mtime +7 -print0 2>/dev/null | xargs -0r rm -f; then
 		log "Old system info logs older than 7 days removed (if any)."
 	else
-		warn "Failed to clean old system info logs in /tmp."
+		warn "Failed to clean old system info logs."
 	fi
 }
 

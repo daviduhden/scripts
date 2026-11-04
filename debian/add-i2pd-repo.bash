@@ -142,11 +142,11 @@ log_detected_platform() {
 # /usr/share/keyrings, and remove the temporary file on success or
 # failure. The keyring is replaced on every run.
 install_repo_key() {
-	local key_tmp
+	local key_tmp fpr
 
 	log "Importing signing key..."
 	install -d -m 0755 /usr/share/keyrings
-	key_tmp="$(mktemp /tmp/purplei2p-key.XXXXXX)" || {
+	key_tmp="$(mktemp "${TMPDIR:-/tmp}/purplei2p-key.XXXXXX")" || {
 		error "Cannot create a temporary key file."
 	}
 	if ! net_curl https://repo.i2pd.xyz/r4sas.gpg \
@@ -154,11 +154,20 @@ install_repo_key() {
 		rm -f "$key_tmp"
 		error "Cannot download the Purple I2P signing key."
 	fi
+	fpr=$(gpg --show-keys --with-colons "$key_tmp" 2>/dev/null |
+		awk -F: '$1 == "fpr" { print $10; exit }')
+	if [ "$fpr" != "951928BB317024EFD053D73C66F6C87B98EBCFE2" ]; then
+		rm -f "$key_tmp"
+		error "Purple I2P signing key fingerprint mismatch: ${fpr:-missing}."
+	fi
 	if ! gpg --batch --yes --dearmor \
-		-o /usr/share/keyrings/purplei2p.gpg <"$key_tmp"; then
+		-o /usr/share/keyrings/purplei2p.gpg.new <"$key_tmp"; then
 		rm -f "$key_tmp"
 		error "Cannot dearmor the Purple I2P signing key."
 	fi
+	mv -f /usr/share/keyrings/purplei2p.gpg.new \
+		/usr/share/keyrings/purplei2p.gpg ||
+		error "Cannot publish the Purple I2P keyring."
 	rm -f "$key_tmp"
 }
 

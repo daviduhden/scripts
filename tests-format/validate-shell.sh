@@ -10,7 +10,9 @@ TMPDIR_BASE="${TMPDIR:-/tmp}"
 TMPLOG=$(mktemp "$TMPDIR_BASE/validate-shell-XXXXXX")
 TMP_FAILS=
 UNFMT_SH=
-trap '[ -z "$TMP_FAILS" ] || rm -f "$TMP_FAILS"; [ -z "$UNFMT_SH" ] || rm -f "$UNFMT_SH"' EXIT HUP INT TERM
+TMP_SKIPS=
+trap '[ -z "$TMP_FAILS" ] || rm -f "$TMP_FAILS"; [ -z "$UNFMT_SH" ] || rm -f "$UNFMT_SH"; [ -z "$TMP_SKIPS" ] || rm -f "$TMP_SKIPS"' EXIT
+trap 'exit 1' HUP INT TERM
 printf '%s\n' "[INFO] Logging to: $TMPLOG" >&3
 exec >"$TMPLOG" 2>&1
 
@@ -20,7 +22,7 @@ exec >"$TMPLOG" 2>&1
 #   with shfmt, shell syntax, bash syntax, ksh syntax and
 #   checkbashisms for POSIX sh scripts. It also runs the
 #   ShellCheck linter (if available, treating warnings as errors).
-# - Usage: ./validate-shell.sh [ROOT_DIR]
+# - Usage: ./validate-shell.sh [--check|--format] [--strict] [ROOT_DIR]
 # - Requires: shfmt, shellcheck, checkbashisms and ksh
 #   (all optional) in PATH
 #
@@ -28,7 +30,7 @@ exec >"$TMPLOG" 2>&1
 # and license details.
 
 usage() {
-	printf '%s\n' "Usage: $0 [ROOT_DIR]" >&2
+	printf '%s\n' "Usage: $0 [--check|--format] [--strict] [ROOT_DIR]" >&2
 	exit 2
 }
 
@@ -43,6 +45,22 @@ run_validate_shell() {
 
 	# One optional ROOT_DIR. Reject option-looking paths and verify the
 	# directory before creating any temporary files.
+	MODE=check
+	STRICT=0
+	while [ "$#" -gt 0 ]; do
+		case "$1" in
+		--check) MODE=check ;;
+		--format) MODE=format ;;
+		--strict) STRICT=1 ;;
+		--)
+			shift
+			break
+			;;
+		-*) usage ;;
+		*) break ;;
+		esac
+		shift
+	done
 	ROOT_DIR=${1:-.}
 	[ "$#" -le 1 ] || usage
 	[ "${ROOT_DIR#-}" = "$ROOT_DIR" ] || usage
@@ -62,11 +80,17 @@ run_validate_shell() {
 	fi
 
 	TMP_FAILS=$(mktemp "$TMPDIR_BASE/validate-shell-fails-XXXXXX")
+	TMP_SKIPS=$(mktemp "$TMPDIR_BASE/validate-shell-skips-XXXXXX")
 
 	# Findings are appended to a file rather than an in-memory counter because
 	# the find pipelines below run their loops in subshells; a variable update
 	# there would be lost when the subshell exits.
 	note_fail() { printf '%s\n' "$1" >>"$TMP_FAILS"; }
+	note_skip() {
+		printf '[SKIP] %s\n' "$1" >&2
+		printf '%s\n' "$1" >>"$TMP_SKIPS"
+		if [ "$STRICT" -eq 1 ]; then note_fail "missing: $1"; fi
+	}
 
 	printf '%s\n' "[INFO] Formatting shell scripts with shfmt..."
 	if command -v shfmt >/dev/null 2>&1; then
@@ -76,7 +100,7 @@ run_validate_shell() {
 		# captured, stderr is discarded, and a nonzero status from shfmt does
 		# not abort the validation run.
 		find "$ROOT_DIR" \
-			\( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) \
+			\( -name .git \) \
 			-prune -o -type f \
 			\( -name '*.sh' -o -name '*.bash' -o -name '*.ksh' \) \
 			-print |
@@ -94,6 +118,10 @@ run_validate_shell() {
 			# changed files still exits nonzero and forces a diff review.
 			while IFS= read -r file; do
 				[ -n "$file" ] || continue
+				if [ "$MODE" = check ]; then
+					note_fail "$file"
+					continue
+				fi
 				if shfmt -w -s "$file" 2>/dev/null; then
 					note_fail "$file"
 				else
@@ -107,7 +135,7 @@ run_validate_shell() {
 
 		rm -f "$UNFMT_SH"
 	else
-		printf '%s\n' "[INFO] shfmt not installed; skipping shell formatting"
+		note_skip "shfmt not installed; skipping shell formatting"
 	fi
 
 	printf '%s\n' "[INFO] Running shell syntax checks..."
@@ -116,7 +144,7 @@ run_validate_shell() {
 	# stderr (logged) and on stdout (captured by the trailing loop, which
 	# records it once in TMP_FAILS). -n parses without executing anything.
 	find "$ROOT_DIR" \
-		\( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) \
+		\( -name .git \) \
 		-prune -o -type f -name '*.sh' -print |
 		while IFS= read -r f; do
 			[ -n "$f" ] || continue
@@ -131,7 +159,7 @@ run_validate_shell() {
 	if command -v bash >/dev/null 2>&1; then
 		printf '%s\n' "[INFO] Running bash syntax checks..."
 		find "$ROOT_DIR" \
-			\( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) \
+			\( -name .git \) \
 			-prune -o -type f -name '*.bash' -print |
 			while IFS= read -r f; do
 				[ -n "$f" ] || continue
@@ -143,7 +171,7 @@ run_validate_shell() {
 			[ -n "$bad" ] && note_fail "$bad"
 		done
 	else
-		printf '%s\n' "[INFO] bash not found; skipping bash syntax checks"
+		note_skip "bash not found; skipping bash syntax checks"
 	fi
 
 	KSH_CMD=""
@@ -161,8 +189,7 @@ run_validate_shell() {
 			"[INFO] Running ksh syntax checks" \
 			" (using ${KSH_CMD})..."
 		find "$ROOT_DIR" \
-			\( -path "$ROOT_DIR/.git" -o \
-			-path "$ROOT_DIR/.git/*" \) \
+			\( -name .git \) \
 			-prune -o -type f -name '*.ksh' -print |
 			while IFS= read -r f; do
 				[ -n "$f" ] || continue
@@ -176,9 +203,7 @@ run_validate_shell() {
 			[ -n "$bad" ] && note_fail "$bad"
 		done
 	else
-		printf '%s\n' \
-			"[INFO] ksh not found;" \
-			" skipping ksh syntax checks"
+		note_skip "ksh not found; skipping ksh syntax checks"
 	fi
 
 	if command -v checkbashisms >/dev/null 2>&1; then
@@ -187,7 +212,7 @@ run_validate_shell() {
 		# checkbashisms is a Perl program. Run it through perl -T when perl is
 		# present so taint mode is enforced; otherwise rely on its shebang.
 		find "$ROOT_DIR" \
-			\( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) \
+			\( -name .git \) \
 			-prune -o -type f -name '*.sh' -print |
 			while IFS= read -r f; do
 				[ -n "$f" ] || continue
@@ -206,9 +231,7 @@ run_validate_shell() {
 			[ -n "$bad" ] && note_fail "$bad"
 		done
 	else
-		printf '%s\n' \
-			"[INFO] checkbashisms not installed;" \
-			" skipping POSIX sh checks"
+		note_skip "checkbashisms not installed; skipping POSIX sh checks"
 	fi
 
 	if command -v shellcheck >/dev/null 2>&1; then
@@ -216,13 +239,13 @@ run_validate_shell() {
 		# -x follows source/. directives so included files are analyzed too.
 		# ShellCheck's exit status is nonzero for any warning or error.
 		find "$ROOT_DIR" \
-			\( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) \
+			\( -name .git \) \
 			-prune -o -type f \
 			\( -name '*.bash' -o -name '*.ksh' -o -name '*.sh' \) \
 			-print |
 			while IFS= read -r f; do
 				[ -n "$f" ] || continue
-				if ! shellcheck -x "$f"; then
+				if ! shellcheck -x "$f" >&2; then
 					printf '%s\n' "[ERROR] shellcheck found issues in: $f" 1>&2
 					printf "%s\n" "$f"
 				fi
@@ -230,9 +253,10 @@ run_validate_shell() {
 			[ -n "$bad" ] && note_fail "$bad"
 		done
 	else
-		printf '%s\n' "[INFO] shellcheck not installed; skipping shellcheck"
+		note_skip "shellcheck not installed; skipping shellcheck"
 	fi
 
+	printf '[INFO] Skipped checks: %s\n' "$(wc -l <"$TMP_SKIPS" | tr -d ' ')"
 	issues=0
 	if [ -f "$TMP_FAILS" ]; then
 		issues=$(sort -u "$TMP_FAILS" | wc -l | tr -d ' ')
@@ -250,7 +274,7 @@ run_validate_shell() {
 		exit 2
 	fi
 
-	printf '%s\n' "[INFO] Shell checks passed"
+	printf '%s\n' "[INFO] Shell checks completed; inspect skipped-check summary"
 	exit 0
 }
 

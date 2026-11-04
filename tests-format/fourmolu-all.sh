@@ -3,8 +3,12 @@ set -eu
 
 # Announce the log path on descriptor 3, then send all normal output there.
 # The log stays under ${TMPDIR:-/tmp} for post-mortem inspection.
+umask 077
 exec 3>&1 4>&2
-TMPLOG="${TMPDIR:-/tmp}/fourmolu-all-$$.log"
+TMPLOG=$(mktemp "${TMPDIR:-/tmp}/fourmolu-all.XXXXXX") || {
+	printf '%s\n' "[ERROR] cannot create log file" >&3
+	exit 1
+}
 printf '%s\n' "[INFO] Logging to: $TMPLOG" >&3
 exec >"$TMPLOG" 2>&1
 

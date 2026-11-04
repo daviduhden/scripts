@@ -26,9 +26,9 @@ sub is_windows { return $^O eq 'MSWin32'; }
 sub is_openbsd { return $^O eq 'openbsd'; }
 
 # Emit an informational message to stdout.
-sub logi { print "[INFO] $_[0]\n"; }
-sub logw { print STDERR "[WARN] $_[0]\n"; }
-sub loge { print STDERR "[ERROR] $_[0]\n"; }
+sub logi { return print "[INFO] $_[0]\n"; }
+sub logw { return print STDERR "[WARN] $_[0]\n"; }
+sub loge { return print STDERR "[ERROR] $_[0]\n"; }
 
 sub die_tool {
     my ($msg) = @_;
@@ -39,7 +39,7 @@ sub die_tool {
 sub require_cmd {
     my ($cmd) = @_;
     return if defined $cmd && length $cmd && find_in_path($cmd);
-    die_tool("Required command '$cmd' not found in PATH.");
+    return die_tool("Required command '$cmd' not found in PATH.");
 }
 
 # Return the user's home directory.  HOME wins on Unix; USERPROFILE is the
@@ -48,7 +48,7 @@ sub home_dir {
     return $ENV{HOME} if defined $ENV{HOME} && length $ENV{HOME};
     return $ENV{USERPROFILE}
       if defined $ENV{USERPROFILE} && length $ENV{USERPROFILE};
-    die_tool(
+    return die_tool(
         "Cannot determine home: " . "neither HOME nor USERPROFILE is set." );
 }
 
@@ -210,17 +210,27 @@ sub replace_state_file {
 
     return 1 if rename $tmp, $path;
 
-    # Windows does not replace an existing destination with rename(2).
-    # Move the old file aside, install the new one, and restore on failure.
+    # Use a unique recovery copy: never delete an unrelated .bak file.
     if ( is_windows() && -e $path ) {
-        my $backup = "$path.bak";
-        unlink $backup;
+        my $dir = parent_dir($path);
+        $dir = '.' unless defined $dir && length $dir;
+        my ( $backup_fh, $backup ) =
+          tempfile( 'ssh-menu-backup.XXXXXX', DIR => $dir, UNLINK => 0 );
+        return 0 unless close $backup_fh;
+        return 0 unless unlink $backup;
         if ( rename $path, $backup ) {
             if ( rename $tmp, $path ) {
-                unlink $backup;
+                logw("Could not remove recovery copy $backup: $!")
+                  unless unlink $backup;
                 return 1;
             }
-            rename $backup, $path;
+            my $install_error = $!;
+            if ( !rename $backup, $path ) {
+                logw("Could not restore $path; recovery copy: $backup ($!)");
+            }
+            unlink $tmp;
+            $! = $install_error;
+            return 0;
         }
     }
 
@@ -242,15 +252,22 @@ sub write_state_file {
         return;
     }
 
-    print {$fh} @{$lines_ref};
-    if ( !close $fh ) {
+    my $written     = print {$fh} @{$lines_ref};
+    my $write_error = $!;
+    my $closed      = close $fh;
+    if ( !$written || !$closed ) {
+        local $! = $written ? $! : $write_error;
         logw("Could not write $path: $!");
         unlink $tmp;
         return;
     }
 
     if ( my @st = stat($path) ) {
-        chmod( $st[2] & oct(7777), $tmp );
+        if ( !chmod( $st[2] & oct(7777), $tmp ) ) {
+            logw("Could not preserve permissions for $path: $!");
+            unlink $tmp;
+            return;
+        }
     }
     if ( !replace_state_file( $path, $tmp ) ) {
         logw("Could not replace $path: $!");
@@ -262,7 +279,7 @@ sub write_alias_file {
     my ($aliases_ref) = @_;
     my @lines = map { sprintf "%s %s\n", $_, $aliases_ref->{$_} }
       sort keys %{$aliases_ref};
-    write_state_file( $alias_file, \@lines );
+    return write_state_file( $alias_file, \@lines );
 }
 
 # Persist host usage counts as sorted "host:port count" lines.
@@ -270,7 +287,7 @@ sub write_freq_file {
     my ($freq_ref) = @_;
     my @lines = map { sprintf "%s %d\n", $_, $freq_ref->{$_} }
       sort keys %{$freq_ref};
-    write_state_file( $freq_file, \@lines );
+    return write_state_file( $freq_file, \@lines );
 }
 
 # Persist the last SSH user chosen for each host.
@@ -280,20 +297,20 @@ sub write_last_user_file {
 
     my @lines = map { sprintf "%s %s\n", $_, $last_ref->{$_} }
       sort keys %{$last_ref};
-    write_state_file( $last_user_file, \@lines );
+    return write_state_file( $last_user_file, \@lines );
 }
 
 # Clear in-memory state and note which optional state files exist.  Loading is
 # separate so callers can refresh after a mutating menu action.
 sub reset_state {
-    @entries           = ();
-    %seen              = ();
-    $hashed_count      = 0;
-    %freq              = ();
-    %alias             = ();
-    %last_user         = ();
-    $freq_file_exists  = -f $freq_file  ? 1 : 0;
-    $alias_file_exists = -f $alias_file ? 1 : 0;
+    @entries          = ();
+    %seen             = ();
+    $hashed_count     = 0;
+    %freq             = ();
+    %alias            = ();
+    %last_user        = ();
+    $freq_file_exists = -f $freq_file ? 1 : 0;
+    return $alias_file_exists = -f $alias_file ? 1 : 0;
 }
 
 # Load host usage counts, ignoring malformed lines and nonnumeric values.
@@ -359,7 +376,7 @@ sub load_state_from_disk {
     reset_state();
     load_freq_file();
     load_alias_file();
-    load_last_user_file();
+    return load_last_user_file();
 }
 
 ###########################
@@ -538,7 +555,7 @@ sub refresh_entries {
     parse_known_hosts();
     ensure_entries_present();
     prune_stale_data();
-    sort_entries();
+    return sort_entries();
 }
 
 ###################
@@ -662,11 +679,20 @@ sub remove_known_host_entry {
         logw("Could not create a temporary file in $dir: $!");
         return 0;
     }
-    print {$tfh} @kept;
-    close $tfh;
+    my $write_ok = print {$tfh} @kept;
+    my $close_ok = close $tfh;
+    if ( !$write_ok || !$close_ok ) {
+        logw("Could not write temporary known_hosts file: $!");
+        unlink $tmp;
+        return 0;
+    }
 
     if ( my @st = stat($target) ) {
-        chmod( $st[2] & oct(7777), $tmp );
+        if ( !chmod( $st[2] & oct(7777), $tmp ) ) {
+            logw("Could not preserve permissions for $target: $!");
+            unlink $tmp;
+            return 0;
+        }
     }
     if ( !replace_state_file( $target, $tmp ) ) {
         logw("Could not replace $target: $!");
@@ -735,7 +761,7 @@ sub print_entry_menu {
     }
     printf "  %2d) Manage known_hosts (delete)\n", scalar(@entries) + 1;
     printf "  %2d) Add custom name (alias)\n",     scalar(@entries) + 2;
-    printf "  %2d) Quit\n\n",                      scalar(@entries) + 3;
+    return printf "  %2d) Quit\n\n", scalar(@entries) + 3;
 }
 
 # Repeatedly prompt until a host is selected or the user quits.  Management
@@ -865,8 +891,8 @@ sub build_ssh_command {
 sub update_frequency {
     my ($selected_key) = @_;
     $freq{$selected_key} = ( $freq{$selected_key} // 0 ) + 1;
-    eval { write_freq_file( \%freq ); };
-    if ($@) { logw("Could not persist frequency file: $@"); }
+    my $write_ok = eval { write_freq_file( \%freq ); 1 };
+    if ( !$write_ok ) { logw("Could not persist frequency file: $@"); }
 }
 
 # Replace the launcher with ssh on Unix.  Windows Perl does not wait for exec,
@@ -922,7 +948,7 @@ sub main {
       build_ssh_command( $ssh_path, $ssh_user, $selected_host, $selected_port );
 
     update_frequency($selected_key);
-    exec_ssh_command(@cmd);
+    return exec_ssh_command(@cmd);
 }
 
 main() unless caller;

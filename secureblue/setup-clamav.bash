@@ -367,9 +367,8 @@ EOF
 
 	chmod 0755 /usr/local/sbin/clamav-target-scan.bash
 
-	# clamdscan exits 1 when it finds infected files, so the service lists 0,
-	# 1, and 2 as successful; otherwise every detection would mark the unit
-	# failed.
+	# clamdscan exits 1 when it finds infected files. Exit 2 is an error
+	# (connection/scan failure), not a detection, so it must fail the unit.
 	cat >/etc/systemd/system/clamav-target-scan.service <<'EOF'
 [Unit]
 Description=ClamAV periodic scan
@@ -377,7 +376,7 @@ Description=ClamAV periodic scan
 [Service]
 Type=oneshot
 ExecStart=/usr/local/sbin/clamav-target-scan.bash
-SuccessExitStatus=0 1 2
+SuccessExitStatus=0 1
 NoNewPrivileges=true
 ProtectSystem=full
 ProtectHome=read-only

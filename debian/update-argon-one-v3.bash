@@ -12,13 +12,14 @@ set -euo pipefail
 # with a HEAD request before downloading.
 #
 # Side effects:
-#  - Downloads both upstream scripts into temporary files and runs them
+#  - Prepares and verifies both installers before running either of them
 #    with bash as root
 #  - May reboot the system, depending on the option or interactive
 #    answer
 #
-# The downloaded scripts are not verified with a checksum or signature;
-# they execute with the privileges of this script. Temporary files are
+# Script execution requires operator-pinned SHA-256 digests or explicit
+# --trust-upstream. ARGON_EEPROM_SCRIPT/ARGON_CONTROL_SCRIPT select local files;
+# supplied digests also apply to local files. Scripts execute as root. Temporary files are
 # removed on exit. Use --no-reboot for cron, or --auto-reboot to reboot
 # without prompting.
 #
@@ -32,6 +33,9 @@ export PATH
 EEPROM_URL="https://download.argon40.com/argon-eeprom.sh"
 CONTROL_URL="https://download.argon40.com/argon1.sh"
 TMP_FILES=()
+TRUST_UPSTREAM=0
+EEPROM_SHA256=${ARGON_EEPROM_SHA256:-}
+CONTROL_SHA256=${ARGON_CONTROL_SHA256:-}
 
 # Reboot mode:
 #   "question" -> ask (default in interactive mode)
@@ -47,17 +51,20 @@ Options:
   -r, --auto-reboot   Automatically reboot at the end without asking.
   -N, --no-reboot     Do not reboot at the end
                        (default in non-interactive).
+      --eeprom-sha256 HASH  Require this reviewed EEPROM script digest.
+      --control-sha256 HASH Require this reviewed control script digest.
+      --trust-upstream      Explicitly trust unpinned upstream scripts.
   -h, --help          Show this help and exit.
 
 Examples:
   # Normal interactive usage
-  sudo $0
+  sudo $0 --eeprom-sha256 REVIEWED_HASH --control-sha256 REVIEWED_HASH
 
   # For cron (no automatic reboot)
-  sudo $0 --no-reboot
+  sudo $0 --trust-upstream --no-reboot
 
   # For cron with automatic reboot when finished
-  sudo $0 --auto-reboot
+  sudo $0 --trust-upstream --auto-reboot
 EOF
 }
 
@@ -65,6 +72,18 @@ parse_args() {
 	local flag_used=0
 	while [[ $# -gt 0 ]]; do
 		case "$1" in
+		--eeprom-sha256 | --control-sha256)
+			[[ $# -ge 2 && $2 =~ ^[[:xdigit:]]{64}$ ]] || {
+				error 'Expected a SHA-256 digest'
+				exit 1
+			}
+			if [[ $1 == --eeprom-sha256 ]]; then EEPROM_SHA256=${2,,}; else CONTROL_SHA256=${2,,}; fi
+			shift 2
+			;;
+		--trust-upstream)
+			TRUST_UPSTREAM=1
+			shift
+			;;
 		-r | --auto-reboot)
 			flag_used=1
 			AUTO_REBOOT="yes"
@@ -152,31 +171,42 @@ check_network() {
 
 download_remote_script() {
 	local url="$1"
-	local tmp_script="$2"
-	log "Downloading script from $url to temporary file..."
-	net_curl -o "$tmp_script" "$url"
+	local tmp_script="$2" digest="$3" local_script="$4"
+	if [[ -n $local_script ]]; then
+		[[ -f $local_script && ! -L $local_script ]] || {
+			error 'Expected a regular local script'
+			return 1
+		}
+		cp -- "$local_script" "$tmp_script" || return 1
+	else
+		log "Downloading script from $url to temporary file..."
+		net_curl --proto '=https' --proto-redir '=https' -o "$tmp_script" "$url" || return 1
+	fi
+	if [[ -n $digest ]]; then
+		[[ $digest =~ ^[[:xdigit:]]{64}$ ]] || {
+			error 'Invalid SHA-256'
+			return 1
+		}
+		printf '%s  %s\n' "${digest,,}" "$tmp_script" | sha256sum -c - || return 1
+	elif [[ $TRUST_UPSTREAM != 1 ]]; then
+		error 'Supply reviewed SHA-256 digests, or explicitly opt in with --trust-upstream.'
+		return 1
+	else
+		warn 'Executing upstream script without an independent pinned digest.'
+	fi
+	bash -n "$tmp_script"
 }
 
-# Download the upstream EEPROM script to a file in the current
-# directory and execute it with bash. mktemp supplies the unique name.
+# Execute only after both installers have passed preparation and validation.
 run_eeprom_update() {
-	local script_path
-	log "Running EEPROM update script from Argon40..."
-	script_path="$(mktemp argon40-update.XXXXXX.bash)"
-	TMP_FILES+=("$script_path")
-	download_remote_script "$EEPROM_URL" "$script_path"
-	bash "$script_path"
+	log "Running verified EEPROM update script from Argon40..."
+	bash "$1" || return 1
 	log "EEPROM update script finished."
 }
 
-# Download and run the upstream fan/power-button installer.
 run_control_update() {
-	local script_path
-	log "Running Argon One V3 control script installer..."
-	script_path="$(mktemp argon40-update.XXXXXX.bash)"
-	TMP_FILES+=("$script_path")
-	download_remote_script "$CONTROL_URL" "$script_path"
-	bash "$script_path"
+	log "Running verified Argon One V3 control script installer..."
+	bash "$1" || return 1
 	log "Argon One V3 control script finished."
 }
 
@@ -219,16 +249,27 @@ ask_reboot() {
 
 check_prereqs() {
 	require_root
-	require_cmd curl
+	require_cmd sha256sum
 	require_cmd bash
 	require_cmd mktemp
 	require_cmd reboot
-	check_network
+	if [[ -z ${ARGON_EEPROM_SCRIPT:-} || -z ${ARGON_CONTROL_SCRIPT:-} ]]; then
+		require_cmd curl
+		check_network
+	fi
 }
 
 run_update() {
-	run_eeprom_update
-	run_control_update
+	local eeprom control
+	eeprom=$(mktemp "${TMPDIR:-/tmp}/argon-eeprom.XXXXXX.bash")
+	TMP_FILES+=("$eeprom")
+	control=$(mktemp "${TMPDIR:-/tmp}/argon-control.XXXXXX.bash")
+	TMP_FILES+=("$control")
+	# A bad second download/digest must not allow the first installer to run.
+	download_remote_script "$EEPROM_URL" "$eeprom" "$EEPROM_SHA256" "${ARGON_EEPROM_SCRIPT:-}" || return 1
+	download_remote_script "$CONTROL_URL" "$control" "$CONTROL_SHA256" "${ARGON_CONTROL_SCRIPT:-}" || return 1
+	run_eeprom_update "$eeprom" || return 1
+	run_control_update "$control" || return 1
 	log "All Argon One V3 update steps completed."
 	ask_reboot
 }
@@ -237,6 +278,10 @@ run_update() {
 
 main() {
 	parse_args "$@"
+	[[ $TRUST_UPSTREAM == 1 || (-n $EEPROM_SHA256 && -n $CONTROL_SHA256) ]] || {
+		error 'Require both reviewed SHA-256 digests or explicit --trust-upstream.'
+		exit 1
+	}
 	log "Argon One V3 maintenance: EEPROM + control script update"
 	check_prereqs
 	run_update

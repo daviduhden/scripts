@@ -386,23 +386,25 @@ EOF
 assert_rc 0 $? "--strict with clean tree exits 0"
 
 # ---- JSON output is valid (with and without findings) ----
-# python3 is optional: without it the JSON syntax check is skipped rather than
-# failed. Both the nonempty and empty report paths are exercised.
-if command -v python3 >/dev/null 2>&1; then
-	out=$("$VALIDATE" --target all --format json "$T" 2>/dev/null)
-	if printf '%s' "$out" | python3 -c \
-		'import json,sys; json.load(sys.stdin)' 2>/dev/null; then
-		pass
-	else
-		fail_test "JSON output is not valid JSON (with findings)"
-	fi
-	out=$("$VALIDATE" --target debian --format json "$T3" 2>/dev/null)
-	if printf '%s' "$out" | python3 -c \
-		'import json,sys; json.load(sys.stdin)' 2>/dev/null; then
-		pass
-	else
-		fail_test "JSON output is not valid JSON (clean tree)"
-	fi
+# Perl and JSON::PP are core dependencies of the project. Both the nonempty
+# and empty report paths are exercised.
+out=$("$VALIDATE" --target all --format json "$T" 2>/dev/null)
+if printf '%s' "$out" | perl -MJSON::PP -e '
+	local $/;
+	decode_json(<STDIN>);
+	' 2>/dev/null; then
+	pass
+else
+	fail_test "JSON output is not valid JSON (with findings)"
+fi
+out=$("$VALIDATE" --target debian --format json "$T3" 2>/dev/null)
+if printf '%s' "$out" | perl -MJSON::PP -e '
+	local $/;
+	decode_json(<STDIN>);
+	' 2>/dev/null; then
+	pass
+else
+	fail_test "JSON output is not valid JSON (clean tree)"
 fi
 
 # ---- --quiet prints only ERRORs ----

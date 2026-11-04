@@ -56,6 +56,9 @@ export LC_ALL=C.UTF-8
 #   - CLI: --user USERNAME
 #   - Env: SYSUPGRADE_USER=USERNAME
 NONROOT_USER="${SYSUPGRADE_USER:-}"
+# Full balance and recursive defragmentation are expensive on large disks and
+# snapshots. They are opt-in; scrub remains the default integrity check.
+BTRFS_MAINTENANCE="${BTRFS_MAINTENANCE:-0}"
 
 # Print a recognizable banner around an external command so log readers can
 # tell the individual maintenance steps apart.
@@ -741,18 +744,19 @@ maintain_filesystems() {
 					phase_failed=1
 				fi
 
-				# Full balance: reorganize all chunks
-				# (can be heavy on large disks, but
-				# non-destructive)
-				if ! btrfs balance start --full-balance "$mp"; then
-					warn "btrfs balance failed for $mp."
-					phase_failed=1
-				fi
-
-				# Recursive defragmentation (can take a while, but non-destructive)
-				if ! btrfs filesystem defragment -r "$mp"; then
-					warn "btrfs filesystem defragment failed for $mp."
-					phase_failed=1
+				if [ "$BTRFS_MAINTENANCE" = "1" ]; then
+					# Balance/defrag are opt-in: they can
+					# consume hours and space on snapshots.
+					if ! btrfs balance start -dusage=50 "$mp"; then
+						warn "btrfs balance failed for $mp."
+						phase_failed=1
+					fi
+					if ! btrfs filesystem defragment -r "$mp"; then
+						warn "btrfs filesystem defragment failed for $mp."
+						phase_failed=1
+					fi
+				else
+					log "Skipping btrfs balance/defrag (set BTRFS_MAINTENANCE=1 to enable)."
 				fi
 			done
 		fi
@@ -792,11 +796,14 @@ maintain_filesystems() {
 # Lynis output is teed to a timestamped /tmp log that is made private after
 # creation. The log is local only; this script does not upload it.
 run_security_audit() {
-	local audit_ts audit_log
+	local audit_log
 
 	if command -v lynis >/dev/null 2>&1; then
-		audit_ts="$(date +%Y%m%d-%H%M%S)"
-		audit_log="/tmp/lynis-audit-${audit_ts}.log"
+		umask 077
+		audit_log=$(mktemp "${TMPDIR:-/tmp}/lynis-audit.XXXXXX") || {
+			warn "Cannot create a private Lynis log."
+			return
+		}
 		log "Running Lynis security audit..."
 		local lynis_rc=0
 		lynis audit system --quiet \
@@ -836,7 +843,11 @@ collect_system_info() {
 	fi
 
 	local info_log
-	info_log="/tmp/secureblue-info-$(date +%Y%m%d-%H%M%S).log"
+	umask 077
+	info_log=$(mktemp "${TMPDIR:-/tmp}/secureblue-info.XXXXXX") || {
+		warn "Cannot create a private SecureBlue information log."
+		return 1
+	}
 
 	log "Collecting Secureblue debug information..."
 
@@ -980,6 +991,15 @@ bootstrap() {
 
 # ---- Main ----
 main() {
+	# Serialize maintenance runs. A stale lock is left for the operator after
+	# SIGKILL, matching the website synchronization policy.
+	if command -v flock >/dev/null 2>&1; then
+		exec 9>/run/secureblue-sysupgrade.lock
+		flock -n 9 || {
+			error "Another SecureBlue sysupgrade is already running."
+			return 1
+		}
+	fi
 	log "Starting update process..."
 	# Reset the registries in case main is ever called twice in one shell.
 	PHASE_ORDER=()

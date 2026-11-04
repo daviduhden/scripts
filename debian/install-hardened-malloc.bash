@@ -195,7 +195,28 @@ install_variant() {
 	fi
 
 	log "Installing $so_name to $INSTALL_DIR/"
+	if [ -f "$INSTALL_DIR/$so_name" ]; then
+		cp -a "$INSTALL_DIR/$so_name" \
+			"$INSTALL_DIR/$so_name.bak.$(date '+%Y%m%d%H%M%S')" ||
+			error "Cannot back up the previous $so_name."
+	fi
 	install -m 0755 "$out_dir/$so_name" "$INSTALL_DIR/"
+}
+
+# Load the new libraries in a short-lived process before changing the
+# system-wide preload. A broken build must not make every new process fail.
+smoke_test_variants() {
+	local so
+	for so in "$INSTALL_DIR/libhardened_malloc.so" \
+		"$INSTALL_DIR/libhardened_malloc-light.so"; do
+		[ -f "$so" ] || error "Missing built library: $so"
+		if ! LD_PRELOAD="$so" /bin/true; then
+			error "Smoke test failed for $so; refusing to configure preload."
+		fi
+		if ! LD_PRELOAD="$so" /bin/ls / >/dev/null 2>&1; then
+			error "Representative command failed with $so."
+		fi
+	done
 }
 
 # Set the global preload entry. Any existing line mentioning
@@ -216,21 +237,31 @@ configure_preload() {
 
 	log "Configuring global preload ($variant variant) in $PRELOAD_CONF..."
 
-	# Remove any existing hardened_malloc entries, keeping unrelated
-	# lines and blank lines intact. Back up the loader configuration
-	# before the first modification in this run.
+	# Build the complete file in a same-directory temporary and publish it
+	# with rename. This preserves unrelated entries and avoids truncating
+	# the loader configuration on failure.
+	local staged
+	staged=$(mktemp "${PRELOAD_CONF}.new.XXXXXX") ||
+		error "Cannot create a staged loader configuration."
 	if [ -f "$PRELOAD_CONF" ]; then
 		backup="${PRELOAD_CONF}.bak.$(date '+%Y%m%d%H%M%S')"
 		cp -a "$PRELOAD_CONF" "$backup" ||
 			error "Cannot back up $PRELOAD_CONF to $backup."
-		sed -i "\|hardened_malloc|d" "$PRELOAD_CONF"
-		# Avoid concatenating the new entry with an unterminated line.
-		if [ -n "$(tail -c 1 "$PRELOAD_CONF")" ]; then
-			printf '\n' >>"$PRELOAD_CONF"
-		fi
+		grep -v 'hardened_malloc' "$PRELOAD_CONF" >"$staged" ||
+			[ $? -eq 1 ] || {
+			rm -f -- "$staged"
+			error "Cannot read $PRELOAD_CONF."
+		}
 	fi
-
-	printf '%s\n' "$so_path" >>"$PRELOAD_CONF"
+	# Repair a missing final newline before appending the new entry.
+	if [ -s "$staged" ] && [ -n "$(tail -c 1 "$staged")" ]; then
+		printf '\n' >>"$staged"
+	fi
+	printf '%s\n' "$so_path" >>"$staged" ||
+		error "Cannot write the staged loader configuration."
+	chmod 0644 "$staged" || error "Cannot set modes on $staged."
+	mv -f -- "$staged" "$PRELOAD_CONF" ||
+		error "Cannot publish $PRELOAD_CONF."
 
 	log "Preload configured: $so_path"
 }
@@ -238,13 +269,19 @@ configure_preload() {
 # Raise vm.max_map_count persistently and apply it immediately. The
 # configuration file is overwritten on each run.
 configure_sysctl() {
+	local staged
 	log "Configuring vm.max_map_count for hardened_malloc..."
-	cat >"$SYSCTL_CONF" <<'EOF'
+	staged=$(mktemp "${SYSCTL_CONF}.new.XXXXXX") ||
+		error "Cannot create a staged sysctl configuration."
+	cat >"$staged" <<'EOF'
 # Increased max map count for hardened_malloc guard slabs.
 # hardened_malloc creates many PROT_NONE guard mappings between slabs;
 # the default 65530 is too low and will cause mmap failures.
 vm.max_map_count = 1048576
 EOF
+	chmod 0644 "$staged" || error "Cannot set modes on $staged."
+	mv -f -- "$staged" "$SYSCTL_CONF" ||
+		error "Cannot publish $SYSCTL_CONF."
 
 	log "Applying sysctl..."
 	sysctl -p "$SYSCTL_CONF" >/dev/null
@@ -348,6 +385,7 @@ main() {
 
 	install_variant "default"
 	install_variant "light"
+	smoke_test_variants || exit 1
 
 	configure_sysctl
 	run_ldconfig

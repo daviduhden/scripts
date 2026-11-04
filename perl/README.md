@@ -33,3 +33,25 @@ Install with `make install-perl` on POSIX systems or
 `windows\install-windows.bat` on Windows. Installed commands are named
 `normalize-files` and `ssh-menu`. Regression tests live in
 [../tests-format](../tests-format/README.md).
+
+## File safety and audit status
+
+`normalize-files` reads content in chunks capped by `--max-bytes`, rejects
+read failures, and compares path/handle identity and modification metadata
+before and after reading and before replacement. These checks detect common
+concurrent changes; they are not a lock against a hostile writer preserving
+file size and timestamps. Run it on a quiescent tree when consistency matters.
+Replacement is aborted if original permissions or requested timestamps cannot
+be applied to the temporary output. Report write/close failures count toward
+the exit status. Ownership, ACLs and extended attributes are not preserved.
+
+On Windows, both programs use unique recovery names when replacement requires
+moving an existing destination aside. A failed restoration leaves the original
+at the recovery path reported in the diagnostic. Do not remove that file until
+the original has been recovered. Simulated rename-failure tests exercise this
+logic on Linux; native Windows filesystem behavior still requires Windows.
+
+The [Perl audit and individual critic triage](../docs/perl-audit.md) records
+retained severity 4/3 diagnostics and their engineering rationale. It does not
+claim default-policy compliance, and no policy configuration is weakened to
+hide warnings.

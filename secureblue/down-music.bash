@@ -161,9 +161,9 @@ run_download_and_convert() {
 
 	log "Downloading audio from YouTube..."
 	# Extract the best audio stream; FFmpeg performs the OGG/Vorbis encode.
-	yt-dlp -x --audio-format best \
+	yt-dlp -x --audio-format best --no-playlist \
 		--cookies-from-browser "chromium:${cookies_profile}" \
-		-o "$TMP_DIR/%(title)s.%(ext)s" "$URL"
+		-o "$TMP_DIR/%(title)s.%(ext)s" -- "$URL"
 
 	input="$(resolve_downloaded_file)"
 	audio_file="$(basename "$input")"

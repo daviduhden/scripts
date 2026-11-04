@@ -144,6 +144,9 @@ install_krohnkite() {
 	shopt -s nullglob
 	files=("$SRC_DIR/$BUILD_DIR_NAME"/*.kwinscript)
 	shopt -u nullglob
+	if ((${#files[@]} > 1)); then
+		mapfile -t files < <(printf '%s\n' "${files[@]}" | sort)
+	fi
 	pkg="${files[0]:-}"
 
 	if [[ -z $pkg ]]; then

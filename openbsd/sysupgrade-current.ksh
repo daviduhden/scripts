@@ -200,9 +200,14 @@ run_lynis_audit() {
     fi
     if [ -x /usr/local/bin/lynis ]; then
         audit_ts=$(date +%Y%m%d-%H%M%S)
-        audit_log="/tmp/lynis-audit-${audit_ts}.log"
-        audit_report="/tmp/lynis-report-${audit_ts}.dat"
-        lynis_log="/tmp/lynis-terminal-${audit_ts}.log"
+        umask 077
+        audit_dir=$(mktemp -d "${TMPDIR:-/tmp}/lynis-audit.XXXXXX") || {
+            print "Cannot create a private Lynis log directory."
+            return
+        }
+        audit_log="${audit_dir}/lynis-${audit_ts}.log"
+        audit_report="${audit_dir}/lynis-${audit_ts}.dat"
+        lynis_log="${audit_dir}/terminal-${audit_ts}.log"
         # Redirection instead of `| tee` so that lynis's exit
         # status decides the branch without relying on pipefail.
         if "$shell_bin" /usr/local/bin/lynis \
@@ -234,7 +239,11 @@ run_lynis_audit() {
 
 collect_system_info() {
     print "Collecting system info..."
-    out_log="/tmp/openbsd-info-$(date +%Y%m%d-%H%M%S).log"
+    umask 077
+    out_log=$(mktemp "${TMPDIR:-/tmp}/openbsd-info.XXXXXX") || {
+        print "Cannot create a private system information log."
+        return
+    }
     rcctl_ls_on_output=""
     if command -v rcctl >/dev/null 2>&1; then
         rcctl_ls_on_output=$(rcctl ls on 2>/dev/null || true)

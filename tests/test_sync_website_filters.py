@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Exercise website staging filters against disposable filesystem trees."""
 
 from __future__ import annotations
@@ -94,7 +95,13 @@ class WebsiteSyncFilterTests(unittest.TestCase):
         source_text = script.read_text(encoding="utf-8")
         functions = "\n\n".join(
             extract_function(source_text, name)
-            for name in ("filter_site_tree", "has_repo_content", "stage_from_source")
+            for name in (
+                "filter_site_tree",
+                "has_repo_content",
+                "reject_source_symlinks",
+                "copy_from_source",
+                "stage_from_source",
+            )
         )
         for transfer_mode in ("rsync", "copy"):
             if transfer_mode == "rsync" and shutil.which("rsync") is None:
@@ -111,6 +118,53 @@ class WebsiteSyncFilterTests(unittest.TestCase):
                         transfer_mode,
                         destination_state,
                     )
+
+    def test_public_symlink_is_rejected(self) -> None:
+        for relative_script, shell_name in SYNC_IMPLEMENTATIONS:
+            shell = shutil.which(shell_name)
+            if shell is None:
+                continue
+            script = REPOSITORY_ROOT / relative_script
+            source_text = script.read_text(encoding="utf-8")
+            functions = "\n\n".join(
+                extract_function(source_text, name)
+                for name in (
+                    "filter_site_tree",
+                    "has_repo_content",
+                    "reject_source_symlinks",
+                    "copy_from_source",
+                    "stage_from_source",
+                )
+            )
+            with (
+                self.subTest(script=relative_script),
+                tempfile.TemporaryDirectory(prefix="website-link-test-") as temporary,
+            ):
+                root = Path(temporary)
+                source = root / "source"
+                destination = root / "public"
+                source.mkdir()
+                destination.mkdir()
+                (source / "index.html").write_text("ok", encoding="utf-8")
+                external = root / "external"
+                external.write_text("secret", encoding="utf-8")
+                (source / "public-link").symlink_to(external)
+                command = (
+                    f"SRC={str(source)!r}\n"
+                    f"WWW_DIR={str(destination)!r}\n"
+                    "warn() { :; }\n"
+                    "error() { printf '%s\\n' \"$*\" >&2; }\n"
+                    f"{functions}\n"
+                    'stage_from_source "$SRC"\n'
+                )
+                result = subprocess.run(
+                    [shell, "-c", command],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=20,
+                )
+                self.assertNotEqual(result.returncode, 0, result.stderr)
 
     def _stage_fixture(
         self,

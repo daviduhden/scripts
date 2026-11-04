@@ -4,16 +4,16 @@ set -eu
 # validate-python.sh
 # - Recursively checks Python files under ROOT_DIR (default: current directory)
 #   with Ruff formatting and lint checks, excluding .git directories.
-# - Ruff formatting is applied in place; changed files make validation fail
-#   so the resulting diff can be reviewed before validation is rerun.
-# - Usage: ./validate-python.sh [ROOT_DIR]
+# - Formatting is checked without caches by default; --format explicitly
+#   applies changes, which still make validation fail for diff review.
+# - Usage: ./validate-python.sh [--check|--format] [--strict] [ROOT_DIR]
 # - Requires: find, sed, grep, sort, wc, tr and ruff in PATH when Python files
 #   are present; mktemp and rm are always required.
 # See the LICENSE file at the top of this project tree for copyright and
 # license details.
 
 usage() {
-	printf '%s\n' "Usage: $0 [ROOT_DIR]" >&2
+	printf '%s\n' "Usage: $0 [--check|--format] [--strict] [ROOT_DIR]" >&2
 	exit 2
 }
 
@@ -29,7 +29,7 @@ cleanup() {
 	trap - EXIT HUP INT TERM
 	[ -z "${TMP_FAILS:-}" ] || rm -f "$TMP_FAILS"
 	[ -z "${UNFMT:-}" ] || rm -f "$UNFMT"
-	if [ "${RUFF_USED:-0}" -eq 1 ]; then
+	if [ "${RUFF_USED:-0}" -eq 1 ] && [ "${MODE:-check}" = format ]; then
 		if ! (CDPATH='' cd "$ROOT_DIR" && ruff clean); then
 			printf '%s\n' '[ERROR] Failed to clear Ruff cache' >&2
 			status=1
@@ -49,12 +49,27 @@ run_validate_python() {
 	RUFF_USED=0
 	trap cleanup EXIT
 	trap 'exit 1' HUP INT TERM
-	TMPLOG=$(mktemp "$TMPDIR_BASE/validate-python-XXXXXX.log")
+	TMPLOG=$(mktemp "$TMPDIR_BASE/validate-python-XXXXXX")
 	TMP_FAILS=$(mktemp "$TMPDIR_BASE/validate-python-fails-XXXXXX")
 	UNFMT=$(mktemp "$TMPDIR_BASE/unformatted-python-XXXXXX")
 	printf '%s\n' "[INFO] Logging to: $TMPLOG" >&3
 	exec >"$TMPLOG" 2>&1
 
+	MODE=check
+	while [ "$#" -gt 0 ]; do
+		case "$1" in
+		--check) MODE=check ;;
+		--format) MODE=format ;;
+		--strict) : ;; # Ruff is required whenever Python files exist.
+		--)
+			shift
+			break
+			;;
+		-*) usage ;;
+		*) break ;;
+		esac
+		shift
+	done
 	ROOT_DIR=${1:-.}
 	[ "$#" -le 1 ] || usage
 	[ "${ROOT_DIR#-}" = "$ROOT_DIR" ] || usage
@@ -65,7 +80,7 @@ run_validate_python() {
 	ROOT_DIR=$(CDPATH='' cd "$ROOT_DIR" && pwd -P)
 	# No Python source means Ruff and its result-reporting tools are unnecessary.
 	if ! find "$ROOT_DIR" \
-		\( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) \
+		\( -name .git \) \
 		-prune -o -type f -name '*.py' -print |
 		sed -n '1p' | grep -q .; then
 		printf '[INFO] No Python files found under: %s\n' "$ROOT_DIR"
@@ -81,11 +96,11 @@ run_validate_python() {
 
 	printf '%s\n' '[INFO] Checking Python formatting with Ruff...'
 	find "$ROOT_DIR" \
-		\( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) \
+		\( -name .git \) \
 		-prune -o -type f -name '*.py' -print |
 		while IFS= read -r file; do
 			[ -n "$file" ] || continue
-			if ! ruff format --check --quiet "$file" >/dev/null 2>&1; then
+			if ! ruff format --no-cache --check --quiet "$file" >/dev/null 2>&1; then
 				printf '%s\n' "$file"
 			fi
 		done >"$UNFMT" || true
@@ -95,7 +110,11 @@ run_validate_python() {
 		sed -n '1,200p' "$UNFMT" | sed 's/^/  - /'
 		while IFS= read -r file; do
 			[ -n "$file" ] || continue
-			if ruff format "$file"; then
+			if [ "$MODE" = check ]; then
+				note_fail "$file"
+				continue
+			fi
+			if ruff format --no-cache "$file"; then
 				note_fail "$file"
 			else
 				printf '[ERROR] Ruff formatting failed for: %s\n' "$file" >&2
@@ -108,11 +127,11 @@ run_validate_python() {
 
 	printf '%s\n' '[INFO] Running Ruff lint checks...'
 	find "$ROOT_DIR" \
-		\( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) \
+		\( -name .git \) \
 		-prune -o -type f -name '*.py' -print |
 		while IFS= read -r file; do
 			[ -n "$file" ] || continue
-			if ! ruff check "$file"; then
+			if ! ruff check --no-cache "$file"; then
 				note_fail "$file"
 			fi
 		done

@@ -30,24 +30,26 @@ SWIVAL_PROJECT_HOME=${SWIVAL_PROJECT_HOME:-"$PWD"}
 # Normalize DRY_RUN from the environment. Any value other than one of the
 # truthy spellings below means a real purge, and the --dry-run option can
 # still enable it later.
-typeset DRY_RUN
+typeset DRY_RUN INCLUDE_CRUSH
 DRY_RUN="${DRY_RUN:-0}"
 case "$DRY_RUN" in
 1 | true | TRUE | yes | YES | on | ON) DRY_RUN=1 ;;
 *) DRY_RUN=0 ;;
 esac
+INCLUDE_CRUSH=0
 
 # Help text. ksh's print builtin is used throughout this tree instead of
 # echo because its escape and option handling is predictable.
 usage() {
-	print "Usage: ai-purge-history.ksh [--dry-run|-n] [--help]"
+	print "Usage: ai-purge-history.ksh [--dry-run|-n] [--include-crush-data] [--help]"
 	print ""
 	print "Removes Codex, Copilot, Crush, and project-local Swival"
 	print "history/state for the current user. Configuration and"
 	print "credentials are kept."
 	print ""
-	print "  --dry-run, -n  Show the paths that would be removed, delete nothing"
-	print "  --help, -h     Show this help"
+	print "  --dry-run, -n          Show the paths that would be removed, delete nothing"
+	print "  --include-crush-data   Also remove the whole Crush data directory"
+	print "  --help, -h             Show this help"
 }
 
 # Parse options before anything is deleted. Unknown options print the usage
@@ -55,6 +57,7 @@ usage() {
 while [ "$#" -gt 0 ]; do
 	case "$1" in
 	--dry-run | -n) DRY_RUN=1 ;;
+	--include-crush-data) INCLUDE_CRUSH=1 ;;
 	--help | -h)
 		usage
 		exit 0
@@ -75,10 +78,34 @@ done
 # A real run uses rm -rf, which removes symlinks themselves rather than
 # following them, and the leading -- stops a path starting with "-" from
 # being read as an option.
+validate_remove_path() {
+	typeset path="$1"
+	case "$path" in
+	"") return 1 ;;
+	/*) : ;;
+	*)
+		print "[ERROR] refusing non-absolute path: $path" >&2
+		return 1
+		;;
+	esac
+	if [ "$path" = "/" ] || [ "$path" = "$HOME" ] || [ "$path" = "$HOME/" ]; then
+		print "[ERROR] refusing protected path: $path" >&2
+		return 1
+	fi
+	case "$path" in
+	*/../* | */.. | */./* | */. | *//*)
+		print "[ERROR] refusing unnormalized path: $path" >&2
+		return 1
+		;;
+	esac
+	return 0
+}
+
 remove_paths() {
 	typeset path
 
 	for path in "$@"; do
+		validate_remove_path "$path" || continue
 		if [ "$DRY_RUN" -eq 1 ]; then
 			if [ -e "$path" ] || [ -L "$path" ]; then
 				print "[DRY-RUN] would remove: $path"
@@ -93,8 +120,12 @@ remove_paths() {
 # credentials, and other files in those home directories are left intact.
 remove_paths "$CODEX_HOME/sessions" "$CODEX_HOME/archived_sessions"
 remove_paths "$COPILOT_HOME/session-state" "$COPILOT_HOME/logs"
-# Crush keeps all of its state in a single data directory.
-remove_paths "$CRUSH_DATA_HOME"
+# Crush's data directory may include configuration; require an explicit opt-in.
+if [ "$INCLUDE_CRUSH" -eq 1 ]; then
+	remove_paths "$CRUSH_DATA_HOME"
+else
+	print "[INFO] Preserving Crush data directory (use --include-crush-data to remove it): $CRUSH_DATA_HOME"
+fi
 # Swival stores history and state inside the selected project. Remove the
 # listed files only; the rest of .swival and the project are preserved.
 remove_paths \

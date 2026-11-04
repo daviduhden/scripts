@@ -27,8 +27,7 @@ use Unicode::Normalize qw(NFKD);
 use Pod::Usage         ();
 use Digest::SHA        ();
 use Cwd                qw(abs_path);
-use Fcntl              qw(O_WRONLY O_CREAT O_EXCL);
-use Errno              qw(EEXIST);
+use Errno              qw(EFBIG EAGAIN);
 
 # UTF-16LE/BE codecs live in Encode::Unicode. Some Perl builds (notably the
 # one shipped with OpenBSD) do not autoload them, so request the module
@@ -915,24 +914,14 @@ sub string_cmp {
 sub reserve_temp_name {
     my ( $dir, $prefix ) = @_;
     $prefix = '.norm-tmp-' unless defined $prefix;
-    for my $try ( 1 .. 1000 ) {
-        my $name = sprintf(
-            '%s%d-%d-%08x%08x',
-            $prefix, $$, $try,
-            int( rand( 2**31 ) ),
-            int( rand( 2**31 ) )
-        );
-        my $p = File::Spec->catfile( $dir, $name );
-        my $fh;
-        if ( sysopen( $fh, $p, O_WRONLY | O_CREAT | O_EXCL, 0600 ) ) {
-            close $fh;
-            return $p;
-        }
-        next if $! == EEXIST;
-        my @st = lstat($p);
-        return $p if !@st;
+    my ( $fh, $path ) =
+      tempfile( $prefix . 'XXXXXXXX', DIR => $dir, UNLINK => 0 );
+    if ( !close $fh ) {
+        my $close_error = $!;
+        unlink $path;
+        die "cannot close temporary reservation in $dir: $close_error";
     }
-    die "cannot allocate a temporary name in $dir";
+    return $path;
 }
 
 # Move a source to a freshly reserved temporary name in the same directory.
@@ -943,7 +932,7 @@ sub stage_to_temp {
     if ( rename( $src, $tmp ) ) {
         return $tmp;
     }
-    eval { unlink $tmp };
+    unlink $tmp;
     return;
 }
 
@@ -1503,14 +1492,20 @@ sub safe_replace {
     return 0 unless -e $target;
     my $dir = dirname($target);
     my $bak = reserve_temp_name( $dir, '.norm-bak-' );
-    unlink $bak;
+    return 0 unless unlink $bak;
     return 0 unless rename( $target, $bak );
 
     if ( rename( $tmp, $target ) ) {
         unlink $bak;
         return 1;
     }
-    rename( $bak, $target );
+    my $install_error = $!;
+    if ( !rename( $bak, $target ) ) {
+        emit_error( "cannot restore original; recovery copy remains at "
+              . disp($bak)
+              . ": $!" );
+    }
+    $! = $install_error;
     return 0;
 }
 
@@ -1519,9 +1514,17 @@ sub safe_replace {
 # pre-write device/inode check detects files changed by another process during
 # processing.
 sub atomic_write {
-    my ( $cfg, $path_raw, $bytes, $R ) = @_;
-    my @before     = stat($path_raw);
-    my $want_inode = @before ? _devino( @before[ 0, 1 ] ) : '';
+    my ( $cfg, $path_raw, $bytes, $R, $expected ) = @_;
+    my @before = lstat($path_raw);
+    if (   !@before
+        || -l _
+        || ( $expected && !same_snapshot( $expected, \@before ) ) )
+    {
+        $R->{errors}++;
+        emit_error( 'file changed before writing: ' . disp($path_raw) );
+        return 0;
+    }
+    @before = @$expected if $expected;
 
     my ( $base, $dir ) = fileparse($path_raw);
     my ( $fh, $tmp );
@@ -1537,14 +1540,16 @@ sub atomic_write {
     }
     my $write_ok = eval {
         binmode( $fh, ':raw' );
-        print {$fh} $bytes;
-        close $fh;
+        print {$fh} $bytes or die "write failed: $!";
+        close $fh          or die "close failed: $!";
         1;
     };
     if ( !$write_ok ) {
         $R->{errors}++;
         emit_error( 'write failed for ' . disp($path_raw) . ": $@" );
-        eval { close $fh };
+
+        # Cleanup is best effort; the original write error was reported.
+        close $fh if defined fileno($fh);
         unlink $tmp;
         return 0;
     }
@@ -1557,21 +1562,19 @@ sub atomic_write {
         return 0;
     }
 
-    if (@before) {
-        chmod( $before[2] & oct(7777), $tmp );
-        if ( $cfg->{preserve_times} ) {
-            utime( $before[8], $before[9], $tmp );
-        }
+    if ( !preserve_metadata( $cfg, \@before, $tmp ) ) {
+        $R->{errors}++;
+        emit_error( 'cannot preserve metadata: ' . disp($path_raw) . ": $!" );
+        unlink $tmp;
+        return 0;
     }
 
-    if ( $want_inode ne '' ) {
-        my @now = stat($path_raw);
-        if ( !@now || _devino( @now[ 0, 1 ] ) ne $want_inode ) {
-            $R->{errors}++;
-            emit_error( 'file changed during processing: ' . disp($path_raw) );
-            unlink $tmp;
-            return 0;
-        }
+    my @now = lstat($path_raw);
+    if ( !@now || -l _ || !same_snapshot( \@before, \@now ) ) {
+        $R->{errors}++;
+        emit_error( 'file changed during processing: ' . disp($path_raw) );
+        unlink $tmp;
+        return 0;
     }
 
     if ( !safe_replace( $tmp, $path_raw ) ) {
@@ -1587,28 +1590,94 @@ sub atomic_write {
 # Content processing   #
 ########################
 
-# Read at most `n` bytes for content classification.  Returns undef when the
-# file cannot be opened.
+# Compare identity and modification metadata, excluding access time because
+# our own reads can change it. This detects common concurrent modifications,
+# but is not a lock against a hostile writer preserving size and timestamps.
+sub same_snapshot {
+    my ( $before, $after ) = @_;
+    return 0 unless @$before && @$after;
+    for my $index ( 0, 1, 2, 7, 9, 10 ) {
+        return 0 if $before->[$index] != $after->[$index];
+    }
+    return 1;
+}
+
+# Metadata failures leave the original intact rather than silently installing
+# a temporary file with different permissions or requested timestamps.
+sub preserve_metadata {
+    my ( $cfg, $before, $tmp ) = @_;
+    return 0 unless chmod( $before->[2] & oct(7777), $tmp );
+    return 0
+      if $cfg->{preserve_times}
+      && !utime( $before->[8], $before->[9], $tmp );
+    return 1;
+}
+
+# Read at most n bytes for classification; undef denotes an I/O failure.
 sub read_sniff {
     my ( $path, $n ) = @_;
-    my $fh;
-    return unless open( $fh, '<:raw', $path );
-    my $buf = '';
-    read( $fh, $buf, $n );
-    close $fh;
+    open my $fh, '<:raw', $path or return;
+    my $buf        = '';
+    my $count      = read( $fh, $buf, $n );
+    my $read_error = $!;
+    my $closed     = close $fh;
+    if ( !defined $count || !$closed ) {
+        $! = $read_error if !defined $count;
+        return;
+    }
     return $buf;
 }
 
-# Read a file completely in raw mode.  An empty file and a failed read are
-# distinguished by the caller's undef check.
+# Read in bounded chunks and reject changing files or links. A limit breach
+# reports EFBIG; other failures return undef without treating an empty file as
+# an error. Save the pre-read identity for the later replacement check.
 sub read_all {
-    my ($path) = @_;
-    my $fh;
-    return unless open( $fh, '<:raw', $path );
-    local $/ = undef;
-    my $data = <$fh>;
-    close $fh;
-    return defined $data ? $data : '';
+    my ( $path, $limit, $snapshot ) = @_;
+    my @before = lstat($path);
+    return if !@before || !-f _ || -l _;
+    if ( defined $limit && $before[7] > $limit ) {
+        $! = EFBIG;
+        return;
+    }
+    open my $fh, '<:raw', $path or return;
+    my @opened = stat($fh);
+    if ( !same_snapshot( \@before, \@opened ) ) {
+        close $fh;
+        $! = EAGAIN;
+        return;
+    }
+    my $data = '';
+    while (1) {
+        my $length = 65536;
+        if ( defined $limit && $limit - length($data) + 1 < $length ) {
+            $length = $limit - length($data) + 1;
+        }
+        my $count = read( $fh, my $chunk, $length );
+        if ( !defined $count ) {
+            my $read_error = $!;
+            close $fh;
+            $! = $read_error;
+            return;
+        }
+        last if !$count;
+        $data .= $chunk;
+        if ( defined $limit && length($data) > $limit ) {
+            close $fh;
+            $! = EFBIG;
+            return;
+        }
+    }
+    my @after = stat($fh);
+    return unless close $fh;
+    my @current = lstat($path);
+    if (   !same_snapshot( \@before, \@after )
+        || !same_snapshot( \@before, \@current ) )
+    {
+        $! = EAGAIN;
+        return;
+    }
+    @$snapshot = @before if $snapshot;
+    return $data;
 }
 
 # Apply encoding and line-ending policy to regular files.  The function skips
@@ -1679,7 +1748,9 @@ sub process_content {
             next;
         }
 
-        my $bytes = read_all( $n->{raw_path} );
+        my @read_snapshot;
+        my $bytes =
+          read_all( $n->{raw_path}, $cfg->{max_bytes}, \@read_snapshot );
         if ( !defined $bytes ) {
             $R->{errors}++;
             emit_error( 'cannot read: ' . disp( $n->{rel} ) );
@@ -1864,7 +1935,12 @@ sub process_content {
         }
 
         if ( $changed && $cfg->{apply} ) {
-            if ( atomic_write( $cfg, $n->{raw_path}, $bytes_out, $R ) ) {
+            if (
+                atomic_write(
+                    $cfg, $n->{raw_path}, $bytes_out, $R, \@read_snapshot
+                )
+              )
+            {
                 $R->{pending}++;
             }
         }
@@ -1973,9 +2049,15 @@ sub write_report {
         $R->{errors}++;
         return;
     }
-    my $text = join( "\n", @LOG ) . "\n";
-    print {$fh} encode( 'UTF-8', $text );
-    close $fh;
+    my $text        = join( "\n", @LOG ) . "\n";
+    my $written     = print {$fh} encode( 'UTF-8', $text );
+    my $write_error = $!;
+    my $closed      = close $fh;
+    if ( !$written || !$closed ) {
+        local $! = $written ? $! : $write_error;
+        warn "normalize-files: cannot finish report $cfg->{report}: $!\n";
+        $R->{errors}++;
+    }
     return;
 }
 

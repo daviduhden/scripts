@@ -3,10 +3,12 @@
 set -euo pipefail
 
 # Log cleanup script
-# - Removes *.gz files under /var/log and *.old files
-#   under / (root filesystem only).
-# - Supports a dry-run mode via DRY_RUN=1 or the
-#   --dry-run / -n option to only list files.
+# - Removes *.gz files under /var/log and *.old files in a bounded set of
+#   system directories (default: /var/log /var/tmp /tmp /etc).
+# - Only removes *.old files older than OLDER_THAN days (default: 7).
+# - Supports a dry-run mode via DRY_RUN=1 or --dry-run / -n.
+# - A real deletion requires --force; this prevents an accidental cron run
+#   from deleting fresh configuration backups.
 #
 # Requirements: find; root privileges for a real run (dry-run works as
 # any user).
@@ -52,6 +54,9 @@ case "$DRY_RUN" in
 1 | true | TRUE | yes | YES | on | ON) DRY_RUN=1 ;;
 *) DRY_RUN=0 ;;
 esac
+OLDER_THAN="${OLDER_THAN:-7}"
+FORCE="${FORCE:-0}"
+OLD_ROOTS="${OLD_ROOTS:-/var/log /var/tmp /tmp /etc}"
 
 parse_args() {
 	while [ "$#" -gt 0 ]; do
@@ -63,9 +68,21 @@ parse_args() {
 				"instead of standard behavior."
 			shift
 			;;
+		--older-than)
+			[[ $# -ge 2 && $2 =~ ^[0-9]+$ ]] || {
+				error "--older-than requires a non-negative day count."
+				exit 2
+			}
+			OLDER_THAN=$2
+			shift 2
+			;;
+		--force)
+			FORCE=1
+			shift
+			;;
 		*)
 			error "Unknown option: $1"
-			error "Try: $0 --dry-run"
+			error "Try: $0 --dry-run | --force [--older-than DAYS]"
 			exit 1
 			;;
 		esac
@@ -100,24 +117,29 @@ cleanup_gz_logs() {
 # this scan from crossing into other mounts; without it, a full-root
 # search would be considerably broader.
 cleanup_old_files() {
+	local root
 	if [ "$DRY_RUN" -eq 1 ]; then
-		log "DRY RUN: listing *.old files" \
-			"under / (no deletion will occur):"
-		if ! find / -xdev -type f \
-			-name '*.old' -print; then
-			error "Failed to list *.old" \
-				"files under /."
-			return 1
-		fi
+		log "DRY RUN: listing *.old files older than" \
+			"${OLDER_THAN} day(s) under: ${OLD_ROOTS}"
+		for root in $OLD_ROOTS; do
+			[ -d "$root" ] || continue
+			if ! find "$root" -xdev -type f \
+				-name '*.old' -mtime +"$OLDER_THAN" -print; then
+				error "Failed to list *.old files under ${root}."
+				return 1
+			fi
+		done
 	else
-		log "Deleting *.old files under /" \
-			"(use with care)..."
-		if ! find / -xdev -type f \
-			-name '*.old' -print -delete; then
-			error "Failed while deleting *.old" \
-				"files under /."
-			return 1
-		fi
+		log "Deleting *.old files older than" \
+			"${OLDER_THAN} day(s) under: ${OLD_ROOTS}"
+		for root in $OLD_ROOTS; do
+			[ -d "$root" ] || continue
+			if ! find "$root" -xdev -type f \
+				-name '*.old' -mtime +"$OLDER_THAN" -print -delete; then
+				error "Failed while deleting *.old files under ${root}."
+				return 1
+			fi
+		done
 	fi
 }
 
@@ -129,6 +151,11 @@ main() {
 	if [[ $DRY_RUN -ne 1 && ${EUID:-$(id -u)} -ne 0 ]]; then
 		error "This script must be run as root unless --dry-run is used." \
 			"Try: sudo $0"
+		exit 1
+	fi
+	if [[ $DRY_RUN -ne 1 && $FORCE -ne 1 ]]; then
+		error "Real deletion requires --force;" \
+			"use --dry-run to preview."
 		exit 1
 	fi
 

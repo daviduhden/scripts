@@ -10,18 +10,20 @@ set -euo pipefail
 # - Install into /usr/local/go
 # - Ensure /usr/local/go/bin is in system-wide PATH via /etc/profile
 #
-# Requirements: root privileges, network access, curl, tar, install,
-# uname, and mktemp. Only Linux is supported.
+# Requirements: root privileges, network access, curl, Python 3, install,
+# awk, mv, uname, and mktemp. Only Linux is supported.
 #
 # Side effects:
 #  - Replaces /usr/local/go with the downloaded release
 #  - Appends an export to /etc/profile when /usr/local/go/bin is not
 #    already mentioned, after copying it to a timestamped backup
-#  - Writes the tarball to a temporary file that is removed on exit
+#  - Stages the verified archive beside the destination and cleans it on exit
+#  - Retains prior installations under /usr/local/.go-backup.* for recovery
 #
-# The download is not checked against a published checksum or
-# signature. A distribution Go package is left untouched; this script
-# only replaces the /usr/local/go tree.
+# The archive SHA-256 is checked against the exact official go.dev metadata.
+# This trusts HTTPS rather than an independent signature. A new tree is
+# prepared and version-checked before activation, with restoration on failure.
+# A distribution Go package is untouched; only /usr/local/go is replaced.
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
@@ -30,17 +32,36 @@ set -euo pipefail
 PATH=/usr/local/go/bin:/usr/local/sbin:/usr/local/bin
 PATH="${PATH}:/usr/sbin:/usr/bin:/sbin:/bin"
 export PATH
+PERL_CMD="${PERL_CMD:-perl}"
 
 GO_BASE_URL="https://go.dev/dl"
 VERSION_URL="https://go.dev/VERSION?m=text"
 INSTALL_DIR="/usr/local"
 GO_ROOT="${INSTALL_DIR}/go"
+GO_STAGE=
+GO_LOCK=
+GO_BACKUP=
 
 log() { printf '%s [INFO] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
 warn() { printf '%s [WARN] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
 error() {
 	printf '%s [ERROR] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2
 	exit 1
+}
+
+# EXIT cleanup can run after the updater function has returned, so transaction
+# paths are global rather than trap references to expired local variables.
+cleanup_go_update() {
+	local status=$?
+	if [[ -n $GO_BACKUP && -d $GO_BACKUP/go && ! -e $GO_ROOT && ! -L $GO_ROOT ]]; then
+		if ! mv -T -- "$GO_BACKUP/go" "$GO_ROOT"; then
+			warn "Restoration failed; previous Go tree retained at $GO_BACKUP/go"
+			status=1
+		fi
+	fi
+	if [[ -n $GO_STAGE && -d $GO_STAGE ]]; then rm -rf -- "$GO_STAGE"; fi
+	if [[ -n $GO_LOCK && -d $GO_LOCK ]]; then rmdir -- "$GO_LOCK" || status=1; fi
+	return "$status"
 }
 
 require_root() {
@@ -166,30 +187,108 @@ run_golang_update() {
 	GO_ARCH="$(detect_go_arch)"
 	TAR_NAME="${LATEST_VERSION}.linux-${GO_ARCH}.tar.gz"
 	TAR_URL="${GO_BASE_URL}/${TAR_NAME}"
-	# The trap removes the downloaded archive on success and on every
-	# error path after this point.
-	TAR_FILE="$(mktemp /tmp/go-XXXXXX.tar.gz)"
-	trap 'rm -f "$TAR_FILE" 2>/dev/null || true' EXIT
-
+	[[ $LATEST_VERSION =~ ^go[0-9]+\.[0-9]+\.[0-9]+$ ]] || error 'Invalid Go release version'
+	install -d -m 0755 "$INSTALL_DIR"
+	local lock="$INSTALL_DIR/.go-update.lock" stage backup='' published actual listing
+	mkdir -- "$lock" 2>/dev/null || error "Go update lock exists: $lock (inspect before removing)"
+	stage=$(mktemp -d "$INSTALL_DIR/.go-install.XXXXXX") || {
+		rmdir -- "$lock"
+		error 'Cannot create Go staging directory'
+	}
+	GO_STAGE=$stage
+	GO_LOCK=$lock
+	# The backup is deliberately retained, including after failed restoration.
+	trap cleanup_go_update EXIT
+	trap 'exit 130' INT
+	trap 'exit 143' TERM
+	TAR_FILE="$stage/release.tar.gz"
 	log "Downloading ${TAR_NAME} from ${TAR_URL}..."
-	if ! net_curl "$TAR_URL" -o "$TAR_FILE"; then
-		error "download failed from ${TAR_URL}"
+	net_curl --proto '=https' --proto-redir '=https' "$TAR_URL" -o "$TAR_FILE"
+	net_curl --proto '=https' --proto-redir '=https' 'https://go.dev/dl/?mode=json&include=all' -o "$stage/releases.json"
+	# Verify the exact filename/digest from official metadata, then extract
+	# regular files/directories only into the new tree, never the live install.
+	# shellcheck disable=SC2016
+	published=$("$PERL_CMD" -MJSON::PP -e '
+		local $/;
+		my $data = decode_json(<STDIN>);
+		my @matches;
+		for my $release (@$data) {
+			for my $file (@{ $release->{files} // [] }) {
+				push @matches, $file
+					if ($file->{filename} // "") eq $ARGV[0];
+			}
+		}
+		die "missing unique Go release digest\n"
+			unless @matches == 1
+			&& ($matches[0]{sha256} // "") =~ /\A[0-9a-f]{64}\z/;
+		print $matches[0]{sha256}, "\n";
+	' "$TAR_NAME" <"$stage/releases.json") || error 'Go archive validation failed'
+	actual=$(sha256sum "$TAR_FILE" | awk '{print $1}') ||
+		error 'Go archive validation failed'
+	[[ $actual == "$published" ]] || error 'Go SHA-256 mismatch'
+	listing=$(tar -tzf "$TAR_FILE") || error 'Go archive validation failed'
+	if printf '%s\n' "$listing" |
+		grep -Eq '(^|/)\.\.(/|$)|^/' ||
+		[ -n "$(printf '%s\n' "$listing" | sort | uniq -d)" ] ||
+		! tar -tvzf "$TAR_FILE" | awk '$1 !~ /^[d-]/ { exit 1 }'; then
+		error 'Go archive validation failed'
 	fi
-
-	log "Download complete: ${TAR_FILE}"
-	# The old tree is removed before extraction so files from a
-	# previous release do not remain in /usr/local/go.
-	log "Installing Go into ${GO_ROOT}..."
-	install -d -m 0755 "${INSTALL_DIR}"
-	if [[ -d $GO_ROOT ]]; then
-		log "Removing previous Go installation at ${GO_ROOT}..."
-		rm -rf "$GO_ROOT"
+	# shellcheck disable=SC2016
+	"$PERL_CMD" -MArchive::Tar -e '
+		use strict;
+		use warnings;
+		my ($archive, $destination) = @ARGV;
+		my $tar = Archive::Tar->new($archive, 1)
+			or die "cannot read archive: $!\n";
+		my @members = $tar->get_files();
+		my %seen;
+		my $total = 0;
+		for my $entry (@members) {
+			my $name = $entry->name;
+			my @parts = split m{/}, $name;
+			die "invalid Go archive entry\n"
+				if !@parts || $parts[0] ne "go" || $name =~ m{\A/}
+				|| grep { $_ eq ".." } @parts || $seen{$name}++
+				|| !($entry->is_dir || $entry->is_file);
+			$total += $entry->size;
+			die "Go archive exceeds extraction limit\n"
+				if $total > 2147483648;
+		}
+		for my $entry (@members) {
+			my $name = $entry->name;
+			my $target = "$destination/$name";
+			if ($entry->is_dir) {
+				require File::Path;
+				File::Path::make_path($target);
+				next;
+			}
+			require File::Basename;
+			require File::Path;
+			File::Path::make_path(File::Basename::dirname($target));
+			open my $out, ">:raw", $target
+				or die "cannot create $target: $!\n";
+			print {$out} $entry->get_content
+				or die "cannot write $target: $!\n";
+			close $out or die "cannot close $target: $!\n";
+			chmod $entry->mode & 0777, $target;
+		}
+	' "$TAR_FILE" "$stage" || error 'Go archive validation failed'
+	[[ -f $stage/go/bin/go && ! -L $GO_ROOT ]] || error 'Invalid staged binary or linked install destination'
+	[[ "$("$stage/go/bin/go" version | awk '{print $3}')" == "$LATEST_VERSION" ]] || error 'Staged Go version mismatch'
+	if [[ -e $GO_ROOT ]]; then
+		[[ -d $GO_ROOT ]] || error 'Go destination is not a directory'
+		backup=$(mktemp -d "$INSTALL_DIR/.go-backup.XXXXXX")
+		GO_BACKUP=$backup
+		mv -T -- "$GO_ROOT" "$backup/go"
 	fi
-	tar -C "$INSTALL_DIR" -xzf "$TAR_FILE"
-
-	log "Go installation finished successfully."
-	log "Installed version:"
-	"${GO_ROOT}/bin/go" version || true
+	if ! mv -T -- "$stage/go" "$GO_ROOT"; then
+		if [[ -n $backup ]] && ! mv -T -- "$backup/go" "$GO_ROOT"; then
+			error "Go activation and restoration failed; previous tree retained at $backup/go"
+		fi
+		error 'Go activation failed; previous installation restored'
+	fi
+	[[ -z $backup ]] || log "Previous Go installation retained at $backup/go"
+	log "Go installation finished successfully: $LATEST_VERSION"
 
 	ensure_go_path_in_etc_profile
 	log "Done."
@@ -209,6 +308,10 @@ check_prereqs() {
 	require_cmd install
 	require_cmd uname
 	require_cmd mktemp
+	require_cmd "$PERL_CMD"
+	require_cmd sha256sum
+	require_cmd awk
+	require_cmd mv
 }
 
 main() {

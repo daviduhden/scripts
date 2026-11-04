@@ -31,6 +31,7 @@ set -euo pipefail
 # Basic PATH
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
+PERL_CMD="${PERL_CMD:-perl}"
 
 BUILD_DIR="${HOME}/.local/src"
 REPO="aristocratos/btop"
@@ -63,6 +64,7 @@ get_latest_tag() {
 	tag="$(git ls-remote --tags --refs "$REPO_URL" 2>/dev/null |
 		awk '{print $2}' |
 		sed 's#refs/tags/##; s/\^{}//' |
+		grep -E '^v?[0-9]+(\.[0-9]+)*$' |
 		sort -Vr |
 		sed -n '1p')"
 	[[ -n $tag ]] && printf '%s\n' "$tag"
@@ -105,12 +107,12 @@ install_build_deps() {
 # Prints the source directory on success.
 fetch_source() {
 	local tag="$1" dest="$2" src_dir=""
-	mkdir -p "$dest"
+	mkdir -p "$dest" || return 1
 
 	# A previous run may have left a checkout behind; git clone refuses an
 	# existing non-empty destination, and a stale tree could otherwise be
 	# picked up by the tarball fallback.
-	rm -rf "$dest/btop"
+	rm -rf "$dest/btop" || return 1
 
 	log "Cloning btop tag ${tag} with git..."
 	if git clone --depth 1 --branch "$tag" "$REPO_URL" "$dest/btop"; then
@@ -124,19 +126,71 @@ fetch_source() {
 	tarball_url="${tarball_url}/archive/refs/tags/${tag}.tar.gz"
 	local tarball="$dest/btop.tar.gz"
 	log "Git clone failed, downloading tarball ${tarball_url}..."
-	curl -fLsS --retry 5 "$tarball_url" -o "$tarball"
-	tar -xzf "$tarball" -C "$dest"
-	# GitHub tarballs unpack to <name>-<tag without leading v>.
-	local extracted="$dest/btop-${tag#v}"
-	if [ -d "$extracted" ]; then
-		src_dir="$extracted"
-	else
-		# sed reads the whole stream; `| head -n1` would exit early
-		# and make find die of SIGPIPE (141 under pipefail).
-		src_dir="$(find "$dest" -maxdepth 1 -type d -name 'btop*' |
-			sed -n '1p')"
+	curl -fLsS --retry 5 "$tarball_url" -o "$tarball" || return 1
+	# Extract into a unique tree, with exact root and no archive links/devices.
+	local unpack listing
+	unpack=$(mktemp -d "$dest/btop-source.XXXXXX") || return 1
+	listing=$(tar -tzf "$tarball") || {
+		rm -rf -- "$unpack"
+		return 1
+	}
+	if printf '%s\n' "$listing" |
+		grep -Eq '(^|/)\.\.(/|$)|^/' ||
+		[ -n "$(printf '%s\n' "$listing" | sort | uniq -d)" ] ||
+		! tar -tvzf "$tarball" | awk '$1 !~ /^[d-]/ { exit 1 }'; then
+		rm -rf -- "$unpack"
+		return 1
 	fi
-	[[ -n $src_dir ]] && printf '%s\n' "$src_dir"
+	# shellcheck disable=SC2016
+	if ! "$PERL_CMD" -MArchive::Tar -e '
+		use strict;
+		use warnings;
+		my ($archive, $destination, $expected) = @ARGV;
+		my $tar = Archive::Tar->new($archive, 1)
+			or die "cannot read archive: $!\n";
+		my @members = $tar->get_files();
+		my %seen;
+		my $total = 0;
+		for my $entry (@members) {
+			my $name = $entry->name;
+			my @parts = split m{/}, $name;
+			die "unexpected source archive structure\n"
+				if !@parts || $parts[0] ne $expected
+				|| $name =~ m{\A/} || grep { $_ eq ".." } @parts
+				|| $seen{$name}++
+				|| !($entry->is_dir || $entry->is_file);
+			$total += $entry->size;
+			die "source archive exceeds extraction limit\n"
+				if $total > 536870912;
+		}
+		for my $entry (@members) {
+			my $name = $entry->name;
+			my $target = "$destination/$name";
+			if ($entry->is_dir) {
+				require File::Path;
+				File::Path::make_path($target);
+				next;
+			}
+			require File::Basename;
+			require File::Path;
+			File::Path::make_path(File::Basename::dirname($target));
+			open my $out, ">:raw", $target
+				or die "cannot create $target: $!\n";
+			my $data = $entry->get_content;
+			print {$out} $data or die "cannot write $target: $!\n";
+			close $out or die "cannot close $target: $!\n";
+			chmod $entry->mode & 0777, $target;
+		}
+	' "$tarball" "$unpack" "btop-${tag#v}"; then
+		rm -rf -- "$unpack"
+		return 1
+	fi
+	src_dir="$unpack/btop-${tag#v}"
+	if [[ ! -d $src_dir ]]; then
+		rm -rf -- "$unpack"
+		return 1
+	fi
+	printf '%s\n' "$src_dir"
 }
 
 # Build with all available cores and install under /usr/local. The
@@ -164,6 +218,9 @@ check_prereqs() {
 	require_cmd git
 	require_cmd make
 	require_cmd cmake
+	require_cmd "$PERL_CMD"
+	require_cmd tar
+	require_cmd mktemp
 }
 
 resolve_latest_tag() {
@@ -211,10 +268,20 @@ run_update() {
 }
 
 main() {
+	local latest_tag
 	require_root
+	# A current installation should not trigger an APT update/install pass.
+	if ! command -v git >/dev/null 2>&1; then
+		install_build_deps
+	fi
+	require_cmd git
+	latest_tag="$(resolve_latest_tag)"
+	if is_up_to_date "$latest_tag"; then
+		exit 0
+	fi
 	install_build_deps
 	check_prereqs
-	run_update
+	build_and_install "$latest_tag"
 }
 
 main "$@"

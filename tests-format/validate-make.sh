@@ -4,22 +4,28 @@ set -eu
 # Announce the log path on descriptor 3, then send normal output to the log.
 # The log remains under ${TMPDIR:-/tmp} after exit for inspection.
 exec 3>&1 4>&2
-TMPLOG="${TMPDIR:-/tmp}/validate-make-$$.log"
+TMPLOG=$(mktemp "${TMPDIR:-/tmp}/validate-make-XXXXXX")
+TMP_FAILS=
+UNFMT=
+TMP_SKIPS=
+trap '[ -z "$TMP_FAILS" ] || rm -f "$TMP_FAILS"; [ -z "$UNFMT" ] || rm -f "$UNFMT"; [ -z "$TMP_SKIPS" ] || rm -f "$TMP_SKIPS"' EXIT
+trap 'exit 1' HUP INT TERM
 printf '%s\n' "[INFO] Logging to: $TMPLOG" >&3
 exec >"$TMPLOG" 2>&1
 
 # validate-make.sh
 # - Recursively finds all Makefiles under ROOT_DIR
 #   (default: current directory), checks formatting with
-#   mbake, lints with checkmake and runs a bmake/make dry run.
-# - Usage: ./validate-make.sh [ROOT_DIR]
+#   mbake and lints with checkmake. --make-dry-run opts into evaluating
+#   trusted Makefiles with bmake/make; even -n can execute parse-time commands.
+# - Usage: ./validate-make.sh [--check|--format] [--strict] [ROOT_DIR]
 # - Uses: mbake, checkmake, bmake (or make) in PATH when available
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
 
 usage() {
-	printf '%s\n' "Usage: $0 [ROOT_DIR]" >&2
+	printf '%s\n' "Usage: $0 [--check|--format] [--strict] [--make-dry-run] [ROOT_DIR]" >&2
 	exit 2
 }
 
@@ -33,6 +39,24 @@ require_cmd() {
 run_validate_make() {
 
 	# One optional ROOT_DIR; reject option-looking paths before doing work.
+	MODE=check
+	STRICT=0
+	MAKE_DRY_RUN=0
+	while [ "$#" -gt 0 ]; do
+		case "$1" in
+		--check) MODE=check ;;
+		--format) MODE=format ;;
+		--strict) STRICT=1 ;;
+		--make-dry-run) MAKE_DRY_RUN=1 ;;
+		--)
+			shift
+			break
+			;;
+		-*) usage ;;
+		*) break ;;
+		esac
+		shift
+	done
 	ROOT_DIR=${1:-.}
 	[ "$#" -le 1 ] || usage
 	[ "${ROOT_DIR#-}" = "$ROOT_DIR" ] || usage
@@ -54,11 +78,16 @@ run_validate_make() {
 	fi
 
 	TMPDIR_BASE="${TMPDIR:-/tmp}"
-	TMP_FAILS="$TMPDIR_BASE/validate-make-fails-$$.txt"
-	trap 'rm -f "$TMP_FAILS"' EXIT
+	TMP_FAILS=$(mktemp "$TMPDIR_BASE/validate-make-fails-XXXXXX")
+	TMP_SKIPS=$(mktemp "$TMPDIR_BASE/validate-make-skips-XXXXXX")
 
 	# Pipelines run their loops in subshells; use a file to accumulate names.
 	note_fail() { printf '%s\n' "$1" >>"$TMP_FAILS"; }
+	note_skip() {
+		printf '[SKIP] %s\n' "$1" >&2
+		printf '%s\n' "$1" >>"$TMP_SKIPS"
+		if [ "$STRICT" -eq 1 ] && [ "${2:-required}" = required ]; then note_fail "missing: $1"; fi
+	}
 
 	is_bsd_makefile() {
 		# mbake and checkmake implement GNU make syntax. Do not feed them
@@ -83,14 +112,14 @@ run_validate_make() {
 	printf '%s\n' "[INFO] Formatting Makefiles with mbake..."
 	# mbake is unavailable on OpenBSD, and checkmake is skipped there as well.
 	if [ "$IS_OPENBSD" -eq 1 ]; then
-		printf '%s\n' "[INFO] OpenBSD: skipping mbake"
+		note_skip "OpenBSD: mbake is not ported" inapplicable
 	elif command -v mbake >/dev/null 2>&1; then
-		UNFMT="$TMPDIR_BASE/unformatted-make-$$.txt"
+		UNFMT=$(mktemp "$TMPDIR_BASE/unformatted-make-XXXXXX")
 
 		# --check reports drift without rewriting; names are collected so the
 		# rewrite pass can print what it is about to change.
 		find "$ROOT_DIR" \
-			\( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) \
+			\( -name .git \) \
 			-prune -o -type f \
 			\( -name 'Makefile' -o -name 'makefile' \
 			-o -name 'GNUmakefile' -o -name '*.mk' \) \
@@ -98,7 +127,7 @@ run_validate_make() {
 			while IFS= read -r f; do
 				[ -n "$f" ] || continue
 				if [ "${f##*/}" != "GNUmakefile" ] && is_bsd_makefile "$f"; then
-					printf '%s\n' "[INFO] Skipping mbake for BSD makefile: $f" >&2
+					note_skip "mbake unsupported BSD makefile: $f" inapplicable
 					continue
 				fi
 				if ! mbake format --check "$f" >/dev/null 2>&1; then
@@ -114,6 +143,10 @@ run_validate_make() {
 			# exits nonzero and the diff is reviewed.
 			while IFS= read -r file; do
 				[ -n "$file" ] || continue
+				if [ "$MODE" = check ]; then
+					note_fail "$file"
+					continue
+				fi
 				if mbake format "$file" >/dev/null 2>&1; then
 					note_fail "$file"
 				else
@@ -127,17 +160,15 @@ run_validate_make() {
 
 		rm -f "$UNFMT"
 	else
-		printf '%s\n' \
-			"[INFO] mbake not installed;" \
-			" skipping Makefile formatting"
+		note_skip "mbake not installed; skipping Makefile formatting"
 	fi
 
 	if [ "$IS_OPENBSD" -eq 1 ]; then
-		printf '%s\n' "[INFO] OpenBSD: skipping checkmake"
+		note_skip "OpenBSD: checkmake is not ported" inapplicable
 	elif command -v checkmake >/dev/null 2>&1; then
 		printf '%s\n' "[INFO] Running checkmake (Makefile linter)..."
 		find "$ROOT_DIR" \
-			\( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) \
+			\( -name .git \) \
 			-prune -o -type f \
 			\( -name 'Makefile' -o -name 'makefile' \
 			-o -name 'GNUmakefile' -o -name '*.mk' \) \
@@ -145,7 +176,7 @@ run_validate_make() {
 			while IFS= read -r f; do
 				[ -n "$f" ] || continue
 				if is_bsd_makefile "$f" || is_makefile_wrapper "$f"; then
-					printf '%s\n' "[INFO] Skipping checkmake for unsupported makefile dialect: $f" >&2
+					note_skip "checkmake unsupported makefile dialect: $f" inapplicable
 					continue
 				fi
 				if ! checkmake "$f" >/dev/null 2>&1; then
@@ -154,7 +185,7 @@ run_validate_make() {
 				fi
 			done || true
 	else
-		printf '%s\n' "[INFO] checkmake not installed; skipping Makefile lint"
+		note_skip "checkmake not installed; skipping Makefile lint"
 	fi
 
 	# Run bmake/make dry-run to ensure BSD make compatibility. On OpenBSD the
@@ -167,10 +198,12 @@ run_validate_make() {
 		MAKE_CMD="make"
 	fi
 
-	if command -v "$MAKE_CMD" >/dev/null 2>&1; then
+	if [ "$MAKE_DRY_RUN" -ne 1 ]; then
+		note_skip "make execution disabled; use --make-dry-run only on trusted trees" inapplicable
+	elif command -v "$MAKE_CMD" >/dev/null 2>&1; then
 		printf '%s\n' "[INFO] Running $MAKE_CMD -n -f (bsdmake dry-run)..."
 		find "$ROOT_DIR" \
-			\( -path "$ROOT_DIR/.git" -o -path "$ROOT_DIR/.git/*" \) \
+			\( -name .git \) \
 			-prune -o -type f \
 			\( -name 'Makefile' -o -name 'makefile' \
 			-o -name 'GNUmakefile' -o -name '*.mk' \) \
@@ -180,13 +213,13 @@ run_validate_make() {
 				make_dir=$(dirname "$f")
 				make_file=${f##*/}
 				if [ "$make_file" = "GNUmakefile" ]; then
-					printf '%s\n' "[INFO] Skipping bmake for GNU makefile: $f" >&2
+					note_skip "bmake unsupported GNU makefile: $f" inapplicable
 					continue
 				fi
 				if [ "$make_file" = "Makefile" ] &&
 					grep -Eq '^[[:space:]]*include[[:space:]]+\$\{\.CURDIR\}/config\.mk' "$f" &&
 					[ ! -f "$make_dir/config.mk" ]; then
-					printf '%s\n' "[INFO] Skipping bmake until configure generates config.mk: $f" >&2
+					note_skip "bmake requires generated config.mk: $f" inapplicable
 					continue
 				fi
 				# bmake resolves relative paths against the
@@ -203,9 +236,10 @@ run_validate_make() {
 			[ -n "$bad" ] && note_fail "$bad"
 		done || true
 	else
-		printf '%s\n' "[INFO] bmake/make not installed; skipping dry-run"
+		note_skip "bmake/make not installed; skipping dry-run"
 	fi
 
+	printf '[INFO] Skipped checks: %s\n' "$(wc -l <"$TMP_SKIPS" | tr -d ' ')"
 	issues=0
 	if [ -f "$TMP_FAILS" ]; then
 		issues=$(sort -u "$TMP_FAILS" | wc -l | tr -d ' ')
@@ -222,11 +256,12 @@ run_validate_make() {
 		exit 2
 	fi
 
-	printf '%s\n' "[INFO] Makefile checks passed"
+	printf '%s\n' "[INFO] Makefile checks completed; inspect skipped-check summary"
 	exit 0
 }
 
 main() {
+	require_cmd mktemp
 	require_cmd uname
 	require_cmd find
 	require_cmd sed

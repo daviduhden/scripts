@@ -183,11 +183,28 @@ build_lyrebird() {
 }
 
 install_lyrebird() {
+	local staged
 	log "Installing lyrebird to $INSTALL_PATH..."
-	# cp and chmod are system binaries, so they remain runnable through run0
-	# even though the build itself ran in the user's environment.
-	run_root cp "./$BIN_NAME" "$INSTALL_PATH"
-	run_root chmod +x "$INSTALL_PATH"
+	# Stage in the user's tree, then copy and rename with privilege. Renaming
+	# over a running binary is safe on Linux; a direct cp can fail with
+	# ETXTBSY.
+	staged="${BUILD_DIR}/.${BIN_NAME}.new.$$"
+	install -m 0755 "./$BIN_NAME" "$staged" || {
+		rm -f "$staged"
+		error "Cannot stage the built lyrebird binary."
+	}
+	if run_root test -e "$INSTALL_PATH"; then
+		run_root cp -p "$INSTALL_PATH" \
+			"${INSTALL_PATH}.bak.$(date +%Y%m%d%H%M%S)" ||
+			warn "Could not back up the previous lyrebird binary."
+	fi
+	if ! run_root cp "$staged" "${INSTALL_PATH}.new" ||
+		! run_root chmod 0755 "${INSTALL_PATH}.new" ||
+		! run_root mv -f "${INSTALL_PATH}.new" "$INSTALL_PATH"; then
+		rm -f "$staged"
+		error "Cannot activate lyrebird."
+	fi
+	rm -f "$staged"
 	log "Lyrebird installed successfully."
 }
 

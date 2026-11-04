@@ -5,8 +5,12 @@ set -eu
 # redirected to a per-run log, so progress messages land in the log while
 # descriptor 3 can still bypass it (for example, to announce the log path).
 # The log is left in ${TMPDIR:-/tmp} for inspection after the run.
+umask 077
 exec 3>&1 4>&2
-TMPLOG="${TMPDIR:-/tmp}/clang-format-all-$$.log"
+TMPLOG=$(mktemp "${TMPDIR:-/tmp}/clang-format-all.XXXXXX") || {
+	printf '%s\n' "[ERROR] cannot create log file" >&3
+	exit 1
+}
 printf '%s\n' "[INFO] Logging to: $TMPLOG" >&3
 exec >"$TMPLOG" 2>&1
 

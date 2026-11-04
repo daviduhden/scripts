@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Black-box contract tests for validate-agent-knowledge.py."""
 
 from __future__ import annotations

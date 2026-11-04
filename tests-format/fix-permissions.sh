@@ -324,6 +324,19 @@ process_one() {
 
 worker_mode() {
 	for f in "$@"; do
+		# --check/--dry-run operate on the effective project tree. Generated
+		# caches and other Git-ignored artifacts are not part of it and must
+		# not make the read-only gate fail.
+		if [ "${SKIP_GITIGNORED:-0}" -eq 1 ]; then
+			rel=$f
+			case $rel in
+			"$ROOT_DIR"/*) rel=${rel#"$ROOT_DIR"/} ;;
+			esac
+			if [ -n "$rel" ] &&
+				git -C "$ROOT_DIR" check-ignore -q -- "$rel" 2>/dev/null; then
+				continue
+			fi
+		fi
 		process_one "$f"
 	done
 	exit 0
@@ -393,11 +406,24 @@ main() {
 	done
 	[ -n "$ROOT_DIR" ] || ROOT_DIR=.
 
-	STATE="${TMPDIR:-/tmp}/fix-permissions-$$.txt"
+	umask 077
+	STATE=$(mktemp "${TMPDIR:-/tmp}/fix-permissions.XXXXXX") || {
+		printf '%s\n' "[ERROR] cannot create state file" >&2
+		exit 1
+	}
 	: >"$STATE"
 	trap 'rm -f "$STATE"' EXIT HUP INT TERM
 
-	export MODE VERBOSE STATE
+	# In a Git work tree, skip ignored generated artifacts. The explicit
+	# prune list also avoids walking large caches.
+	SKIP_GITIGNORED=0
+	if [ "$MODE" != "fix" ] &&
+		command -v git >/dev/null 2>&1 &&
+		git -C "$ROOT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+		SKIP_GITIGNORED=1
+	fi
+
+	export MODE VERBOSE STATE ROOT_DIR SKIP_GITIGNORED
 
 	case "$MODE" in
 	check) printf '%s\n' "[INFO] Checking permissions under: $ROOT_DIR" ;;
@@ -410,7 +436,10 @@ main() {
 	# word-splitting, no NUL parsing required. .git directories and
 	# gitfiles are pruned; only regular files and directories are
 	# visited (symlinks and special files are skipped by construction).
-	find "$ROOT_DIR" \( -name .git \) -prune -o \
+	find "$ROOT_DIR" \
+		\( -name .git -o -name .ruff_cache -o -name __pycache__ \
+		-o -name node_modules -o -name .pytest_cache \
+		-o -name .mypy_cache \) -prune -o \
 		\( -type d -o -type f \) \
 		-exec "$SELF" --worker {} +
 

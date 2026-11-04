@@ -16,8 +16,8 @@ set -euo pipefail
 #  - Installs the edit binary as /usr/local/bin/edit
 #  - Removes the temporary directory on exit
 #
-# The download is not checked against a published checksum or
-# signature. Only x86_64 and aarch64 are supported. The installed
+# The download is checked against the SHA-256 in GitHub release metadata;
+# this trusts GitHub HTTPS and is not an independent signature. Only x86_64 and aarch64 are supported. The installed
 # version is compared with the release tag as versions, so a newer
 # installed build is left in place.
 #
@@ -27,6 +27,7 @@ set -euo pipefail
 # Basic PATH
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
+PERL_CMD="${PERL_CMD:-perl}"
 
 REPO_OWNER="microsoft"
 REPO_NAME="edit"
@@ -142,50 +143,70 @@ version_is_up_to_date() {
 		sort -V | tail -n1)" == "$installed" ]]
 }
 
-# Select the first browser_download_url that contains "linux", the
-# architecture string, and a .tar.gz suffix.
+# Select one exact Linux release asset; fail on missing/ambiguous metadata.
 get_release_asset_from_json() {
-	local json="$1"
-	local arch="$2"
-
-	awk -F'"' '/"browser_download_url":/ {print $4}' <<<"$json" |
-		grep -F linux |
-		grep -F "$arch" |
-		grep -E '\.tar\.gz$' |
-		sed -n '1p'
+	local json="$1" arch="$2"
+	# shellcheck disable=SC2016
+	printf '%s' "$json" | "$PERL_CMD" -MJSON::PP -e '
+		local $/;
+		my $release = decode_json(<STDIN>);
+		my $version = $release->{tag_name} // "";
+		$version =~ s/^v//;
+		die "Invalid release version\n"
+			unless $version =~ /\A[0-9]+(?:\.[0-9]+)+\z/;
+		my $name = "edit-$version-$ARGV[0]-linux-gnu.tar.gz";
+		my @assets = grep { ($_->{name} // "") eq $name }
+			@{ $release->{assets} // [] };
+		die "Expected exactly one Linux release asset\n" unless @assets == 1;
+		print $assets[0]{browser_download_url}, "\n";
+	' "$arch"
 }
 
-# Download the release archive with curl -O in WORK_DIR, extract it,
-# find the first executable named edit, and install it. curl here does
-# not use the net_curl retry wrapper.
+# Verify GitHub release metadata before reading only the expected regular entry.
 install_msedit() {
-	local url="$1"
-
-	cd "$WORK_DIR"
+	local url="$1" digest="$2" actual
+	local archive="$WORK_DIR/release.tar.gz" bin="$WORK_DIR/edit"
+	[[ $url == https://github.com/microsoft/edit/releases/download/* ]] || {
+		error 'Unexpected release URL'
+		return 1
+	}
 	log "Downloading $url"
-	curl -fLO "$url"
-
-	local archive bin
-	archive="$(basename "$url")"
-
-	log "Extracting $archive"
-	tar -xzf "$archive"
-
-	# sed reads the whole stream; `| head -n1` would exit early
-	# and make find die of SIGPIPE (141 under pipefail).
-	bin="$(find . -type f -name edit -perm -u+x | sed -n '1p')"
-
-	if [[ -z $bin ]]; then
-		error "edit binary not found."
-		exit 1
+	net_curl --proto '=https' --proto-redir '=https' "$url" -o "$archive" || return 1
+	[[ $digest =~ ^sha256:[0-9a-f]{64}$ ]] || {
+		error "Release metadata must publish a SHA-256 digest"
+		return 1
+	}
+	actual=$(sha256sum "$archive" | awk '{print $1}') || return 1
+	[[ "sha256:$actual" == "$digest" ]] || {
+		error "Release SHA-256 mismatch"
+		return 1
+	}
+	listing=$(tar -tzf "$archive") || return 1
+	if printf '%s\n' "$listing" |
+		grep -Eq '(^|/)\.\.(/|$)|^/' ||
+		[ "$(printf '%s\n' "$listing" | grep -Fxc 'edit')" -ne 1 ] ||
+		! tar -tvzf "$archive" | awk '$1 !~ /^-/ { exit 1 }'; then
+		error "Invalid edit archive structure"
+		return 1
 	fi
-
+	# shellcheck disable=SC2016
+	"$PERL_CMD" -MArchive::Tar -e '
+		my ($archive, $binary) = @ARGV;
+		my $tar = Archive::Tar->new($archive, 1)
+			or die "cannot read archive: $!\n";
+		my @entries = $tar->get_files("edit");
+		die "expected exactly one regular edit binary\n"
+			unless @entries == 1 && $entries[0]->is_file
+			&& $entries[0]->size > 0 && $entries[0]->size <= 536870912;
+		$tar->extract_file("edit", $binary)
+			or die "cannot extract edit: $!\n";
+	' "$archive" "$bin" || return 1
 	log "Installing edit to $INSTALL_DIR"
 	run_root install -m 0755 "$bin" "$INSTALL_DIR/edit"
 }
 
 run_update() {
-	local installed latest arch asset release_json
+	local installed latest arch asset digest release_json
 	installed="$(get_installed_version || true)"
 	release_json="$(net_curl "$GITHUB_API")"
 	latest="$(get_latest_version_from_json "$release_json")"
@@ -218,15 +239,24 @@ run_update() {
 		exit 1
 	fi
 
-	install_msedit "$asset"
+	# shellcheck disable=SC2016
+	digest=$(printf '%s' "$release_json" | "$PERL_CMD" -MJSON::PP -e '
+		local $/;
+		my $release = decode_json(<STDIN>);
+		my @assets = grep { ($_->{browser_download_url} // "") eq $ARGV[0] }
+			@{ $release->{assets} // [] };
+		die "asset not found\n" unless @assets == 1;
+		print $assets[0]{digest} // "";
+	' "$asset") || exit 1
+	install_msedit "$asset" "$digest"
 	rm -rf "$WORK_DIR"
 	log "edit successfully installed or updated to version $latest."
 }
 
 check_prereqs() {
 	detect_root_cmd
-	ensure_cmd curl tar grep awk sort uname find \
-		mktemp head install sed
+	ensure_cmd curl "$PERL_CMD" sha256sum tar grep awk sort uname find \
+		mktemp install sed
 }
 
 main() {

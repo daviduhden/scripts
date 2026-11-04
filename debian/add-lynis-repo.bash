@@ -186,6 +186,7 @@ ensure_https_transport() {
 # the binary keyring. Both temporary files are removed on success and
 # on the handled download and dearmor failure paths.
 install_keyring() {
+	local fpr
 	mkdir -p /etc/apt/keyrings &&
 		chmod 0755 /etc/apt/keyrings
 	KEYRING="/etc/apt/keyrings/cisofy-lynis-archive-keyring.gpg"
@@ -198,6 +199,12 @@ install_keyring() {
 		error "failed to download Lynis archive key" \
 			"(curl/wget)."
 	fi
+	fpr=$(gpg --show-keys --with-colons "$TMPKEY" 2>/dev/null |
+		awk -F: '$1 == "fpr" { print $10; exit }')
+	if [ "$fpr" != "84FAA9983B24AEF24D6C87F1FEBB7D1812576482" ]; then
+		rm -f "$TMPKEY" "$TMPDEARMOR"
+		error "Lynis signing key fingerprint mismatch: ${fpr:-missing}."
+	fi
 
 	log "Installing key to ${KEYRING} via gpg --dearmor..."
 	if ! gpg --dearmor "$TMPKEY" >"$TMPDEARMOR"; then
@@ -205,7 +212,10 @@ install_keyring() {
 		error "gpg --dearmor failed for" \
 			"downloaded key."
 	fi
-	install -m 0644 "$TMPDEARMOR" "$KEYRING"
+	install -m 0644 "$TMPDEARMOR" "${KEYRING}.new" ||
+		error "Cannot stage $KEYRING."
+	mv -f "${KEYRING}.new" "$KEYRING" ||
+		error "Cannot publish $KEYRING."
 	rm -f "$TMPKEY" "$TMPDEARMOR"
 	chmod go+r "$KEYRING"
 }

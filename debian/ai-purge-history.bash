@@ -36,22 +36,25 @@ case "$DRY_RUN" in
 1 | true | TRUE | yes | YES | on | ON) DRY_RUN=1 ;;
 *) DRY_RUN=0 ;;
 esac
+INCLUDE_CRUSH=0
 
 usage() {
 	cat <<'EOF'
-Usage: ai-purge-history.bash [--dry-run|-n] [--help]
+Usage: ai-purge-history.bash [--dry-run|-n] [--include-crush-data] [--help]
 
 Removes Codex, Copilot, OpenCode, Crush, and project-local Swival
 history/state for the current user. Configuration and credentials are kept.
 
-  --dry-run, -n  Show the paths that would be removed, delete nothing
-  --help, -h     Show this help
+  --dry-run, -n          Show the paths that would be removed, delete nothing
+  --include-crush-data   Also remove the whole Crush data directory
+  --help, -h             Show this help
 EOF
 }
 
 while [ "$#" -gt 0 ]; do
 	case "$1" in
 	--dry-run | -n) DRY_RUN=1 ;;
+	--include-crush-data) INCLUDE_CRUSH=1 ;;
 	--help | -h)
 		usage
 		exit 0
@@ -68,10 +71,30 @@ done
 # Remove each path, or print it in dry-run mode. Missing paths are
 # ignored (rm -rf does not fail on them). In dry-run mode, only paths
 # that currently exist are listed.
+validate_remove_path() {
+	local path="$1"
+	[[ -n $path && $path == /* ]] || {
+		printf '%s\n' "[ERROR] refusing a non-absolute removal path: '$path'" >&2
+		return 1
+	}
+	[[ $path != "/" && $path != "$HOME" && $path != "$HOME/" ]] || {
+		printf '%s\n' "[ERROR] refusing to remove a protected path: $path" >&2
+		return 1
+	}
+	case "$path" in
+	*/../* | */.. | */./* | */. | *//*)
+		printf '%s\n' "[ERROR] refusing an unnormalized removal path: $path" >&2
+		return 1
+		;;
+	esac
+	return 0
+}
+
 remove_paths() {
 	local path
 
 	for path in "$@"; do
+		validate_remove_path "$path" || continue
 		if [ "$DRY_RUN" -eq 1 ]; then
 			if [[ -e $path || -L $path ]]; then
 				printf '%s\n' "[DRY-RUN] would remove: $path"
@@ -92,7 +115,12 @@ remove_paths \
 	"$OPENCODE_DATA_HOME/opencode.db-wal" \
 	"$OPENCODE_DATA_HOME/opencode.db-shm" \
 	"$OPENCODE_DATA_HOME/log"
-remove_paths "$CRUSH_DATA_HOME"
+if [ "$INCLUDE_CRUSH" -eq 1 ]; then
+	remove_paths "$CRUSH_DATA_HOME"
+else
+	printf '%s\n' \
+		"[INFO] Preserving Crush data directory (use --include-crush-data to remove it): $CRUSH_DATA_HOME"
+fi
 remove_paths \
 	"$SWIVAL_PROJECT_HOME/.swival/HISTORY.md" \
 	"$SWIVAL_PROJECT_HOME/.swival/HISTORY.md.lock" \
