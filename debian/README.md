@@ -9,6 +9,10 @@ access.
 From the repository root, install with `make install-debian`. Installed commands
 omit the `.bash` extension and default to `/usr/local/bin`. To run a source file,
 use `bash debian/<script>.bash` with the privileges required by that script.
+The release updaters use the auxiliary `release-verify.pl` helper, and
+`rpi-update-safe` uses `bootargs.pl`; both are installed beside the commands
+without their source extension and are not intended to be called directly by
+users.
 
 | Script | Purpose |
 | --- | --- |
@@ -32,7 +36,7 @@ use `bash debian/<script>.bash` with the privileges required by that script.
 | [update-openrsync.bash](update-openrsync.bash) | Builds and installs openrsync, installing build dependencies through APT. |
 | [update-signify.bash](update-signify.bash) | Builds and installs the portable OpenBSD signify utility. |
 | [update-xd-torrent.bash](update-xd-torrent.bash) | Builds and installs XD and configures its service; `--skip-service-and-user-setup` skips that setup. |
-| [rpi-update-safe](rpi-update-safe) | Runs `rpi-update` without rebooting on Raspberry Pi 5, then validates and repairs the selected DTB and initramfs with backups. Requires root and can change firmware, modules, and boot files; it does not provide a complete updater rollback. |
+| [rpi-update-safe.bash](rpi-update-safe.bash) | Runs `rpi-update` without rebooting on Raspberry Pi 5, then validates and repairs the selected DTB and initramfs with backups. Requires root and can change firmware, modules, and boot files; it does not provide a complete updater rollback. |
 
 Examples from the repository root:
 

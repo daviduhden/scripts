@@ -45,7 +45,8 @@ perl tests-format/test-normalize-files.pl
 ```
 
 Validators create private temporary logs; no `$$`-based predictable temporary
-paths are used. Shell/Perl validators skip nested `.git` directories and
+paths are used. JSON report validation uses the standalone
+`../scripts/release-verify.pl json-validate` helper instead of inline Perl. Shell/Perl validators skip nested `.git` directories and
 formatters clean up their failure lists.
 `make check` runs validation; `make format` explicitly runs formatters.
 `make test` completes validation before its regression targets, even under
@@ -58,8 +59,8 @@ stages temporary trees through the Debian Bash and OpenBSD ksh synchronization
 filters without invoking deployment side effects.
 `make install-tests-format` installs the tools selected by the Makefile under
 `${DESTDIR}${TESTS_FORMAT_DIR}` (default `${PREFIX}/libexec/scripts`), removing
-`.sh` from shell command names. Set `TESTS_FORMAT_LINKS=1` to add compatibility
-symlinks in `BINDIR`.
+`.sh` and `.py` from command names and `.yaml` from bundled configuration names.
+Set `TESTS_FORMAT_LINKS=1` to add compatibility symlinks in `BINDIR`.
 
 Run `make check-agent-knowledge` before completing repository changes. For CI,
 use `python3 scripts/validate-agent-knowledge.py --scope range --base BASE_REF --head HEAD` after
@@ -79,9 +80,9 @@ regressions without invoking the system-changing scripts.
 
 Supporting files:
 
-- [clang-format](clang-format): shared LLVM style, installed as `clang-format-all.yaml`.
-- [clang-tidy](clang-tidy): security-focused clang-tidy configuration based on knfmt's, installed as `clang-tidy-all.yaml`.
-- [fourmolu-all.yaml](fourmolu-all.yaml): shared Haskell formatting settings.
+- `clang-format.yaml`: shared LLVM style, installed as `clang-format-all`.
+- `clang-tidy.yaml`: security-focused clang-tidy configuration based on knfmt, installed as `clang-tidy-all`.
+- `fourmolu-all.yaml`: shared Haskell formatting settings, installed as `fourmolu-all`.
 - [openbsd-tools.txt](openbsd-tools.txt): reference mapping of the optional analysis tools to their OpenBSD ports/packages (information only; not read by the validators).
 
 PowerShell formatting and its tests are documented separately in

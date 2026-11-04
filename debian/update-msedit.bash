@@ -28,6 +28,17 @@ set -euo pipefail
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 PERL_CMD="${PERL_CMD:-perl}"
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd -P)
+RELEASE_HELPER="${RELEASE_HELPER:-}"
+if [ -z "$RELEASE_HELPER" ]; then
+	RELEASE_HELPER=""
+	for candidate in "$SCRIPT_DIR/release-verify.pl" "$SCRIPT_DIR/release-verify" "$SCRIPT_DIR/../scripts/release-verify.pl"; do
+		if [ -f "$candidate" ]; then
+			RELEASE_HELPER="$candidate"
+			break
+		fi
+	done
+fi
 
 REPO_OWNER="microsoft"
 REPO_NAME="edit"
@@ -145,21 +156,14 @@ version_is_up_to_date() {
 
 # Select one exact Linux release asset; fail on missing/ambiguous metadata.
 get_release_asset_from_json() {
-	local json="$1" arch="$2"
-	# shellcheck disable=SC2016
-	printf '%s' "$json" | "$PERL_CMD" -MJSON::PP -e '
-		local $/;
-		my $release = decode_json(<STDIN>);
-		my $version = $release->{tag_name} // "";
-		$version =~ s/^v//;
-		die "Invalid release version\n"
-			unless $version =~ /\A[0-9]+(?:\.[0-9]+)+\z/;
-		my $name = "edit-$version-$ARGV[0]-linux-gnu.tar.gz";
-		my @assets = grep { ($_->{name} // "") eq $name }
-			@{ $release->{assets} // [] };
-		die "Expected exactly one Linux release asset\n" unless @assets == 1;
-		print $assets[0]{browser_download_url}, "\n";
-	' "$arch"
+	local json="$1" arch="$2" version name
+	version=$(printf '%s' "$json" |
+		"$PERL_CMD" "$RELEASE_HELPER" json-tag) || return 1
+	version=${version#v}
+	[[ $version =~ ^[0-9]+(\.[0-9]+)+$ ]] || return 1
+	name="edit-${version}-${arch}-linux-gnu.tar.gz"
+	printf '%s' "$json" |
+		"$PERL_CMD" "$RELEASE_HELPER" json-asset-url "$name"
 }
 
 # Verify GitHub release metadata before reading only the expected regular entry.
@@ -189,18 +193,8 @@ install_msedit() {
 		error "Invalid edit archive structure"
 		return 1
 	fi
-	# shellcheck disable=SC2016
-	"$PERL_CMD" -MArchive::Tar -e '
-		my ($archive, $binary) = @ARGV;
-		my $tar = Archive::Tar->new($archive, 1)
-			or die "cannot read archive: $!\n";
-		my @entries = $tar->get_files("edit");
-		die "expected exactly one regular edit binary\n"
-			unless @entries == 1 && $entries[0]->is_file
-			&& $entries[0]->size > 0 && $entries[0]->size <= 536870912;
-		$tar->extract_file("edit", $binary)
-			or die "cannot extract edit: $!\n";
-	' "$archive" "$bin" || return 1
+	"$PERL_CMD" "$RELEASE_HELPER" tar-extract-entry \
+		"$archive" "$bin" edit 536870912 || return 1
 	log "Installing edit to $INSTALL_DIR"
 	run_root install -m 0755 "$bin" "$INSTALL_DIR/edit"
 }
@@ -239,15 +233,9 @@ run_update() {
 		exit 1
 	fi
 
-	# shellcheck disable=SC2016
-	digest=$(printf '%s' "$release_json" | "$PERL_CMD" -MJSON::PP -e '
-		local $/;
-		my $release = decode_json(<STDIN>);
-		my @assets = grep { ($_->{browser_download_url} // "") eq $ARGV[0] }
-			@{ $release->{assets} // [] };
-		die "asset not found\n" unless @assets == 1;
-		print $assets[0]{digest} // "";
-	' "$asset") || exit 1
+	digest=$(printf '%s' "$release_json" |
+		"$PERL_CMD" "$RELEASE_HELPER" json-asset-digest "$asset") ||
+		exit 1
 	install_msedit "$asset" "$digest"
 	rm -rf "$WORK_DIR"
 	log "edit successfully installed or updated to version $latest."
@@ -257,6 +245,8 @@ check_prereqs() {
 	detect_root_cmd
 	ensure_cmd curl "$PERL_CMD" sha256sum tar grep awk sort uname find \
 		mktemp install sed
+	[ -f "$RELEASE_HELPER" ] ||
+		error "release-verify helper not found: $RELEASE_HELPER"
 }
 
 main() {

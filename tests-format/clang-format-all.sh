@@ -130,14 +130,14 @@ run_clang_format_all() {
 	ROOT_DIR=$(CDPATH='' cd "$ROOT_DIR" && pwd -P)
 	SCRIPT_DIR=$(CDPATH='' cd "$(dirname "$0")" && pwd -P)
 	# Prefer a project-local style. The in-tree script uses the repository
-	# copy (clang-format); the installed command uses the installed file
-	# (clang-format-all.yaml).
+	# copy (clang-format.yaml); the installed command uses the installed file
+	# without its source extension (clang-format-all).
 	if [ -r "$ROOT_DIR/.clang-format" ]; then
 		STYLE_FILE="$ROOT_DIR/.clang-format"
 	else
-		STYLE_FILE="$SCRIPT_DIR/clang-format-all.yaml"
+		STYLE_FILE="$SCRIPT_DIR/clang-format-all"
 		if [ "${0##*/}" = clang-format-all.sh ]; then
-			STYLE_FILE="$SCRIPT_DIR/clang-format"
+			STYLE_FILE="$SCRIPT_DIR/clang-format.yaml"
 		fi
 	fi
 	case ${C_FORMAT_STANDARD:-} in

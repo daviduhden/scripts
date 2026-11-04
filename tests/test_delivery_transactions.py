@@ -247,6 +247,13 @@ cleanup_lock
                 text=True,
                 capture_output=True,
                 check=False,
+                env={
+                    **os.environ,
+                    "PERL_CMD": shutil.which("perl") or "perl",
+                    "RENAME_HELPER": str(
+                        REPOSITORY_ROOT / "openbsd" / "rename-link.pl"
+                    ),
+                },
             )
             self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
 
@@ -295,6 +302,7 @@ cp "$FIXTURES/${url##*/}" "$target"
                 HOME=str(root),
                 FIXTURES=str(fixtures),
                 PERL_CMD=shutil.which("perl") or "perl",
+                RELEASE_HELPER=str(REPOSITORY_ROOT / "scripts" / "release-verify.pl"),
             )
             env["PATH"] = str(mocks) + os.pathsep + os.environ["PATH"]
             commands = "\nVERSION=v1.0.0\nTMP_DIR=''\nBINARY_STAGE=''\ninstall_xerj\n"

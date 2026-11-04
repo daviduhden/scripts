@@ -15,7 +15,7 @@ repository's scope, say so instead of inventing support.
 
 | Path | Runtime and purpose |
 | --- | --- |
-| `debian/` | Bash helpers for Debian-based systems; several require Debian 13 or a supported derivative. `rpi-update-safe` is Raspberry Pi 5-specific and updates firmware and boot files. |
+| `debian/` | Bash helpers for Debian-based systems; several require Debian 13 or a supported derivative. `rpi-update-safe.bash` is Raspberry Pi 5-specific and updates firmware and boot files. |
 | `openbsd/` | OpenBSD base `ksh` helpers using native tools; not Bash. |
 | `debian/sync-website.bash`, `openbsd/sync-website.ksh` | Platform-specific staged website synchronization; public-tree filters are intentionally kept aligned. |
 | `perl/` | Portable Perl programs (5.10.1+, core modules; Windows programs may use bundled Win32 modules). `programs.txt` is the public manifest shared by the POSIX and Windows installers. |
@@ -31,8 +31,9 @@ require the explicit `install-tests-format` target. The OS-specific install
 targets install the same command names, so they cannot share one `BINDIR`.
 `DESTDIR` is supported for staging. SecureBlue user units install under
 `${PREFIX}/lib/systemd/user`; developer tools install under
-`${PREFIX}/libexec/scripts` (`TESTS_FORMAT_DIR`). Installed names omit `.bash`,
-`.ksh`, `.sh`, and `.pl`; Python helpers keep their `.py` suffix.
+`${PREFIX}/libexec/scripts` (`TESTS_FORMAT_DIR`). Source scripts always carry
+an extension; installed command names omit `.bash`, `.ksh`, `.sh`, `.pl`, and
+`.py`, and bundled configuration names omit `.yaml`.
 
 ## Conventions
 
@@ -59,10 +60,12 @@ targets install the same command names, so they cannot share one `BINDIR`.
 - Reuse the existing helper names and patterns instead of adding a second
   logging, elevation, or install mechanism.
 - Most scripts do not implement `--help`; do not assume it exists.
-- Do not embed Python in Bash, sh, or Perl scripts with `python3 -c` or a
-  heredoc. Use native tools, core Perl modules, or a standalone helper program.
-  A standalone helper must be installed by the relevant Makefile target and
-  discovered relative to the invoking script.
+- Do not embed Python or Perl source in Bash, sh, or Perl scripts with
+  `-c`, `-e`, `-n`, or a heredoc. Use native shell tools or a standalone helper
+  program. A helper must be installed by the relevant Makefile target and
+  discovered relative to the invoking script. Existing examples are
+  `scripts/release-verify.pl`, `debian/bootargs.pl`,
+  `secureblue/xerj-config.pl`, and `openbsd/rename-link.pl`.
 - Do not write predictable temporary or log paths under `/tmp`; use
   `mktemp`, `umask 077`, and a cleanup trap where appropriate.
 
@@ -137,7 +140,7 @@ pwsh -NoProfile -File .\windows\test-format\tests\run-tests.ps1
   includes package installs, `sudo`/`doas`/`run0`, service changes, firewall
   rules, `/etc` rewrites, history purges, and deployments. Review the code and
   run static checks instead.
-- `debian/rpi-update-safe` runs the official updater as root with rebooting
+- `debian/rpi-update-safe.bash` runs the official updater as root with rebooting
   disabled, then runs `depmod` and may replace the selected Raspberry Pi 5 DTB
   and initramfs under mounted `/boot/firmware`. Its backups cover replaced boot
   files, not all updater or module changes. Never execute it for validation.

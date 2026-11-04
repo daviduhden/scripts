@@ -1,8 +1,11 @@
 # Architecture
 
 The repository is a collection of self-contained administration programs.
-Each script is installed as one command; scripts do not require a shared
-runtime library. The platform directories are:
+Each source script carries an extension (`.bash`, `.ksh`, `.sh`, `.pl`, or
+`.py`); install targets remove it from the installed command name. Scripts do
+not require a shared runtime library, but focused helpers such as
+`release-verify.pl`, `bootargs.pl`, `xerj-config.pl`, and `rename-link.pl`
+are installed beside their caller when non-shell logic is needed. The platform directories are:
 
 - `debian/`: Bash 4+, GNU utilities, APT, systemd;
 - `openbsd/`: base `ksh`, `doas`, `rcctl`, native tools;

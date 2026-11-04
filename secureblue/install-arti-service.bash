@@ -61,7 +61,10 @@ if [[ ! -f $SERVICE_SRC ]]; then
 fi
 ARTI_HELPER="${SCRIPT_DIR}/arti-config.py"
 if [[ ! -f $ARTI_HELPER ]]; then
-	ARTI_HELPER="${SCRIPT_DIR}/../libexec/scripts/arti-config.py"
+	ARTI_HELPER="${SCRIPT_DIR}/arti-config"
+fi
+if [[ ! -f $ARTI_HELPER ]]; then
+	ARTI_HELPER="${SCRIPT_DIR}/../libexec/scripts/arti-config"
 fi
 ARTI_REPO_RAW="https://gitlab.torproject.org/tpo/core/arti/-/raw"
 ARTI_EXAMPLE_PATH="crates/arti/src/arti-example-config.toml"

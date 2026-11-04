@@ -67,7 +67,10 @@ make uninstall-debian
 make uninstall-secureblue
 ```
 
-Recipes use `install(1)` and strip `.pl`/`.bash`/`.ksh`/`.sh` when placing shell scripts in `${DESTDIR}${BINDIR}`. Windows scripts remain in `windows/` and are not installed by the POSIX targets. Developer validators and formatters are installed only with `make install-tests-format`, under `${DESTDIR}${TESTS_FORMAT_DIR}` (default `${PREFIX}/libexec/scripts`); set `TESTS_FORMAT_LINKS=1` to add compatibility symlinks in `BINDIR`. `make all` no longer installs them.
+Source scripts always carry an extension. Recipes use `install(1)` and strip
+source extensions (`.pl`, `.bash`, `.ksh`, `.sh`, `.py`, and `.yaml` for
+bundled configs) when installing commands and helpers in `${DESTDIR}${BINDIR}`
+or `${DESTDIR}${TESTS_FORMAT_DIR}`. Windows scripts remain in `windows/` and are not installed by the POSIX targets. Developer validators and formatters are installed only with `make install-tests-format`, under `${DESTDIR}${TESTS_FORMAT_DIR}` (default `${PREFIX}/libexec/scripts`); set `TESTS_FORMAT_LINKS=1` to add compatibility symlinks in `BINDIR`. `make all` no longer installs them.
 
 ## Windows installation
 
@@ -169,7 +172,8 @@ use `C_FORMAT_STANDARD=c23 clang-format-all path` to override detection.
 The nearest directory with an explicit standard wins.
 
 Every `clang-format` invocation uses the bundled Openbar configuration
-(`tests-format/clang-format`, installed as `${BINDIR}/clang-format-all.yaml`),
+(`tests-format/clang-format.yaml`, installed as
+`${TESTS_FORMAT_DIR}/clang-format-all`),
 ignoring project-local style files. This is the single source of the shared
 style, maintained in this repository. The configuration targets
 LLVM 23 and approximates OpenBSD style(9): tabs of eight columns, four-column
@@ -181,7 +185,8 @@ the LLVM 23 configuration is not a portable knfmt configuration schema.
 `clang-tidy-all [ROOT_DIR]` runs `clang-tidy` over C and C++ sources with
 C23/C++23 defaults (`CLANG_TIDY_BUILD_DIR` supplies a compilation database).
 Every invocation uses the bundled security-focused configuration
-(`tests-format/clang-tidy`, installed as `${BINDIR}/clang-tidy-all.yaml`),
+(`tests-format/clang-tidy.yaml`, installed as
+`${TESTS_FORMAT_DIR}/clang-tidy-all`),
 ignoring project-local `.clang-tidy` files. It is based on the `knfmt`
 project's `.clang-tidy` and extended for maximum safety: all CERT rule sets,
 the C++ Core Guidelines, concurrency and `clang-analyzer` families are enabled,
@@ -192,7 +197,7 @@ finding is reported.
 `fourmolu-all [ROOT_DIR]` (default `.`) formats Haskell sources (`.hs`,
 `.hsig` and `.hs-boot`) in place with `fourmolu`. Like `clang-format-all`, it
 always forces a bundled style (`tests-format/fourmolu-all.yaml`, installed as
-`${BINDIR}/fourmolu-all.yaml`) and ignores project-local
+`${TESTS_FORMAT_DIR}/fourmolu-all`) and ignores project-local
 `fourmolu.yaml`/`.fourmolu.yaml` files, so the shared style cannot drift per
 repository. The bundled style pins the Fourmolu 0.21 defaults explicitly;
 edit that one file to evolve the shared style. If `fourmolu` is not present in

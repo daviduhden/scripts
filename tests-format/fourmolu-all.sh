@@ -16,7 +16,8 @@ exec >"$TMPLOG" 2>&1
 # - Recursively finds all Haskell source files (*.hs, *.hsig and *.hs-boot)
 #   under ROOT_DIR (default: current directory, excluding .git directories)
 #   and formats them in place with fourmolu.
-# - fourmolu always uses the bundled fourmolu-all.yaml and ignores any
+# - fourmolu always uses the bundled fourmolu-all.yaml (installed without its
+#   extension) and ignores any
 #   project-local fourmolu.yaml/.fourmolu.yaml, mirroring clang-format-all
 #   and its bundled clang-format style.
 # - Usage: ./fourmolu-all.sh [ROOT_DIR]
@@ -54,7 +55,10 @@ run_fourmolu_all() {
 	}
 	ROOT_DIR=$(CDPATH='' cd "$ROOT_DIR" && pwd -P)
 	SCRIPT_DIR=$(CDPATH='' cd "$(dirname "$0")" && pwd -P)
-	STYLE_FILE="$SCRIPT_DIR/fourmolu-all.yaml"
+	STYLE_FILE="$SCRIPT_DIR/fourmolu-all"
+	if [ "${0##*/}" = fourmolu-all.sh ]; then
+		STYLE_FILE="$SCRIPT_DIR/fourmolu-all.yaml"
+	fi
 
 	if ! command -v fourmolu >/dev/null 2>&1; then
 		# Optional tool: a missing formatter is a skip, not a failure.

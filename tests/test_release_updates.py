@@ -55,6 +55,7 @@ class ReleaseUpdates(unittest.TestCase):
         env.update(
             TEST_ROOT=str(self.root),
             PERL_CMD=shutil.which("perl") or "perl",
+            RELEASE_HELPER=str(ROOT / "scripts" / "release-verify.pl"),
             **extra,
         )
         return subprocess.run(
@@ -65,6 +66,43 @@ class ReleaseUpdates(unittest.TestCase):
             capture_output=True,
             timeout=20,
         )
+
+    def test_release_helper_parses_json_without_inline_perl(self):
+        helper = ROOT / "scripts" / "release-verify.pl"
+        payload = {
+            "tag_name": "v1.2.3",
+            "assets": [
+                {
+                    "name": "edit-1.2.3-amd64-linux-gnu.tar.gz",
+                    "browser_download_url": "https://example.invalid/release",
+                    "digest": "sha256:" + "a" * 64,
+                }
+            ],
+        }
+        perl = shutil.which("perl") or "perl"
+        tag = subprocess.run(
+            [perl, str(helper), "json-tag"],
+            input=json.dumps(payload),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(tag.returncode, 0, tag.stderr)
+        self.assertEqual(tag.stdout.strip(), "v1.2.3")
+        url = subprocess.run(
+            [
+                perl,
+                str(helper),
+                "json-asset-url",
+                "edit-1.2.3-amd64-linux-gnu.tar.gz",
+            ],
+            input=json.dumps(payload),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(url.returncode, 0, url.stderr)
+        self.assertEqual(url.stdout.strip(), "https://example.invalid/release")
 
     def test_msedit_checks_digest_and_exact_entry(self):
         for kind in ("valid", "digest", "duplicate", "link"):

@@ -130,14 +130,15 @@ tool is missing, report the check as skipped rather than passed.
   during validation.
 
 - A script was added to the directory but not to `*_SCRIPTS` or the README.
-- The installed name still contains `.bash`, `.ksh`, `.sh`, or `.pl`; the
-  Makefile strips one of those suffixes.
+- A source script is missing its extension, or an installed name still
+  contains `.bash`, `.ksh`, `.sh`, `.pl`, `.py`, or a bundled `.yaml` suffix.
+  Source files always carry an extension; install targets strip it.
 - Two OS-specific targets were installed into the same `BINDIR`; they share
   command names and cannot coexist.
 - `install-secureblue` installs units under `${PREFIX}/lib/systemd/user`
   (`SYSTEMD_USER_UNIT_DIR`) and never deletes `${BINDIR}/systemd`.
-- A new embedded `python3 -c` or Python heredoc appeared in a shell script;
-  use a native tool, core Perl, or a standalone helper installed by the target.
+- A new inline `perl -e`/`-n`/`-c` program or Python `-c`/heredoc appeared in
+  a shell script; move it to a focused helper installed by the target.
 - GNU-only options in `openbsd/`: bare `mktemp`, `sort -V`, `sed -r`,
   `readlink -e`, `find -printf`, `xargs --null`.
 - Linux commands or paths in `openbsd/`: `systemctl`, `apt`, `run0`,

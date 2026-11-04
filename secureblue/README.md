@@ -39,7 +39,9 @@ intended user and set `SWIVAL_PROJECT_HOME` to choose a project.
 
 Bundled service templates are documented in
 [systemd/README.md](systemd/README.md). Interactive Bash helpers are documented
-in [../shell/README.md](../shell/README.md).
+in [../shell/README.md](../shell/README.md). `update-xerj` uses the auxiliary
+`release-verify.pl` and `xerj-config.pl` helpers installed beside the command
+without their source extensions; they are not user-facing commands.
 
 ## xerj
 

@@ -4,6 +4,9 @@ These helpers target OpenBSD and use its base `ksh` and native tools. Install
 from the repository root with `make install-openbsd`; installed command names
 omit `.ksh`. System upgrades, log cleanup, and deployment changes need the
 appropriate root permissions. User history cleanup uses the current user's data.
+`sync-website.ksh` uses the auxiliary `rename-link.pl` helper for atomic symlink
+replacement; it is installed beside the command without its source extension
+and is not user-facing.
 
 | Script | Purpose and usage |
 | --- | --- |

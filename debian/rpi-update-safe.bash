@@ -17,6 +17,13 @@ set -euo pipefail
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 export LC_ALL=C
+PERL_CMD="${PERL_CMD:-perl}"
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd -P)
+BOOTARGS_HELPER="${BOOTARGS_HELPER:-}"
+if [ -z "$BOOTARGS_HELPER" ]; then
+	BOOTARGS_HELPER="${SCRIPT_DIR}/bootargs.pl"
+	[ -f "$BOOTARGS_HELPER" ] || BOOTARGS_HELPER="${SCRIPT_DIR}/bootargs"
+fi
 
 readonly RPI_UPDATE=/usr/bin/rpi-update
 readonly BOOT_DIR=/boot/firmware
@@ -85,7 +92,7 @@ create_backup() {
 normalize_bootargs() {
 	# Compare argument tokens without treating whitespace formatting as a change.
 	printf '%s\n' "$1" |
-		perl -ne 'print join(" ", grep { length } split /\s+/), "\n";'
+		"$PERL_CMD" "$BOOTARGS_HELPER" normalize
 }
 
 contains_memory_cgroup_arg() {
@@ -121,7 +128,8 @@ repair_dtb() {
 
 	# Remove only a complete boot argument token from bootargs properties.
 	# The token-by-token comparison below rejects any other DTS round-trip change.
-	perl -0pi -e 's{(^[ \t]*bootargs[ \t]*=[ \t]*"[^"\n]*?)(?<![^ \t"])cgroup_disable=memory(?![^ \t"])}{$1}gm' "$dts"
+	"$PERL_CMD" "$BOOTARGS_HELPER" remove-token "$dts" ||
+		die 'cannot remove cgroup_disable=memory from the DTB source'
 	dtc -I dts -O dtb -o "$new" "$dts" || die 'cannot compile the repaired DTB'
 	after=$(dtc -I dtb -O dts "$new" | sed -n 's/^[[:space:]]*bootargs[[:space:]]*=[[:space:]]*"\(.*\)";[[:space:]]*$/\1/p')
 	[[ -n $after ]] || die 'the repaired DTB has no bootargs property'
@@ -216,6 +224,8 @@ main() {
 		require_cmd "$command_name"
 	done
 	[[ -x $RPI_UPDATE ]] || die "missing official updater: ${RPI_UPDATE}"
+	[[ -f $BOOTARGS_HELPER ]] ||
+		die "missing bootargs helper: ${BOOTARGS_HELPER}"
 	check_platform
 	[[ ! -L $LOCK_FILE ]] || die "lock path must not be a symlink: ${LOCK_FILE}"
 

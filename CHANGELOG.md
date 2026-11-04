@@ -16,6 +16,8 @@
 - Remove embedded Python from shell scripts in favour of native tools, core
   Perl modules, and the standalone `arti-config.py` helper.
 - Make the permission gate ignore Git-ignored artifacts and fix tracked modes.
+- Give every source script a filename extension and strip it only on install;
+  move inline Perl/Python logic into focused helper programs.
 
 ## 1.0.0
 

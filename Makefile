@@ -40,7 +40,9 @@ DEBIAN_SCRIPTS = \
 	debian/update-signify.bash \
 	debian/update-xd-torrent.bash \
 	debian/ai-purge-history.bash \
-	debian/rpi-update-safe
+	debian/rpi-update-safe.bash \
+	debian/bootargs.pl \
+	scripts/release-verify.pl
 
 OPENBSD_SCRIPTS = \
 	openbsd/clean-logs.ksh \
@@ -48,7 +50,8 @@ OPENBSD_SCRIPTS = \
 	openbsd/sync-website.ksh \
 	openbsd/sysupgrade-current.ksh \
 	openbsd/update-crush.ksh \
-	openbsd/ai-purge-history.ksh
+	openbsd/ai-purge-history.ksh \
+	openbsd/rename-link.pl
 
 SECUREBLUE_SCRIPTS = \
 	secureblue/arti-config.py \
@@ -67,7 +70,9 @@ SECUREBLUE_SCRIPTS = \
 	secureblue/update-perl-modules.bash \
 	secureblue/update-xd-torrent.bash \
 	secureblue/update-xerj.bash \
-	secureblue/ai-purge-history.bash
+	secureblue/ai-purge-history.bash \
+	secureblue/xerj-config.pl \
+	scripts/release-verify.pl
 
 TESTS_FORMAT_SCRIPTS = \
 	tests-format/clang-format-all.sh \
@@ -100,20 +105,20 @@ clean:
 install-debian:
 	@echo "${INFO} Installing Debian helpers"
 	@set -e; install -d "${DESTBIN}"
-	@set -e; for f in ${DEBIAN_SCRIPTS}; do base=$${f##*/}; name=$${base%.bash}; printf '%s Installing %s -> %s\n' "${INFO}" "$$f" "${DESTBIN}/$$name"; install -m 0755 "$$f" "${DESTBIN}/$$name"; done
+	@set -e; for f in ${DEBIAN_SCRIPTS}; do base=$${f##*/}; name=$${base%.bash}; name=$${name%.pl}; printf '%s Installing %s -> %s\n' "${INFO}" "$$f" "${DESTBIN}/$$name"; install -m 0755 "$$f" "${DESTBIN}/$$name"; done
 	@echo "${INFO} Debian helpers installed"
 
 install-openbsd:
 	@echo "${INFO} Installing OpenBSD helpers"
 	@set -e; install -d "${DESTBIN}"
-	@set -e; for f in ${OPENBSD_SCRIPTS}; do base=$${f##*/}; name=$${base%.ksh}; printf '%s Installing %s -> %s\n' "${INFO}" "$$f" "${DESTBIN}/$$name"; install -m 0755 "$$f" "${DESTBIN}/$$name"; done
+	@set -e; for f in ${OPENBSD_SCRIPTS}; do base=$${f##*/}; name=$${base%.ksh}; name=$${name%.pl}; printf '%s Installing %s -> %s\n' "${INFO}" "$$f" "${DESTBIN}/$$name"; install -m 0755 "$$f" "${DESTBIN}/$$name"; done
 	@set -e; wrapper="${DESTBIN}/sudo-wrapper"; if [ -x "$$wrapper" ]; then for link in sudo visudo sudoedit; do if [ -e "${DESTBIN}/$$link" ] && [ ! -L "${DESTBIN}/$$link" ]; then printf '%s ERROR: %s exists and is not a wrapper symlink; refusing to overwrite\n' "${INFO}" "${DESTBIN}/$$link" >&2; exit 1; fi; printf '%s Symlinking %s -> %s\n' "${INFO}" "${DESTBIN}/$$link" "$$wrapper"; ln -sf "$$wrapper" "${DESTBIN}/$$link"; done; fi
 	@echo "${INFO} OpenBSD helpers installed"
 
 install-secureblue:
 	@echo "${INFO} Installing SecureBlue helpers"
 	@set -e; install -d "${DESTBIN}"
-	@set -e; for f in ${SECUREBLUE_SCRIPTS}; do base=$${f##*/}; name=$${base%.bash}; printf '%s Installing %s -> %s\n' "${INFO}" "$$f" "${DESTBIN}/$$name"; install -m 0755 "$$f" "${DESTBIN}/$$name"; done
+	@set -e; for f in ${SECUREBLUE_SCRIPTS}; do base=$${f##*/}; name=$${base%.bash}; name=$${name%.pl}; name=$${name%.py}; printf '%s Installing %s -> %s\n' "${INFO}" "$$f" "${DESTBIN}/$$name"; install -m 0755 "$$f" "${DESTBIN}/$$name"; done
 	@set -e; if [ -d secureblue/systemd ]; then install -d -m 0755 "${DEST_SYSTEMD_USER}" || exit 1; for f in secureblue/systemd/*.service; do [ -f "$$f" ] || continue; printf '%s Installing %s -> %s\n' "${INFO}" "$$f" "${DEST_SYSTEMD_USER}/$${f##*/}"; install -m 0644 "$$f" "${DEST_SYSTEMD_USER}/$${f##*/}" || exit 1; done; fi
 	@set -e; wrapper="${DESTBIN}/sudo-wrapper"; if [ -x "$$wrapper" ]; then for link in sudo visudo sudoedit; do if [ -e "${DESTBIN}/$$link" ] && [ ! -L "${DESTBIN}/$$link" ]; then printf '%s ERROR: %s exists and is not a wrapper symlink; refusing to overwrite\n' "${INFO}" "${DESTBIN}/$$link" >&2; exit 1; fi; printf '%s Symlinking %s -> %s\n' "${INFO}" "${DESTBIN}/$$link" "$$wrapper"; ln -sf "$$wrapper" "${DESTBIN}/$$link"; done; fi; echo "${INFO} SecureBlue helpers installed"
 
@@ -144,21 +149,21 @@ install-perl:
 
 install-tests-format:
 	@set -e; echo "${INFO} Installing Tests/Format scripts" && install -d "${DEST_TESTS_FORMAT}"
-	@set -e; for cfg in "tests-format/clang-format:clang-format-all.yaml" "tests-format/clang-tidy:clang-tidy-all.yaml" "tests-format/fourmolu-all.yaml:fourmolu-all.yaml"; do src=$${cfg%%:*}; dst=$${cfg##*:}; install -m 0644 "$$src" "${DEST_TESTS_FORMAT}/$$dst"; done
-	@set -e; for f in ${TESTS_FORMAT_SCRIPTS}; do base=$${f##*/}; name=$${base%.sh}; printf '%s Installing %s -> %s\n' "${INFO}" "$$f" "${DEST_TESTS_FORMAT}/$$name"; install -m 0755 "$$f" "${DEST_TESTS_FORMAT}/$$name"; if [ "${TESTS_FORMAT_LINKS}" = "1" ]; then install -d "${DESTBIN}"; ln -sf "${DEST_TESTS_FORMAT}/$$name" "${DESTBIN}/$$name"; fi; done
+	@set -e; for cfg in "tests-format/clang-format.yaml:clang-format-all" "tests-format/clang-tidy.yaml:clang-tidy-all" "tests-format/fourmolu-all.yaml:fourmolu-all"; do src=$${cfg%%:*}; dst=$${cfg##*:}; install -m 0644 "$$src" "${DEST_TESTS_FORMAT}/$$dst"; done
+	@set -e; for f in ${TESTS_FORMAT_SCRIPTS}; do base=$${f##*/}; name=$${base%.sh}; name=$${name%.py}; printf '%s Installing %s -> %s\n' "${INFO}" "$$f" "${DEST_TESTS_FORMAT}/$$name"; install -m 0755 "$$f" "${DEST_TESTS_FORMAT}/$$name"; if [ "${TESTS_FORMAT_LINKS}" = "1" ]; then install -d "${DESTBIN}"; ln -sf "${DEST_TESTS_FORMAT}/$$name" "${DESTBIN}/$$name"; fi; done
 	@echo "${INFO} Tests/Format helpers installed in ${DEST_TESTS_FORMAT}"
 
 uninstall-debian:
-	@set -e; for f in ${DEBIAN_SCRIPTS}; do base=$${f##*/}; name=$${base%.bash}; rm -f -- "${DESTBIN}/$$name"; done
+	@set -e; for f in ${DEBIAN_SCRIPTS}; do base=$${f##*/}; name=$${base%.bash}; name=$${name%.pl}; rm -f -- "${DESTBIN}/$$name"; done
 	@echo "${INFO} Debian helpers removed from ${DESTBIN}"
 
 uninstall-openbsd:
-	@set -e; for f in ${OPENBSD_SCRIPTS}; do base=$${f##*/}; name=$${base%.ksh}; rm -f -- "${DESTBIN}/$$name"; done
+	@set -e; for f in ${OPENBSD_SCRIPTS}; do base=$${f##*/}; name=$${base%.ksh}; name=$${name%.pl}; rm -f -- "${DESTBIN}/$$name"; done
 	@set -e; for link in sudo visudo sudoedit; do if [ -L "${DESTBIN}/$$link" ]; then rm -f -- "${DESTBIN}/$$link"; fi; done
 	@echo "${INFO} OpenBSD helpers removed from ${DESTBIN}"
 
 uninstall-secureblue:
-	@set -e; for f in ${SECUREBLUE_SCRIPTS}; do base=$${f##*/}; name=$${base%.bash}; rm -f -- "${DESTBIN}/$$name"; done
+	@set -e; for f in ${SECUREBLUE_SCRIPTS}; do base=$${f##*/}; name=$${base%.bash}; name=$${name%.pl}; name=$${name%.py}; rm -f -- "${DESTBIN}/$$name"; done
 	@set -e; for f in secureblue/systemd/*.service; do [ -f "$$f" ] || continue; rm -f -- "${DEST_SYSTEMD_USER}/$${f##*/}"; done
 	@set -e; for link in sudo visudo sudoedit; do if [ -L "${DESTBIN}/$$link" ]; then rm -f -- "${DESTBIN}/$$link"; fi; done
 	@echo "${INFO} SecureBlue helpers and units removed"
@@ -168,8 +173,8 @@ uninstall-perl:
 	@echo "${INFO} Perl helpers removed from ${DESTBIN}"
 
 uninstall-tests-format:
-	@set -e; for f in ${TESTS_FORMAT_SCRIPTS}; do base=$${f##*/}; name=$${base%.sh}; rm -f -- "${DEST_TESTS_FORMAT}/$$name"; if [ "${TESTS_FORMAT_LINKS}" = "1" ]; then rm -f -- "${DESTBIN}/$$name"; fi; done
-	@set -e; for cfg in clang-format-all.yaml clang-tidy-all.yaml fourmolu-all.yaml; do rm -f -- "${DEST_TESTS_FORMAT}/$$cfg"; done
+	@set -e; for f in ${TESTS_FORMAT_SCRIPTS}; do base=$${f##*/}; name=$${base%.sh}; name=$${name%.py}; rm -f -- "${DEST_TESTS_FORMAT}/$$name"; if [ "${TESTS_FORMAT_LINKS}" = "1" ]; then rm -f -- "${DESTBIN}/$$name"; fi; done
+	@set -e; for cfg in clang-format-all clang-tidy-all fourmolu-all; do rm -f -- "${DEST_TESTS_FORMAT}/$$cfg"; done
 	@echo "${INFO} Tests/Format helpers removed"
 
 uninstall-shell:

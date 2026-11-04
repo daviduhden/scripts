@@ -33,6 +33,17 @@ PATH=/usr/local/go/bin:/usr/local/sbin:/usr/local/bin
 PATH="${PATH}:/usr/sbin:/usr/bin:/sbin:/bin"
 export PATH
 PERL_CMD="${PERL_CMD:-perl}"
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd -P)
+RELEASE_HELPER="${RELEASE_HELPER:-}"
+if [ -z "$RELEASE_HELPER" ]; then
+	RELEASE_HELPER=""
+	for candidate in "$SCRIPT_DIR/release-verify.pl" "$SCRIPT_DIR/release-verify" "$SCRIPT_DIR/../scripts/release-verify.pl"; do
+		if [ -f "$candidate" ]; then
+			RELEASE_HELPER="$candidate"
+			break
+		fi
+	done
+fi
 
 GO_BASE_URL="https://go.dev/dl"
 VERSION_URL="https://go.dev/VERSION?m=text"
@@ -207,22 +218,8 @@ run_golang_update() {
 	net_curl --proto '=https' --proto-redir '=https' 'https://go.dev/dl/?mode=json&include=all' -o "$stage/releases.json"
 	# Verify the exact filename/digest from official metadata, then extract
 	# regular files/directories only into the new tree, never the live install.
-	# shellcheck disable=SC2016
-	published=$("$PERL_CMD" -MJSON::PP -e '
-		local $/;
-		my $data = decode_json(<STDIN>);
-		my @matches;
-		for my $release (@$data) {
-			for my $file (@{ $release->{files} // [] }) {
-				push @matches, $file
-					if ($file->{filename} // "") eq $ARGV[0];
-			}
-		}
-		die "missing unique Go release digest\n"
-			unless @matches == 1
-			&& ($matches[0]{sha256} // "") =~ /\A[0-9a-f]{64}\z/;
-		print $matches[0]{sha256}, "\n";
-	' "$TAR_NAME" <"$stage/releases.json") || error 'Go archive validation failed'
+	published=$("$PERL_CMD" "$RELEASE_HELPER" json-file-digest "$TAR_NAME" \
+		<"$stage/releases.json") || error 'Go archive validation failed'
 	actual=$(sha256sum "$TAR_FILE" | awk '{print $1}') ||
 		error 'Go archive validation failed'
 	[[ $actual == "$published" ]] || error 'Go SHA-256 mismatch'
@@ -233,46 +230,9 @@ run_golang_update() {
 		! tar -tvzf "$TAR_FILE" | awk '$1 !~ /^[d-]/ { exit 1 }'; then
 		error 'Go archive validation failed'
 	fi
-	# shellcheck disable=SC2016
-	"$PERL_CMD" -MArchive::Tar -e '
-		use strict;
-		use warnings;
-		my ($archive, $destination) = @ARGV;
-		my $tar = Archive::Tar->new($archive, 1)
-			or die "cannot read archive: $!\n";
-		my @members = $tar->get_files();
-		my %seen;
-		my $total = 0;
-		for my $entry (@members) {
-			my $name = $entry->name;
-			my @parts = split m{/}, $name;
-			die "invalid Go archive entry\n"
-				if !@parts || $parts[0] ne "go" || $name =~ m{\A/}
-				|| grep { $_ eq ".." } @parts || $seen{$name}++
-				|| !($entry->is_dir || $entry->is_file);
-			$total += $entry->size;
-			die "Go archive exceeds extraction limit\n"
-				if $total > 2147483648;
-		}
-		for my $entry (@members) {
-			my $name = $entry->name;
-			my $target = "$destination/$name";
-			if ($entry->is_dir) {
-				require File::Path;
-				File::Path::make_path($target);
-				next;
-			}
-			require File::Basename;
-			require File::Path;
-			File::Path::make_path(File::Basename::dirname($target));
-			open my $out, ">:raw", $target
-				or die "cannot create $target: $!\n";
-			print {$out} $entry->get_content
-				or die "cannot write $target: $!\n";
-			close $out or die "cannot close $target: $!\n";
-			chmod $entry->mode & 0777, $target;
-		}
-	' "$TAR_FILE" "$stage" || error 'Go archive validation failed'
+	"$PERL_CMD" "$RELEASE_HELPER" tar-extract-all \
+		"$TAR_FILE" "$stage" go 2147483648 ||
+		error 'Go archive validation failed'
 	[[ -f $stage/go/bin/go && ! -L $GO_ROOT ]] || error 'Invalid staged binary or linked install destination'
 	[[ "$("$stage/go/bin/go" version | awk '{print $3}')" == "$LATEST_VERSION" ]] || error 'Staged Go version mismatch'
 	if [[ -e $GO_ROOT ]]; then
@@ -312,6 +272,8 @@ check_prereqs() {
 	require_cmd sha256sum
 	require_cmd awk
 	require_cmd mv
+	[ -f "$RELEASE_HELPER" ] ||
+		error "release-verify helper not found: $RELEASE_HELPER"
 }
 
 main() {

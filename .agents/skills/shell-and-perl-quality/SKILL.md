@@ -43,9 +43,11 @@ description: >-
   SIGPIPE status is handled. Capture the output first or use `sed -n '1p'`.
 - Do not use `eval`, `curl | sh`, or unquoted command strings. If `eval` is
   unavoidable, document why and keep the input bounded.
-- Do not embed Python in shell or Perl scripts (`python3 -c` or a heredoc).
-  Use native tools, core Perl modules, or a standalone helper program that the
+- Do not embed Python or Perl source in shell or Perl scripts (`-c`, `-e`,
+  `-n`, or a heredoc). Use native tools or a standalone helper program that the
   Makefile installs and the invoking script discovers relative to itself.
+- Prefer focused helpers over a single omnibus helper when the helper has
+  platform-specific dependencies.
 - Use `mktemp` and `umask 077` for diagnostic logs and state files; never use
   `$$`-based predictable names under `/tmp`.
 - In `openbsd/`, use `typeset` inside functions and avoid `local`, `declare`,

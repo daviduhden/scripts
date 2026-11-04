@@ -28,6 +28,13 @@ fi
 # environment may be minimal. /usr/local entries cover gh, git, and rsync.
 PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin
 export PATH
+PERL_CMD="${PERL_CMD:-perl}"
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd -P)
+RENAME_HELPER="${RENAME_HELPER:-}"
+if [ -z "$RENAME_HELPER" ]; then
+	RENAME_HELPER="${SCRIPT_DIR}/rename-link.pl"
+	[ -f "$RENAME_HELPER" ] || RENAME_HELPER="${SCRIPT_DIR}/rename-link"
+fi
 
 # Timestamped message helpers built on ksh's print. Progress goes to stdout;
 # warnings and errors go to stderr.
@@ -293,7 +300,7 @@ replace_public_link() {
 		rmdir "$linkdir"
 		return 1
 	fi
-	if ! perl -e 'rename $ARGV[0], $ARGV[1] or die "rename: $!\n"' -- "$linkdir/current" "$WWW_DIR"; then
+	if ! "$PERL_CMD" "$RENAME_HELPER" "$linkdir/current" "$WWW_DIR"; then
 		rm -f "$linkdir/current"
 		rmdir "$linkdir"
 		return 1
@@ -661,6 +668,10 @@ main() {
 		error "This script must be run as root."
 		exit 1
 	fi
+	[ -f "$RENAME_HELPER" ] || {
+		error "rename-link helper not found: $RENAME_HELPER"
+		exit 1
+	}
 
 	# Check the target before taking the lock, which lives inside WWW_DIR.
 	[ -d "$WWW_DIR" ] || {

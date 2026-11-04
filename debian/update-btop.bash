@@ -32,6 +32,17 @@ set -euo pipefail
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 PERL_CMD="${PERL_CMD:-perl}"
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd -P)
+RELEASE_HELPER="${RELEASE_HELPER:-}"
+if [ -z "$RELEASE_HELPER" ]; then
+	RELEASE_HELPER=""
+	for candidate in "$SCRIPT_DIR/release-verify.pl" "$SCRIPT_DIR/release-verify" "$SCRIPT_DIR/../scripts/release-verify.pl"; do
+		if [ -f "$candidate" ]; then
+			RELEASE_HELPER="$candidate"
+			break
+		fi
+	done
+fi
 
 BUILD_DIR="${HOME}/.local/src"
 REPO="aristocratos/btop"
@@ -141,47 +152,8 @@ fetch_source() {
 		rm -rf -- "$unpack"
 		return 1
 	fi
-	# shellcheck disable=SC2016
-	if ! "$PERL_CMD" -MArchive::Tar -e '
-		use strict;
-		use warnings;
-		my ($archive, $destination, $expected) = @ARGV;
-		my $tar = Archive::Tar->new($archive, 1)
-			or die "cannot read archive: $!\n";
-		my @members = $tar->get_files();
-		my %seen;
-		my $total = 0;
-		for my $entry (@members) {
-			my $name = $entry->name;
-			my @parts = split m{/}, $name;
-			die "unexpected source archive structure\n"
-				if !@parts || $parts[0] ne $expected
-				|| $name =~ m{\A/} || grep { $_ eq ".." } @parts
-				|| $seen{$name}++
-				|| !($entry->is_dir || $entry->is_file);
-			$total += $entry->size;
-			die "source archive exceeds extraction limit\n"
-				if $total > 536870912;
-		}
-		for my $entry (@members) {
-			my $name = $entry->name;
-			my $target = "$destination/$name";
-			if ($entry->is_dir) {
-				require File::Path;
-				File::Path::make_path($target);
-				next;
-			}
-			require File::Basename;
-			require File::Path;
-			File::Path::make_path(File::Basename::dirname($target));
-			open my $out, ">:raw", $target
-				or die "cannot create $target: $!\n";
-			my $data = $entry->get_content;
-			print {$out} $data or die "cannot write $target: $!\n";
-			close $out or die "cannot close $target: $!\n";
-			chmod $entry->mode & 0777, $target;
-		}
-	' "$tarball" "$unpack" "btop-${tag#v}"; then
+	if ! "$PERL_CMD" "$RELEASE_HELPER" tar-extract-all \
+		"$tarball" "$unpack" "btop-${tag#v}" 536870912; then
 		rm -rf -- "$unpack"
 		return 1
 	fi
@@ -221,6 +193,8 @@ check_prereqs() {
 	require_cmd "$PERL_CMD"
 	require_cmd tar
 	require_cmd mktemp
+	[ -f "$RELEASE_HELPER" ] ||
+		error "release-verify helper not found: $RELEASE_HELPER"
 }
 
 resolve_latest_tag() {

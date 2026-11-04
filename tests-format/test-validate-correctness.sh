@@ -386,22 +386,18 @@ EOF
 assert_rc 0 $? "--strict with clean tree exits 0"
 
 # ---- JSON output is valid (with and without findings) ----
-# Perl and JSON::PP are core dependencies of the project. Both the nonempty
-# and empty report paths are exercised.
+# The standalone helper parses JSON with core JSON::PP; no Perl source is
+# embedded in this shell script.
+JSON_HELPER=$(CDPATH='' cd -- "$(dirname "$0")/.." && pwd -P)
+JSON_HELPER="${JSON_HELPER}/scripts/release-verify.pl"
 out=$("$VALIDATE" --target all --format json "$T" 2>/dev/null)
-if printf '%s' "$out" | perl -MJSON::PP -e '
-	local $/;
-	decode_json(<STDIN>);
-	' 2>/dev/null; then
+if printf '%s' "$out" | perl "$JSON_HELPER" json-validate 2>/dev/null; then
 	pass
 else
 	fail_test "JSON output is not valid JSON (with findings)"
 fi
 out=$("$VALIDATE" --target debian --format json "$T3" 2>/dev/null)
-if printf '%s' "$out" | perl -MJSON::PP -e '
-	local $/;
-	decode_json(<STDIN>);
-	' 2>/dev/null; then
+if printf '%s' "$out" | perl "$JSON_HELPER" json-validate 2>/dev/null; then
 	pass
 else
 	fail_test "JSON output is not valid JSON (clean tree)"
