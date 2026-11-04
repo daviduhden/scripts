@@ -43,6 +43,11 @@ description: >-
   SIGPIPE status is handled. Capture the output first or use `sed -n '1p'`.
 - Do not use `eval`, `curl | sh`, or unquoted command strings. If `eval` is
   unavoidable, document why and keep the input bounded.
+- Do not embed Python in shell or Perl scripts (`python3 -c` or a heredoc).
+  Use native tools, core Perl modules, or a standalone helper program that the
+  Makefile installs and the invoking script discovers relative to itself.
+- Use `mktemp` and `umask 077` for diagnostic logs and state files; never use
+  `$$`-based predictable names under `/tmp`.
 - In `openbsd/`, use `typeset` inside functions and avoid `local`, `declare`,
   `readarray`, `mapfile`, `shopt`, here-strings, process substitution, and
   `$'...'`. The project validator rejects them.
@@ -60,10 +65,26 @@ description: >-
   them with the active code page and encode native path components back before
   calling Perl's narrow filesystem APIs. Add coverage for a non-ASCII parent
   path when changing this handling.
+- When adding explicit returns, preserve wrapper return values with
+  `return helper(...)`; do not replace an implicit result with a bare return
+  without checking callers. Test exception-producing `eval` blocks through
+  an explicit success value rather than relying only on `$@`.
 - Use `Getopt::Long` for options and `Pod::Usage` for help when the script has
   a POD section.
 - Read and write bytes deliberately (`binmode`/`:raw`). Use a temporary file
-  in the same directory and `rename` for atomic replacement.
+  in the same directory and `rename` for atomic replacement. Check both the
+  write and close results before replacing the original; a successful write
+  call alone does not guarantee buffered data reached the file.
+- For file-content replacements, capture identity before reading and carry it
+  to the pre-replace check. Bound reads while reading, not only with a prior
+  file-size check. A metadata or write/close failure must preserve the original.
+  Snapshot checks detect common concurrent changes but do not provide a lock.
+- Windows replacement recovery must use unique backup names, check restoration,
+  and retain/report the original recovery copy when restoration fails. Simulated
+  failure tests do not establish native Windows filesystem compatibility.
+- Review retained critic diagnostics in
+  [the individual Perl audit](../../../docs/perl-audit.md); do not convert its
+  justifications into global exclusions or broad `no critic` directives.
 - Never follow symlinks implicitly unless the option says so. Use `lstat`
   when inspecting links.
 - Keep POD valid: add `=encoding UTF-8` before non-ASCII text and run
@@ -75,7 +96,7 @@ Run these on each touched file, from the repository root:
 
 ```sh
 shfmt -l -s PATH
-shellcheck -x PATH
+shellcheck -x <ruta>
 bash -n PATH
 ksh -n PATH
 sh -n PATH
@@ -95,8 +116,8 @@ Aggregate checks:
 make test-regression
 ```
 
-`validate-shell.sh` and `validate-perl.sh` rewrite files when the formatters
-are installed. Review `git diff` afterwards. Regression tests create their own
+`validate-shell.sh` and `validate-perl.sh` default to read-only `--check`.
+Use `--format` explicitly to apply formatting, then review `git diff`. Regression tests create their own
 temporary trees and must not touch repository files.
 
 ## Common problems
@@ -126,7 +147,7 @@ the repository. Add only knowledge that will help future work; omit
 execution-specific notes and cosmetic edits. Review affected specialized
 agent instructions for consistency and run
 `make check-agent-knowledge` (or
-`python3 scripts/validate-agent-knowledge.py --scope worktree .`). The automated check
+`python3 scripts/validate-agent-knowledge.py --scope worktree`). The automated check
 covers structure and resolvable local references; semantic relevance still
 requires review. Report the synchronization result in the final summary and
 do not claim completion if it was skipped or failed.

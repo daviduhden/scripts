@@ -1,0 +1,114 @@
+name: Platform Validation
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '17 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: platform-validation-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+      - name: Install analysis tools in the disposable runner
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck shfmt devscripts ksh bmake perltidy libperl-critic-perl mandoc rsync
+          python -m pip install 'ruff==0.17.3' mbake
+      - name: Check and test without invoking administrative utilities
+        run: |
+          export TMPDIR="$RUNNER_TEMP/validation"
+          mkdir -p "$TMPDIR"
+          /bin/sh tests-format/validate-shell.sh --check --strict .
+          /bin/sh tests-format/validate-perl.sh --check --strict .
+          make check
+          make test-regression
+      - name: Show validator logs, including skipped checks
+        if: always()
+        run: |
+          if [ -d "$RUNNER_TEMP/validation" ]; then
+            find "$RUNNER_TEMP/validation" -type f -name 'validate-*' -exec cat {} \;
+          fi
+
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Install the supported analyzer in the disposable runner
+        shell: pwsh
+        run: Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force -Repository PSGallery
+      - name: Validate batch installer and launchers
+        shell: cmd
+        run: tests-format\validate-windows-installer.bat
+      - name: Dry-run the installer
+        shell: cmd
+        run: windows\install-windows.bat --dry-run
+      - name: Analyze and format-check PowerShell
+        shell: pwsh
+        run: |
+          Get-ChildItem windows/*.ps1, windows/test-format/*.ps1 | ForEach-Object {
+            Invoke-ScriptAnalyzer -Path $_.FullName -ErrorAction Stop
+          }
+          & pwsh -NoProfile -File windows/test-format/psfmt.ps1 -c .
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Run PowerShell regression suites with mocked downloads
+        shell: pwsh
+        run: |
+          & pwsh -NoProfile -File windows/test-format/tests/run-tests.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & pwsh -NoProfile -File windows/tests/test-update-xerj.ps1
+          exit $LASTEXITCODE
+      - name: Run portable Perl syntax and regressions
+        shell: pwsh
+        run: |
+          foreach ($file in @(Get-ChildItem perl/*.pl, tests-format/test-*.pl)) {
+            & perl -c $file.FullName
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          & perl tests-format/test-normalize-files.pl
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & perl tests-format/test-ssh-menu.pl
+          exit $LASTEXITCODE
+
+  openbsd:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Analyze and test in an isolated OpenBSD VM
+        uses: vmactions/openbsd-vm@f1ca8bc8ecc5b6ef7218e5b914836e067e1546d3 # v1.4.9
+        with:
+          release: "7.8"
+          copyback: false
+          prepare: |
+            pkg_add -I bash python%3.12 git rsync--
+            ln -sf /usr/local/bin/python3.12 /usr/local/bin/python3
+          run: |
+            set -eu
+            export PYTHONDONTWRITEBYTECODE=1
+            for script in openbsd/*.ksh; do ksh -n "$script"; done
+            /bin/sh tests-format/validate-correctness.sh --target openbsd .
+            make test-regression

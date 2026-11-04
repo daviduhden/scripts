@@ -24,15 +24,17 @@ Each directory documents its scripts, requirements, and usage:
 - [Windows](windows/README.md), [PowerShell formatter](windows/test-format/README.md), and [formatter tests](windows/test-format/tests/README.md)
 - [Interactive Bash helpers](shell/README.md)
 - [Validation and formatting tools](tests-format/README.md)
+- [Architecture](docs/architecture.md), [troubleshooting](docs/troubleshooting.md), [security policy](SECURITY.md), and [changelog](CHANGELOG.md)
 
 ## Installation
 
 Targets are system-specific. Install the set for your host with
 `install-debian`, `install-openbsd` or `install-secureblue`; `make all`
-installs only the OS-independent helpers (Perl and tests/format), because the
-OS-specific sets share installed command names and cannot coexist in one
-`BINDIR`. Adjust `PREFIX`/`BINDIR` if you need a different path (defaults to
-`/usr/local/bin`).
+installs only the OS-independent runtime helper (Perl), because the OS-specific
+sets share installed command names and cannot coexist in one `BINDIR`. Adjust
+`PREFIX`/`BINDIR` if you need a different path (defaults to `/usr/local/bin`).
+`DESTDIR` is supported for staged packaging. SecureBlue user units are installed
+under `${PREFIX}/lib/systemd/user`, not below `bin`.
 
 ```
 # Debian
@@ -53,11 +55,16 @@ make install-shell-bash
 # Perl
 make install-perl
 
-# Validation/formatting tools (for developers)
+# Validation/formatting tools (for developers), installed under
+# ${PREFIX}/libexec/scripts by default
 make install-tests-format
+
+# Remove an installed target explicitly
+make uninstall-debian
+make uninstall-secureblue
 ```
 
-Recipes use `install(1)` and strip `.pl`/`.bash`/`.ksh`/`.sh` when placing shell scripts in `${BINDIR}`. Windows scripts remain in `windows/` and are not installed by the POSIX targets.
+Recipes use `install(1)` and strip `.pl`/`.bash`/`.ksh`/`.sh` when placing shell scripts in `${DESTDIR}${BINDIR}`. Windows scripts remain in `windows/` and are not installed by the POSIX targets. Developer validators and formatters are installed only with `make install-tests-format`, under `${DESTDIR}${TESTS_FORMAT_DIR}` (default `${PREFIX}/libexec/scripts`); set `TESTS_FORMAT_LINKS=1` to add compatibility symlinks in `BINDIR`. `make all` no longer installs them.
 
 ## Windows installation
 
@@ -188,18 +195,44 @@ repository. The bundled style pins the Fourmolu 0.21 defaults explicitly;
 edit that one file to evolve the shared style. If `fourmolu` is not present in
 `PATH`, the script reports it and skips Haskell formatting.
 
-`make test` runs, in order:
+`make check` runs agent-knowledge checks and contract tests, Python/Ruff,
+shell, Perl, Makefile, permissions, correctness, and manual-page checks.
+It checks formatting without rewriting sources or creating/removing caches.
+Validators retain private diagnostic logs under `${TMPDIR:-/tmp}`. The
+permission check skips Git-ignored artifacts and requires normalized modes;
+run `make fix-permissions` once after cloning with a restrictive umask.
+Missing optional tools are reported as skipped checks; a completed run does
+not imply that those tools ran.
 
-- shell validation/formatting (`tests-format/validate-shell.sh`, including sh/bash/ksh syntax)
-- perl validation/formatting (`tests-format/validate-perl.sh`)
-- make validation/formatting (`tests-format/validate-make.sh`)
-- permission validation (`tests-format/fix-permissions.sh --check`, read-only)
-- correctness validation (`tests-format/validate-correctness.sh --target all`)
-- man page validation (`tests-format/validate-manpages.sh`, skipped when `mandoc` is absent)
-- regression tests for both new tools (`test-fix-permissions.sh`, `test-validate-correctness.sh`)
-- ssh-menu and normalize-files regression tests (`test-ssh-menu.pl`, `test-normalize-files.pl`)
+Scripts in `debian/`, `openbsd/`, `secureblue/`, `shell/`, and `tests-format/`
+must not embed Python with `python3 -c` or a heredoc. Use native tools, core
+Perl modules, or a standalone helper program. The Arti installer uses the
+standalone `secureblue/arti-config.py` helper for TOML/unit rendering.
 
-`make test` is a validation operation: it **never** modifies file permissions or file contents on its own (the format validators may rewrite formatting when the optional formatters are installed). Permission corrections are only applied by `make fix-permissions`.
+`make test` completes validation before starting isolated regression tests for
+validators, installer failure handling, permissions, shell correctness, both
+Perl programs, delivery transactions, release verification, and website
+synchronization filters. Python test invocations
+disable bytecode caches. This order also holds with `make -j`.
+
+Use `make format` to apply available formatters explicitly. Each validator
+accepts `--check` (the default), `--format`, and `--strict` before `[ROOT_DIR]`.
+Formatting drift is reported with exit status 2 even when successfully fixed;
+review the diff and rerun checks. Strict mode makes missing optional tools and
+unloadable Perl modules fail validation; platform-inapplicable Makefile checks
+remain explicit skips. Ruff is always required when Python sources exist.
+
+The Makefile validator does not invoke make unless `--make-dry-run` is supplied.
+Use that flag only for trusted Makefiles: parsing a Makefile can execute shell
+commands even with `-n`. Likewise, `perl -c` executes compile-time blocks and
+loads modules; these source validators assume trusted input.
+
+The platform CI workflow runs analysis and isolated regression tests on Linux,
+Windows, and an OpenBSD 7.8 VM. It installs analysis dependencies only in those
+disposable runners; it never runs the administrative utilities against the
+host. Actions are pinned to verified commit hashes. Windows/OpenBSD jobs need
+their native environments; a local Linux pass does not establish their result.
+
 
 ## File permissions
 

@@ -19,49 +19,54 @@ description: >-
 
 ## Understand the test split
 
-`make test` runs `test-validate` and then `test-regression`:
+`make check` runs agent-knowledge validation and contract tests, cache-free
+Ruff formatting/lint checks, shell, Perl, Make, permission, correctness, and
+manual-page checks. `make test` completes validation before isolated
+regressions (including under parallel make): tooling/installers, permissions,
+correctness, both Perl programs, delivery transactions, release verification,
+and website synchronization filters.
+Python test recipes set `PYTHONDONTWRITEBYTECODE=1`.
 
-1. `/bin/sh tests-format/validate-python.sh .` (`test-python`, a prerequisite
-   of `test-validate`)
-2. `/bin/sh tests-format/validate-shell.sh .`
-3. `/bin/sh tests-format/validate-perl.sh .`
-4. `/bin/sh tests-format/validate-make.sh .`
-5. `/bin/sh tests-format/fix-permissions.sh --check .`
-6. `/bin/sh tests-format/validate-correctness.sh --target all .`
-7. `/bin/sh tests-format/validate-manpages.sh .`
-8. `/bin/sh tests-format/test-fix-permissions.sh`
-9. `/bin/sh tests-format/test-validate-correctness.sh`
-10. `perl tests-format/test-ssh-menu.pl`
-11. `perl tests-format/test-normalize-files.pl`
+The four language validators default to `--check`; only `--format` rewrites
+sources. `make format` invokes all four explicitly. Formatting drift exits 2
+even if repaired, so inspect the diff and rerun checks. Safe `mktemp` logs
+remain for inspection; transient failure, skip and format lists are cleaned.
+Ruff check mode uses `--no-cache` and must not remove pre-existing caches.
 
-Important boundaries:
+Use `--strict` to fail when optional tools or Perl modules are missing.
+Non-strict runs record `[SKIP]` diagnostics and counts rather than claiming
+those checks passed. Make dialect/platform omissions are expected skips.
+Ruff remains required whenever Python files exist. Make evaluation is opt-in
+via `--make-dry-run`: even `-n` can execute commands while parsing untrusted
+Makefiles. `perl -c` loads modules and executes compile-time blocks, so those
+sources must also be trusted.
 
-- Steps 1-4 can rewrite files when `shfmt`, `perltidy`, `ruff`, or `mbake` are
-  installed. A successful rewrite still makes the validator exit non-zero.
-- Step 5 is read-only and exits 1 on a permission mismatch.
-- Step 6 is read-only; it creates a temporary directory for its worker.
-- Step 7 is read-only and exits 0 when `mandoc` is absent.
-- Steps 8-11 use temporary trees. They must not modify the repository.
-- `validate-windows-installer.bat`, `psfmt`, and the PowerShell test runner
-  are Windows-only and are not part of `make test`.
+Windows batch/PowerShell checks run natively. Platform CI runs safe checks and
+regressions on Linux, Windows, and an OpenBSD 7.8 VM; it must never execute
+administrative scripts against a host. Pin Actions to verified upstream
+commit hashes and document changes to runner dependencies separately from
+runtime dependencies.
 
 ## Procedure
 
 1. Run the read-only checks first:
    ```sh
    shfmt -l -s .
-   shellcheck -x PATH
+   shellcheck -x <ruta>
    perl -c PATH
    /bin/sh tests-format/fix-permissions.sh --check .
    /bin/sh tests-format/validate-manpages.sh .
    /bin/sh tests-format/validate-correctness.sh --target all .
    ```
+   `fix-permissions.sh --check` skips Git-ignored artifacts and requires
+   normalized modes; run `make fix-permissions` once in a clone created with a
+   restrictive umask.
 2. Run the aggregate suite:
    ```sh
    make test
    ```
-3. Inspect `git diff`. Formatters may have rewritten files; decide whether the
-   rewrite is intended, and never commit unrelated formatting.
+3. Inspect `git diff`. If `make format` was explicitly used, review its
+   rewrites and never commit unrelated formatting.
 4. To add a validator:
    - write it as POSIX `sh` unless it needs Perl;
    - use `mktemp` and a cleanup trap;
@@ -70,17 +75,19 @@ Important boundaries:
    - add it to `test-validate`, or to a separate target such as
      `test-manpages` when it depends on an optional tool; a dedicated
      prerequisite target can keep the main validation recipe manageable;
-   - make optional-tool checks skip with exit 0 when the tool is absent;
+   - report absent optional tools as skips by default and failures with
+     `--strict`;
    - document it in `tests-format/README.md`.
-  - update `tests-format/openbsd-tools.txt` when adding or changing an
+   - update `tests-format/openbsd-tools.txt` when adding or changing an
     optional tool with an OpenBSD port/package mapping; keep that file
     informational and verify package paths before recording them.
    - for agent instruction synchronization, use
      `validate-agent-knowledge.py`; `make test-validate` runs it against the
-     current worktree, while `--base REF` supports pull request comparisons.
-     The PR workflow runs the shared agent-knowledge contract tests and range
-     check; platform validation remains local. The standalone Windows xerj
-     updater suite is `pwsh -NoProfile -File windows/tests/test-update-xerj.ps1`;
+     current worktree. Pull request comparisons require
+     `--scope range --base BASE_REF --head HEAD_REF`.
+     The agent workflow runs the shared contract tests and range
+     check; the platform workflow runs native/isolated checks. The standalone
+     Windows xerj updater suite is `pwsh -NoProfile -File windows/tests/test-update-xerj.ps1`;
      it uses temporary paths and mocked downloads/clients, not real installs.
 5. To add a regression test:
    - use POSIX `sh` or core-module Perl for portable shell/tool tests; use the
@@ -130,17 +137,19 @@ Makefiles whose generated `config.mk` is absent. On OpenBSD, `mbake` and
 
 ## Common problems
 
-- `make test` rewrote files and then failed; review the diff and rerun.
-- `validate-shell.sh` runs `shfmt -w`; do not run it when you need a strictly
-  read-only check.
-- `validate-perl.sh` runs `perltidy` in place; it uses `-npro` so a developer
+- `make format` reported drift after rewriting; review the diff and rerun checks.
+- `validate-shell.sh --format` runs `shfmt -w`; its default `--check` mode
+  reports drift without rewriting.
+- `validate-perl.sh --format` runs `perltidy` in place; it uses `-npro` so a developer
   profile does not change the result.
-- `validate-python.sh` applies `ruff format` and runs `ruff check` for Python
-  files, then runs `ruff clean` from the selected root. Ruff is required only
-  when Python files are found; it follows the neighboring validator structure
-  with `require_cmd` checks in `main`, work in `run_validate_python`, and
-  `main "$@"` as its entry point. Formatting rewrites are reported as
-  validation failures so the diff can be reviewed.
+- `validate-python.sh --check` uses cache-free Ruff checks. `--format` applies
+  formatting and clears Ruff caches in its cleanup; both report drift as a
+  failure. Keep the `require_cmd`, `run_validate_python`, `main "$@"` pattern.
+- `make test-tooling` covers all four validator modes, strict missing tools,
+  make execution opt-in, installation paths with spaces, and early failures
+  using temporary paths and offline tool doubles. Installer failure tests must
+  also verify cleanup: the shell-config copy recipe restores its immutable
+  attribute in an exit trap even when a copy fails.
 - `fix-permissions.sh --help` now exits 0; other usage errors exit 2.
 - `fix-permissions.sh` prunes `.git` directories and gitfiles, never follows
   symlinks, and preserves setuid/setgid/sticky bits.
@@ -162,7 +171,7 @@ the repository. Add only knowledge that will help future work; omit
 execution-specific notes and cosmetic edits. Review affected specialized
 agent instructions for consistency and run
 `make check-agent-knowledge` (or
-`python3 scripts/validate-agent-knowledge.py --scope worktree .`). The automated check
+`python3 scripts/validate-agent-knowledge.py --scope worktree`). The automated check
 covers structure and resolvable local references; semantic relevance still
 requires review. Report the synchronization result in the final summary and
 do not claim completion if it was skipped or failed.

@@ -99,10 +99,16 @@ already-installed PSScriptAnalyzer; it does not install it.
 - `ai-purge-history.ps1` removes the entire `%LOCALAPPDATA%\crush` directory,
   which can include configuration; do not describe it as configuration-safe.
   Use `-DryRun` to preview.
-- `psfmt.ps1` auto-installs PSScriptAnalyzer from PSGallery when missing.
+- `psfmt.ps1` requires PSScriptAnalyzer 1.25.0. Missing modules fail without
+  network access by default; `-install-dependency` explicitly opts in to the
+  pinned PSGallery install. Keep the runner and CI version aligned.
   Release updaters `update-aiclis.ps1` and `update-xerj.ps1` also download
   upstream artifacts as their documented purpose. Keep downloads confined
   to those flows rather than adding them to launchers or checks.
+- `update-aiclis.ps1` verifies Codex release archives against the GitHub
+  asset digest and reads only the expected executable entries. PowerShell
+  profile wrappers (`codex --yolo`, `opencode --auto`) are opt-in with
+  `-Wrappers`; profile updates use a backup and atomic replacement.
 - `update-xerj.ps1` is a release-download updater: it verifies the archive's
   SHA-256 against an exact published filename/digest line before reading only
   the expected executable entry. Keep its per-user destination and absolute
@@ -114,6 +120,11 @@ already-installed PSScriptAnalyzer; it does not install it.
   Use `pwsh -NoProfile -File windows/tests/test-update-xerj.ps1` instead:
   it redirects configuration and install paths into temporary directories,
   mocks downloads and Codex, and checks repeated updates and failure paths.
+- Executable activation uses unique same-directory files and `File.Replace`;
+  never fall back to overwriting a locked target. Retain and report recovery
+  copies after failure. xerj retains successful `.bak.*` copies for operators.
+  OpenCode requires an exact GitHub release asset/digest and one regular root
+  executable entry; reject duplicates and checksum failures before activation.
 - The validator now checks that `psfmt.ps1` exists and declares PowerShell 7,
   and that the launcher mentions `pwsh.exe` and `powershell.exe`. It still does
   not execute any of them.
@@ -129,7 +140,7 @@ the repository. Add only knowledge that will help future work; omit
 execution-specific notes and cosmetic edits. Review affected specialized
 agent instructions for consistency and run
 `make check-agent-knowledge` (or
-`python3 scripts/validate-agent-knowledge.py --scope worktree .`). The automated check
+`python3 scripts/validate-agent-knowledge.py --scope worktree`). The automated check
 covers structure and resolvable local references; semantic relevance still
 requires review. Report the synchronization result in the final summary and
 do not claim completion if it was skipped or failed.

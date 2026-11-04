@@ -43,7 +43,9 @@ description: >-
    - never delete from an unset or empty variable;
    - never add `rm -rf /`.
 5. Use `mktemp` with a template and an `EXIT` trap. Do not use fixed names
-   under `/tmp`.
+   under `/tmp`. Root-run audits and system reports must use a private
+   directory (`umask 077`, `mktemp -d`), not a predictable path opened with
+   `tee` before `chmod`.
 6. Make the change idempotent:
    - check installed versions before rebuilding;
    - upsert configuration keys instead of appending duplicates;
@@ -62,12 +64,18 @@ description: >-
     tree, omit known repository-only documentation and tooling from the public
     copy, remove those same known paths left by an older deployment, and keep
     the active `.sync.lock`. Test the copy/filter behavior in temporary trees;
-    never use a production document root for validation.
+    never use a production document root for validation. The opt-in atomic
+    mode requires an existing symlink docroot, stages a sibling release and
+    rolls the link back on post-publication failure. Keep its parent private
+    to administrators; retain old releases until operators prune them. Locks
+    live beside the docroot and are not automatically stolen by PID.
+    `--check-atomic` validates only the filesystem layout, not server policy.
 
 ## Risk checklist for this tree
 
-- `debian/clean-logs.bash` and `openbsd/clean-logs.ksh` delete under
-  `/var/log` and `/`.
+- `debian/clean-logs.bash` and `openbsd/clean-logs.ksh` delete compressed logs
+  under `/var/log` and `.old` files older than a configurable age in a bounded
+  set of system directories. A real run requires `--force`.
 - `*sync-website*` replaces the deployed tree and restarts the web service.
   Its source checkout is private staging data; the document root must not
   expose `.git`, GitHub or agent instructions, maintainer documentation, test
@@ -75,8 +83,9 @@ description: >-
   and OpenBSD ksh filters should stay aligned, and cleanup must preserve the
   live `.sync.lock` and site assets.
 - `*ai-purge-history*` deletes session/state data; use its `--dry-run` /
-  `-DryRun` preview. The Windows variant removes the whole Crush data
-  directory, including configuration stored there.
+  `-DryRun` preview. Crush data is preserved by default; removing the whole
+  directory requires `--include-crush-data` (the Windows variant still removes
+  its documented Crush data directory).
 - `debian/install-hardened-malloc.bash` edits `/etc/ld.so.preload` and a
   sysctl file.
 - `debian/enable-tor-transport.bash` rewrites APT sources and keeps a
@@ -103,7 +112,7 @@ Read-only static checks:
 ```sh
 /bin/sh tests-format/validate-correctness.sh --target all .
 /bin/sh tests-format/fix-permissions.sh --check .
-shellcheck -x PATH
+shellcheck -x <ruta>
 perl -c PATH
 ```
 
@@ -140,7 +149,7 @@ the repository. Add only knowledge that will help future work; omit
 execution-specific notes and cosmetic edits. Review affected specialized
 agent instructions for consistency and run
 `make check-agent-knowledge` (or
-`python3 scripts/validate-agent-knowledge.py --scope worktree .`). The automated check
+`python3 scripts/validate-agent-knowledge.py --scope worktree`). The automated check
 covers structure and resolvable local references; semantic relevance still
 requires review. Report the synchronization result in the final summary and
 do not claim completion if it was skipped or failed.

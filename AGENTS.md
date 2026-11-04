@@ -26,9 +26,13 @@ repository's scope, say so instead of inventing support.
 | `Makefile` | POSIX-sh install and test entry points; recipes must remain BSD make compatible. |
 | `VERSION` | Installed version metadata (`1.0.0`). |
 
-`make all` installs only `install-perl` and `install-tests-format`. The
-OS-specific install targets install the same command names, so they cannot
-share one `BINDIR`. Installed names omit `.bash`, `.ksh`, `.sh`, and `.pl`.
+`make all` installs only `install-perl`. Developer validators and formatters
+require the explicit `install-tests-format` target. The OS-specific install
+targets install the same command names, so they cannot share one `BINDIR`.
+`DESTDIR` is supported for staging. SecureBlue user units install under
+`${PREFIX}/lib/systemd/user`; developer tools install under
+`${PREFIX}/libexec/scripts` (`TESTS_FORMAT_DIR`). Installed names omit `.bash`,
+`.ksh`, `.sh`, and `.pl`; Python helpers keep their `.py` suffix.
 
 ## Conventions
 
@@ -45,10 +49,9 @@ share one `BINDIR`. Installed names omit `.bash`, `.ksh`, `.sh`, and `.pl`.
   unguarded `set -o pipefail`, here-strings, process substitution, and
   `$'...'` in that tree.
 - `tests-format/` scripts use `#!/bin/sh` and POSIX constructs.
-- `tests-format/validate-python.sh` applies Ruff formatting and lint to Python
-  files, then clears Ruff's caches under the selected root; formatting changes
-  count as validation issues, and Ruff is required only when Python files are
-  found.
+- `tests-format/validate-python.sh` checks Python formatting/lint without
+  caches by default. `--format` applies formatting and clears Ruff caches;
+  drift counts as a validation issue. Ruff is required when Python files exist.
 - Windows batch files use CRLF, `DisableDelayedExpansion`, quoted paths, and
   `exit /b %ERRORLEVEL%` in launchers. PowerShell formatter/tests require
   PowerShell 7; the installer uses Windows PowerShell for registry and syntax
@@ -56,6 +59,12 @@ share one `BINDIR`. Installed names omit `.bash`, `.ksh`, `.sh`, and `.pl`.
 - Reuse the existing helper names and patterns instead of adding a second
   logging, elevation, or install mechanism.
 - Most scripts do not implement `--help`; do not assume it exists.
+- Do not embed Python in Bash, sh, or Perl scripts with `python3 -c` or a
+  heredoc. Use native tools, core Perl modules, or a standalone helper program.
+  A standalone helper must be installed by the relevant Makefile target and
+  discovered relative to the invoking script.
+- Do not write predictable temporary or log paths under `/tmp`; use
+  `mktemp`, `umask 077`, and a cleanup trap where appropriate.
 
 ## Commands
 
@@ -63,6 +72,8 @@ Run these from the repository root. All of them exist in the `Makefile`.
 
 ```sh
 make help
+make check
+make format
 make test
 make test-validate
 make test-manpages
@@ -78,11 +89,14 @@ make install-perl
 make install-tests-format
 ```
 
-`make test` runs `validate-python.sh` first, then `validate-shell.sh`,
-`validate-perl.sh`, `validate-make.sh`, `fix-permissions.sh --check`, `validate-correctness.sh
---target all`, `validate-agent-knowledge.py`, `validate-manpages.sh` (skipped
-  without `mandoc`), then the regression tests, including temporary-tree tests
-  for both website synchronizers. Windows checks are not part of it.
+`make check` runs agent-knowledge validation and contract tests, Python,
+shell, Perl, Makefile, permissions, correctness, and manual-page checks.
+The permission check skips Git-ignored artifacts; normalize modes once with
+`make fix-permissions` after a clone with a restrictive umask.
+`make test` completes validation before isolated regression tests, including
+validator/installation, Perl, and website synchronization regressions; this
+ordering also holds with parallel make. Python tests disable bytecode caches.
+Windows checks have their own native CI job.
 
 Read-only checks that do not apply formatting:
 
@@ -94,10 +108,16 @@ perltidy -npro -ast -se -o /dev/null perl/normalize-files.pl
 perltidy -npro -ast -se -o /dev/null perl/ssh-menu.pl
 ```
 
-`validate-shell.sh`, `validate-perl.sh`, and `validate-make.sh` rewrite files
-when `shfmt`, `perltidy`, or `mbake` are installed and formatting has drifted.
-Run `git diff` afterwards. Each of these three writes its findings to a log
-file under `${TMPDIR:-/tmp}` and prints the path.
+`validate-shell.sh`, `validate-perl.sh`, `validate-make.sh`, and
+`validate-python.sh` accept `--check` (default), `--format`, and `--strict`
+before the root directory. Check mode does not rewrite sources or caches;
+logs use safe temporary files and remain under `${TMPDIR:-/tmp}`. Only
+`--format` applies formatting; drift still exits 2. `make format` invokes
+all four formatters. Strict mode fails on missing optional tools or Perl
+modules, while platform-inapplicable Make checks remain explicit skips.
+The Makefile validator evaluates make only with `--make-dry-run`; use that
+option on trusted input because even dry-run parsing can execute commands.
+Perl syntax checks likewise execute compile-time blocks in trusted sources.
 
 Windows validation must run on Windows:
 
@@ -132,8 +152,10 @@ pwsh -NoProfile -File .\windows\test-format\tests\run-tests.ps1
   - real execution: running the system-changing script itself.
 - Record the exact command and result. Report skipped optional tools as
   skipped, not passed.
-- The PR workflow validates agent knowledge only. Platform validation remains
-  local; do not claim that a platform was tested unless it was.
+- PR workflows validate agent knowledge and run isolated Linux, Windows, and
+  OpenBSD 7.8 platform checks. Actions use verified commit hashes; updating
+  them requires checking the upstream repository/ref. Do not claim a platform
+  was tested until that job actually ran successfully.
 - Before changing a script, read its platform README and check `git status`.
   Do not revert, reformat, or commit unrelated changes.
 - Website sync stages a full repository checkout outside the document root,
@@ -171,7 +193,7 @@ A code change without the corresponding agent knowledge maintenance is considere
 
 Never claim completion when the synchronization step has been skipped or has failed.
 
-This review is required after every change to code, configuration, dependencies, features, bug fixes, refactors, tests, workflows, documentation, or repository architecture. At task end, inspect the root and nested `AGENTS.md`, `.github/agents/*.agent.md`, `.agents/skills/**/SKILL.md`, `.github/skills/**/SKILL.md`, `.claude/skills/**/SKILL.md`, and any tool-specific instruction files present (including Cursor and Copilot files). The current repository has one root `AGENTS.md`, five skills under `.agents/skills/`, and a PR workflow at `.github/workflows/agent-knowledge-validation.yml`; no specialized agent definitions exist.
+This review is required after every change to code, configuration, dependencies, features, bug fixes, refactors, tests, workflows, documentation, or repository architecture. At task end, inspect the root and nested `AGENTS.md`, `.github/agents/*.agent.md`, `.agents/skills/**/SKILL.md`, `.github/skills/**/SKILL.md`, `.claude/skills/**/SKILL.md`, and any tool-specific instruction files present (including Cursor and Copilot files). The current repository has one root `AGENTS.md`, five skills under `.agents/skills/`, and PR workflows at `.github/workflows/agent-knowledge-validation.yml` and `.github/workflows/platform-validation.yml`; no specialized agent definitions exist.
 
 Map changed paths to the instructions whose scope covers them, then read the applicable skill(s) and their linked references. Update an existing skill when its procedures, tools, assumptions, validation, or reusable knowledge change. Create a skill only when a durable responsibility has no suitable existing skill. Update specialized agent instructions when their workflow or responsibility changes. Remove obsolete or conflicting guidance and verify that changed local references still resolve. Do not add cosmetic edits, timestamps, or task-specific notes solely to satisfy this rule.
 

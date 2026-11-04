@@ -87,11 +87,33 @@ Formatting and full suite:
 make test
 ```
 
-`validate-shell.sh` runs `shfmt -w` and can rewrite files. Run `git diff`
-afterwards. `make test` includes the same formatter behavior. If an optional
+`validate-shell.sh` defaults to read-only `--check`; use `--format` explicitly
+when applying formatting. `make test` checks before running regressions. If an optional
 tool is missing, report the check as skipped rather than passed.
 
 ## Common problems
+
+- Release updates must verify their documented trust boundary before activation.
+  Go stages a fresh checked tree and retains `.go-backup.*` for recovery;
+  msedit requires the exact GitHub asset digest; btop fallback archives require
+  one bounded source root without links or traversal. These helpers use core
+  Perl modules (`JSON::PP`, `Archive::Tar`) or native tools, not embedded
+  Python. Argon requires operator-pinned digests or explicit
+  `--trust-upstream`; reviewed local scripts can avoid downloads. Never
+  validate by executing their administrative entry points.
+
+- Arti installation preserves existing TOML unless `--replace-config` is
+  selected. TOML validation and unit rendering are delegated to the standalone
+  `secureblue/arti-config.py` helper (installed with the SecureBlue target),
+  never an embedded heredoc. Validate the rendered systemd unit before
+  publishing and exercise activation rollback with mocked systemctl. Escape
+  complete systemd arguments, including `%` specifiers and `$` expansion in
+  Exec directives; socat socket paths cannot contain commas.
+- Website sync locks are siblings of the document root and fail closed on
+  existing locks. Atomic mode requires an already configured symlink docroot;
+  `--check-atomic` checks this prerequisite only. Keep Debian's GNU `mv -T`
+  and OpenBSD's base-Perl `rename` publication behavior distinct. Never migrate a
+  production directory to a symlink automatically during validation.
 
 - `secureblue/update-xerj.bash` installs the static musl release per user in
   `~/.local/bin`, without rpm-ostree layering or run0. Verify the archive's own
@@ -108,8 +130,10 @@ tool is missing, report the check as skipped rather than passed.
   Makefile strips one of those suffixes.
 - Two OS-specific targets were installed into the same `BINDIR`; they share
   command names and cannot coexist.
-- `make install-secureblue` removes `${BINDIR}/systemd` before recopying the
-  unit templates.
+- `install-secureblue` installs units under `${PREFIX}/lib/systemd/user`
+  (`SYSTEMD_USER_UNIT_DIR`) and never deletes `${BINDIR}/systemd`.
+- A new embedded `python3 -c` or Python heredoc appeared in a shell script;
+  use a native tool, core Perl, or a standalone helper installed by the target.
 - GNU-only options in `openbsd/`: bare `mktemp`, `sort -V`, `sed -r`,
   `readlink -e`, `find -printf`, `xargs --null`.
 - Linux commands or paths in `openbsd/`: `systemctl`, `apt`, `run0`,
@@ -133,7 +157,7 @@ the repository. Add only knowledge that will help future work; omit
 execution-specific notes and cosmetic edits. Review affected specialized
 agent instructions for consistency and run
 `make check-agent-knowledge` (or
-`python3 scripts/validate-agent-knowledge.py --scope worktree .`). The automated check
+`python3 scripts/validate-agent-knowledge.py --scope worktree`). The automated check
 covers structure and resolvable local references; semantic relevance still
 requires review. Report the synchronization result in the final summary and
 do not claim completion if it was skipped or failed.

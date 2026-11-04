@@ -40,7 +40,7 @@ Git state, or execution. Warnings do not change a successful exit code.
 | ID | Meaning |
 | --- | --- |
 | `AK001` | Project changes require a substantive update to maintained agent or skill knowledge. Changes limited to the validator, its contract tests, or its dedicated workflow are exempt to prevent recursive gate failures. |
-| `AK002` | Recognized agent and skill files must be non-empty and meet their required headings and simple frontmatter field checks. Frontmatter inspection is partial; it is not full YAML validation. |
+| `AK002` | Recognized agent and skill files must be non-empty and meet their required headings and simple frontmatter field checks. `AGENTS.md` must contain `## Continuous Agent & Skills Maintenance`; every `SKILL.md` must contain `## Maintenance & Continuous Learning`; a skill's frontmatter `name` must match its directory name. Specialized agent files also require `Post-Change Knowledge Synchronization`. Frontmatter inspection is partial; it is not full YAML validation. |
 | `AK003` | Relative Markdown references in recognized instructions must resolve inside the repository. External URLs are not treated as local paths. |
 | `AK004` | Cosmetic, timestamp-only, whitespace-only, or otherwise content-free instruction edits fail. Substantive updates produce a warning for human review; the validator cannot prove semantic relevance. |
 | `AK005` | Invalid CLI configuration, Git revisions, worktree state, or execution are errors. |
