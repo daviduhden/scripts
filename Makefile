@@ -14,6 +14,7 @@ TESTS_FORMAT_DIR ?= ${PREFIX}/libexec/scripts
 DEST_TESTS_FORMAT = ${DESTDIR}${TESTS_FORMAT_DIR}
 TESTS_FORMAT_LINKS ?= 0
 INFO ?= ==>
+MANAGE = /bin/sh scripts/manage-install.sh
 SECUREBLUE_USER ?= david
 BASH_CONF_DST_DIR ?= /var/home/${SECUREBLUE_USER}/.bashrc.d
 BASH_CONF_FILES = shell/aliases.bash \
@@ -102,83 +103,78 @@ clean:
 	@echo "${INFO} Nothing to clean"
 
 install-debian:
-	@echo "${INFO} Installing Debian helpers"
-	@set -e; install -d "${DESTBIN}"
-	@set -e; for f in ${DEBIAN_SCRIPTS}; do base=$${f##*/}; name=$${base%.bash}; name=$${name%.pl}; printf '%s Installing %s -> %s\n' "${INFO}" "$$f" "${DESTBIN}/$$name"; install -m 0755 "$$f" "${DESTBIN}/$$name"; done
-	@echo "${INFO} Debian helpers installed"
+	@INFO='${INFO}' DESTBIN='${DESTBIN}' DEBIAN_SCRIPTS='${DEBIAN_SCRIPTS}' \
+		$(MANAGE) install-debian
 
 install-openbsd:
-	@echo "${INFO} Installing OpenBSD helpers"
-	@set -e; install -d "${DESTBIN}"
-	@set -e; for f in ${OPENBSD_SCRIPTS}; do base=$${f##*/}; name=$${base%.ksh}; name=$${name%.pl}; printf '%s Installing %s -> %s\n' "${INFO}" "$$f" "${DESTBIN}/$$name"; install -m 0755 "$$f" "${DESTBIN}/$$name"; done
-	@set -e; wrapper="${DESTBIN}/sudo-wrapper"; if [ -x "$$wrapper" ]; then for link in sudo visudo sudoedit; do if [ -e "${DESTBIN}/$$link" ] && [ ! -L "${DESTBIN}/$$link" ]; then printf '%s ERROR: %s exists and is not a wrapper symlink; refusing to overwrite\n' "${INFO}" "${DESTBIN}/$$link" >&2; exit 1; fi; printf '%s Symlinking %s -> %s\n' "${INFO}" "${DESTBIN}/$$link" "$$wrapper"; ln -sf "$$wrapper" "${DESTBIN}/$$link"; done; fi
-	@echo "${INFO} OpenBSD helpers installed"
+	@INFO='${INFO}' DESTBIN='${DESTBIN}' OPENBSD_SCRIPTS='${OPENBSD_SCRIPTS}' \
+		$(MANAGE) install-openbsd
 
 install-secureblue:
-	@echo "${INFO} Installing SecureBlue helpers"
-	@set -e; install -d "${DESTBIN}"
-	@set -e; for f in ${SECUREBLUE_SCRIPTS}; do base=$${f##*/}; name=$${base%.bash}; name=$${name%.pl}; printf '%s Installing %s -> %s\n' "${INFO}" "$$f" "${DESTBIN}/$$name"; install -m 0755 "$$f" "${DESTBIN}/$$name"; done
-	@set -e; if [ -d secureblue/systemd ]; then install -d -m 0755 "${DEST_SYSTEMD_USER}" || exit 1; for f in secureblue/systemd/*.service; do [ -f "$$f" ] || continue; printf '%s Installing %s -> %s\n' "${INFO}" "$$f" "${DEST_SYSTEMD_USER}/$${f##*/}"; install -m 0644 "$$f" "${DEST_SYSTEMD_USER}/$${f##*/}" || exit 1; done; fi
-	@set -e; wrapper="${DESTBIN}/sudo-wrapper"; if [ -x "$$wrapper" ]; then for link in sudo visudo sudoedit; do if [ -e "${DESTBIN}/$$link" ] && [ ! -L "${DESTBIN}/$$link" ]; then printf '%s ERROR: %s exists and is not a wrapper symlink; refusing to overwrite\n' "${INFO}" "${DESTBIN}/$$link" >&2; exit 1; fi; printf '%s Symlinking %s -> %s\n' "${INFO}" "${DESTBIN}/$$link" "$$wrapper"; ln -sf "$$wrapper" "${DESTBIN}/$$link"; done; fi; echo "${INFO} SecureBlue helpers installed"
+	@INFO='${INFO}' DESTBIN='${DESTBIN}' SECUREBLUE_SCRIPTS='${SECUREBLUE_SCRIPTS}' \
+		DEST_SYSTEMD_USER='${DEST_SYSTEMD_USER}' \
+		$(MANAGE) install-secureblue
 
 install-shell: install-shell-bash
-	@echo "${INFO} Shell helpers installed"
+	@INFO='${INFO}' $(MANAGE) install-shell
 
 install-shell-bash: install-shell-bash-copy
-	@echo "${INFO} Installing shell aliases for SecureBlue user '${SECUREBLUE_USER}'"
-	@echo "${INFO} SecureBlue shell aliases installed"
+	@INFO='${INFO}' SECUREBLUE_USER='${SECUREBLUE_USER}' \
+		$(MANAGE) install-shell-bash
 
 install-shell-bash-unlock:
-	@set -e; if ! command -v chattr >/dev/null 2>&1; then echo "${INFO} ERROR: chattr not found"; exit 1; fi
-	@set -e; if [ -e "${BASH_CONF_DST_DIR}" ]; then printf '%s Removing immutable attribute from %s\n' "${INFO}" "${BASH_CONF_DST_DIR}"; chattr -i "${BASH_CONF_DST_DIR}" 2>/dev/null || true; fi
-	@set -e; mkdir -p "${BASH_CONF_DST_DIR}"
+	@INFO='${INFO}' BASH_CONF_DST_DIR='${BASH_CONF_DST_DIR}' \
+		$(MANAGE) install-shell-bash-unlock
 
 install-shell-bash-copy: install-shell-bash-unlock
-	@set -e; trap 'status=$$?; trap - 0; printf "%s Restoring immutable attribute on %s\n" "${INFO}" "${BASH_CONF_DST_DIR}"; chattr +i "${BASH_CONF_DST_DIR}" || status=1; exit "$$status"' 0; for f in ${BASH_CONF_FILES}; do printf '%s Installing %s -> %s\n' "${INFO}" "$$f" "${BASH_CONF_DST_DIR}/$${f##*/}"; install -m 0644 "$$f" "${BASH_CONF_DST_DIR}/$${f##*/}"; done
+	@INFO='${INFO}' BASH_CONF_DST_DIR='${BASH_CONF_DST_DIR}' \
+		BASH_CONF_FILES='${BASH_CONF_FILES}' \
+		$(MANAGE) install-shell-bash-copy
 
 install-shell-openbsd:
-	@echo "${INFO} OpenBSD does not support chattr immutable flags like Linux."
-	@echo "${INFO} Copy shell/aliases.bash manually to your preferred shell profile location."
+	@INFO='${INFO}' $(MANAGE) install-shell-openbsd
 
 install-perl:
-	@echo "${INFO} Installing perl helpers"
-	@set -e; install -d "${DESTBIN}"
-	@set -e; programs=$$(grep -Ev '^[[:space:]]*(#|$$)' "${PERL_PROGRAMS_MANIFEST}") || exit 1; for name in $$programs; do src="perl/$$name"; base=$${src##*/}; out=$${base%.pl}; printf '%s Installing %s -> %s\n' "${INFO}" "$$src" "${DESTBIN}/$$out"; install -m 0755 "$$src" "${DESTBIN}/$$out"; install -m 0644 VERSION "${DESTBIN}/$$out.version"; done
-	@echo "${INFO} Perl helpers installed"
+	@INFO='${INFO}' DESTBIN='${DESTBIN}' \
+		PERL_PROGRAMS_MANIFEST='${PERL_PROGRAMS_MANIFEST}' \
+		$(MANAGE) install-perl
 
 install-tests-format:
-	@set -e; echo "${INFO} Installing Tests/Format scripts" && install -d "${DEST_TESTS_FORMAT}"
-	@set -e; for cfg in "tests-format/clang-format.yaml:clang-format-all" "tests-format/clang-tidy.yaml:clang-tidy-all" "tests-format/fourmolu-all.yaml:fourmolu-all"; do src=$${cfg%%:*}; dst=$${cfg##*:}; install -m 0644 "$$src" "${DEST_TESTS_FORMAT}/$$dst"; done
-	@set -e; for f in ${TESTS_FORMAT_SCRIPTS}; do base=$${f##*/}; name=$${base%.sh}; name=$${name%.pl}; printf '%s Installing %s -> %s\n' "${INFO}" "$$f" "${DEST_TESTS_FORMAT}/$$name"; install -m 0755 "$$f" "${DEST_TESTS_FORMAT}/$$name"; if [ "${TESTS_FORMAT_LINKS}" = "1" ]; then install -d "${DESTBIN}"; ln -sf "${DEST_TESTS_FORMAT}/$$name" "${DESTBIN}/$$name"; fi; done
-	@echo "${INFO} Tests/Format helpers installed in ${DEST_TESTS_FORMAT}"
+	@INFO='${INFO}' DESTBIN='${DESTBIN}' \
+		DEST_TESTS_FORMAT='${DEST_TESTS_FORMAT}' \
+		TESTS_FORMAT_LINKS='${TESTS_FORMAT_LINKS}' \
+		TESTS_FORMAT_SCRIPTS='${TESTS_FORMAT_SCRIPTS}' \
+		$(MANAGE) install-tests-format
 
 uninstall-debian:
-	@set -e; for f in ${DEBIAN_SCRIPTS}; do base=$${f##*/}; name=$${base%.bash}; name=$${name%.pl}; rm -f -- "${DESTBIN}/$$name"; done
-	@echo "${INFO} Debian helpers removed from ${DESTBIN}"
+	@INFO='${INFO}' DESTBIN='${DESTBIN}' DEBIAN_SCRIPTS='${DEBIAN_SCRIPTS}' \
+		$(MANAGE) uninstall-debian
 
 uninstall-openbsd:
-	@set -e; for f in ${OPENBSD_SCRIPTS}; do base=$${f##*/}; name=$${base%.ksh}; name=$${name%.pl}; rm -f -- "${DESTBIN}/$$name"; done
-	@set -e; for link in sudo visudo sudoedit; do if [ -L "${DESTBIN}/$$link" ]; then rm -f -- "${DESTBIN}/$$link"; fi; done
-	@echo "${INFO} OpenBSD helpers removed from ${DESTBIN}"
+	@INFO='${INFO}' DESTBIN='${DESTBIN}' OPENBSD_SCRIPTS='${OPENBSD_SCRIPTS}' \
+		$(MANAGE) uninstall-openbsd
 
 uninstall-secureblue:
-	@set -e; for f in ${SECUREBLUE_SCRIPTS}; do base=$${f##*/}; name=$${base%.bash}; name=$${name%.pl}; rm -f -- "${DESTBIN}/$$name"; done
-	@set -e; for f in secureblue/systemd/*.service; do [ -f "$$f" ] || continue; rm -f -- "${DEST_SYSTEMD_USER}/$${f##*/}"; done
-	@set -e; for link in sudo visudo sudoedit; do if [ -L "${DESTBIN}/$$link" ]; then rm -f -- "${DESTBIN}/$$link"; fi; done
-	@echo "${INFO} SecureBlue helpers and units removed"
+	@INFO='${INFO}' DESTBIN='${DESTBIN}' SECUREBLUE_SCRIPTS='${SECUREBLUE_SCRIPTS}' \
+		DEST_SYSTEMD_USER='${DEST_SYSTEMD_USER}' \
+		$(MANAGE) uninstall-secureblue
 
 uninstall-perl:
-	@set -e; programs=$$(grep -Ev '^[[:space:]]*(#|$$)' "${PERL_PROGRAMS_MANIFEST}") || exit 1; for name in $$programs; do base=$${name##*/}; out=$${base%.pl}; rm -f -- "${DESTBIN}/$$out" "${DESTBIN}/$$out.version"; done
-	@echo "${INFO} Perl helpers removed from ${DESTBIN}"
+	@INFO='${INFO}' DESTBIN='${DESTBIN}' \
+		PERL_PROGRAMS_MANIFEST='${PERL_PROGRAMS_MANIFEST}' \
+		$(MANAGE) uninstall-perl
 
 uninstall-tests-format:
-	@set -e; for f in ${TESTS_FORMAT_SCRIPTS}; do base=$${f##*/}; name=$${base%.sh}; name=$${name%.pl}; rm -f -- "${DEST_TESTS_FORMAT}/$$name"; if [ "${TESTS_FORMAT_LINKS}" = "1" ]; then rm -f -- "${DESTBIN}/$$name"; fi; done
-	@set -e; for cfg in clang-format-all clang-tidy-all fourmolu-all; do rm -f -- "${DEST_TESTS_FORMAT}/$$cfg"; done
-	@echo "${INFO} Tests/Format helpers removed"
+	@INFO='${INFO}' DESTBIN='${DESTBIN}' \
+		DEST_TESTS_FORMAT='${DEST_TESTS_FORMAT}' \
+		TESTS_FORMAT_LINKS='${TESTS_FORMAT_LINKS}' \
+		TESTS_FORMAT_SCRIPTS='${TESTS_FORMAT_SCRIPTS}' \
+		$(MANAGE) uninstall-tests-format
 
 uninstall-shell:
-	@set -e; if [ -e "${BASH_CONF_DST_DIR}" ]; then chattr -i "${BASH_CONF_DST_DIR}" 2>/dev/null || true; fi; for f in ${BASH_CONF_FILES}; do rm -f -- "${BASH_CONF_DST_DIR}/$${f##*/}"; done; if [ -d "${BASH_CONF_DST_DIR}" ]; then chattr +i "${BASH_CONF_DST_DIR}" 2>/dev/null || true; fi
-	@echo "${INFO} Shell helpers removed"
+	@INFO='${INFO}' BASH_CONF_DST_DIR='${BASH_CONF_DST_DIR}' \
+		BASH_CONF_FILES='${BASH_CONF_FILES}' \
+		$(MANAGE) uninstall-shell
 
 test: test-validate
 	@${MAKE} test-manpages
@@ -188,7 +184,7 @@ test: test-validate
 check: test-validate test-manpages
 
 format:
-	@status=0; for validator in shell perl make; do /bin/sh "tests-format/validate-$$validator.sh" --format . || status=1; done; exit "$$status"
+	@$(MANAGE) format
 
 test-validate: check-agent-knowledge test-agent-knowledge
 	@echo "Running shell script validation..." && /bin/sh tests-format/validate-shell.sh --check .
@@ -225,5 +221,14 @@ check-agent-knowledge:
 test-agent-knowledge:
 	@prove tests/agent_knowledge_validator/test_validator.pl
 
+HELP_ENV = INFO='${INFO}' PREFIX='${PREFIX}' DESTDIR='${DESTDIR}' \
+	BINDIR='${BINDIR}' DESTBIN='${DESTBIN}' \
+	SYSTEMD_USER_UNIT_DIR='${SYSTEMD_USER_UNIT_DIR}' \
+	DEST_SYSTEMD_USER='${DEST_SYSTEMD_USER}' \
+	TESTS_FORMAT_DIR='${TESTS_FORMAT_DIR}' \
+	DEST_TESTS_FORMAT='${DEST_TESTS_FORMAT}' \
+	TESTS_FORMAT_LINKS='${TESTS_FORMAT_LINKS}' \
+	BASH_CONF_DST_DIR='${BASH_CONF_DST_DIR}'
+
 help:
-	@printf "Usage: make [target]\n\nTargets:\n  all                      Install the OS-independent runtime helper (Perl only)\n  install-debian           Install Debian helper scripts into ${DESTBIN}\n  install-openbsd          Install OpenBSD helper scripts into ${DESTBIN}\n  install-secureblue       Install SecureBlue helpers into ${DESTBIN} and units into ${DEST_SYSTEMD_USER}\n  install-shell            Install SecureBlue Bash shell helpers\n  install-shell-bash       Install shell aliases into ${BASH_CONF_DST_DIR} (with chattr -i/+i)\n  install-shell-openbsd    Guidance for installing shell helpers on OpenBSD\n  install-perl             Install perl helper scripts into ${DESTBIN}\n  install-tests-format     Install developer validators/formatters into ${DEST_TESTS_FORMAT}\n  uninstall-debian         Remove Debian helpers from ${DESTBIN}\n  uninstall-openbsd        Remove OpenBSD helpers and wrapper links\n  uninstall-secureblue     Remove SecureBlue helpers and user units\n  uninstall-perl           Remove Perl helpers\n  uninstall-tests-format   Remove developer validators/formatters\n  uninstall-shell          Remove installed shell helpers\n  check                    Run validation without formatting or caches\n  format                   Apply formatters (reports drift as failure)\n  test                     Run checks and isolated regression tests\n  test-validate            Run only read-only validators\n  test-manpages            Run mandoc lint when mandoc is installed\n  test-regression          Run only the regression tests\n  test-tooling             Run validator/installer temporary-tree regressions\n  test-delivery            Run delivery/release transaction regressions\n  test-agent-knowledge     Run the agent-knowledge validator contract tests\n  fix-permissions          Correct file modes from file(1) content\n  check-permissions        Report wrong file modes (read-only, rc != 0)\n  check-agent-knowledge    Enforce agent/skills synchronization for repository changes\n  clean                    No-op clean target\n  help                     Show this help\n\nVariables: PREFIX=${PREFIX} DESTDIR=${DESTDIR} BINDIR=${BINDIR} SYSTEMD_USER_UNIT_DIR=${SYSTEMD_USER_UNIT_DIR} TESTS_FORMAT_DIR=${TESTS_FORMAT_DIR} TESTS_FORMAT_LINKS=${TESTS_FORMAT_LINKS}\n"
+	@${HELP_ENV} $(MANAGE) help

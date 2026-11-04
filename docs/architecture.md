@@ -12,6 +12,7 @@ are installed beside their caller when non-shell logic is needed.
 - `secureblue/`: Bash, `run0`, rpm-ostree, Homebrew, systemd user units;
 - `perl/`: portable Perl 5.10.1+ programs using core modules;
 - `windows/`: batch installers/launchers and PowerShell utilities;
+- `scripts/manage-install.sh`: POSIX install/uninstall/help/format logic used by the Makefile;
 - `tests-format/`: POSIX validators and formatters;
 - `tests/`: isolated regression suites;
 - `scripts/`: the standalone agent-knowledge validator;

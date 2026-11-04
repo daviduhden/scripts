@@ -70,7 +70,9 @@ make uninstall-secureblue
 Source scripts always carry an extension. Recipes use `install(1)` and strip
 source extensions (`.pl`, `.bash`, `.ksh`, `.sh`, and `.yaml` for
 bundled configs) when installing commands and helpers in `${DESTDIR}${BINDIR}`
-or `${DESTDIR}${TESTS_FORMAT_DIR}`. Windows scripts remain in `windows/` and are not installed by the POSIX targets. Developer validators and formatters are installed only with `make install-tests-format`, under `${DESTDIR}${TESTS_FORMAT_DIR}` (default `${PREFIX}/libexec/scripts`); set `TESTS_FORMAT_LINKS=1` to add compatibility symlinks in `BINDIR`. `make all` no longer installs them.
+or `${DESTDIR}${TESTS_FORMAT_DIR}`. The Makefile delegates install, uninstall,
+help, and format loops to `scripts/manage-install.sh`, so its recipes stay
+declarative and BSD make compatible. Windows scripts remain in `windows/` and are not installed by the POSIX targets. Developer validators and formatters are installed only with `make install-tests-format`, under `${DESTDIR}${TESTS_FORMAT_DIR}` (default `${PREFIX}/libexec/scripts`); set `TESTS_FORMAT_LINKS=1` to add compatibility symlinks in `BINDIR`. `make all` no longer installs them.
 
 ## Windows installation
 

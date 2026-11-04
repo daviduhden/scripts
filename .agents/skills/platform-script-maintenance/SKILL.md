@@ -54,6 +54,8 @@ GNU options, paths, privilege tools, and service commands. Do not add `sudo`,
 5. Honor `DESTDIR` in new install rules and add a matching `uninstall-*`
    target. Developer tools belong under `${PREFIX}/libexec/scripts`, units
    under `${PREFIX}/lib/systemd/user`, and runtime commands in `BINDIR`.
+   Keep Makefile recipes declarative; add install/uninstall/help/format logic
+   to `scripts/manage-install.sh` and pass lists/paths through the environment.
 
 6. Keep the target's conventions:
    - Bash: `set -euo pipefail`, quoted expansions, `main "$@"`.

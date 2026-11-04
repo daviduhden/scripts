@@ -70,7 +70,10 @@ runtime dependencies.
    - `make all` installs only the Perl runtime helper; use the explicit
      `install-tests-format` target for validators;
    - every install target has a matching `uninstall-*` target and honors
-     `DESTDIR`.
+     `DESTDIR`;
+   - install, uninstall, help, and format loops live in
+     `scripts/manage-install.sh`; keep new Makefile recipes declarative and
+     pass lists/paths through the environment.
 
 5. To add a validator:
    - write it as POSIX `sh` unless it needs Perl;

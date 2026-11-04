@@ -20,6 +20,9 @@
 - Make the permission gate ignore Git-ignored artifacts and fix tracked modes.
 - Give every source script a filename extension and strip it only on install;
   move inline interpreter logic into focused helper programs.
+- Move Makefile install, uninstall, help, and format loops into
+  `scripts/manage-install.sh`, keeping recipes declarative and BSD make
+  compatible.
 - Replace the embedded Perl mock in `tests/test_tooling.pl` with standalone
   fixtures under `tests/fixtures/`.
 

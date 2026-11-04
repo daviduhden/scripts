@@ -41,7 +41,7 @@ sub build_fixture {
     for my $name (
         qw(
         uname find sed grep mktemp rm sort wc tr awk dirname mkdir sh bash
-        perl
+        cat perl
         )
       )
     {
@@ -246,7 +246,12 @@ subtest 'install accepts destination with spaces' => sub {
     my $fixture = build_fixture();
     my $root    = "$fixture->{base}/installation";
     make_path($root);
-    write_file( "$root/Makefile",     slurp("$REPO/Makefile") );
+    write_file( "$root/Makefile", slurp("$REPO/Makefile") );
+    make_path("$root/scripts");
+    write_file(
+        "$root/scripts/manage-install.sh",
+        slurp("$REPO/scripts/manage-install.sh")
+    );
     write_file( "$root/fixture.bash", "#!/bin/bash\nexit 0\n" );
     my $install = find_command('install');
     ok( defined $install, 'install is installed' ) or return;
@@ -271,11 +276,46 @@ subtest 'install accepts destination with spaces' => sub {
         'installed name omits the source extension' );
 };
 
+subtest 'help renders from the install helper' => sub {
+    my $fixture = build_fixture();
+    my $root    = "$fixture->{base}/help";
+    make_path($root);
+    write_file( "$root/Makefile", slurp("$REPO/Makefile") );
+    make_path("$root/scripts");
+    write_file(
+        "$root/scripts/manage-install.sh",
+        slurp("$REPO/scripts/manage-install.sh")
+    );
+    my $make = find_command('make');
+    ok( defined $make, 'make is installed' ) or return;
+
+    my $result = run_command(
+        cmd     => [ $make, 'help' ],
+        cwd     => $root,
+        env     => $fixture->{env},
+        timeout => 30,
+    );
+    is( $result->{returncode}, 0, 'help succeeds' )
+      or diag $result->{stderr};
+    like(
+        $result->{stdout},
+        qr/Usage: make \[target\]/,
+        'usage line is present'
+    );
+    like( $result->{stdout}, qr/install-tests-format/,
+        'help lists install targets' );
+};
+
 subtest 'shell install restores attribute after copy failure' => sub {
     my $fixture = build_fixture();
     my $root    = "$fixture->{base}/shell-installation";
     make_path($root);
     write_file( "$root/Makefile", slurp("$REPO/Makefile") );
+    make_path("$root/scripts");
+    write_file(
+        "$root/scripts/manage-install.sh",
+        slurp("$REPO/scripts/manage-install.sh")
+    );
     my $destination = "$root/bash config";
     make_path($destination);
     my $marker = "$fixture->{base}/chattr-calls";
@@ -318,6 +358,11 @@ subtest 'install loop stops at first failure' => sub {
     my $root = "$fixture->{base}/installation";
     make_path($root);
     write_file( "$root/Makefile", slurp("$REPO/Makefile") );
+    make_path("$root/scripts");
+    write_file(
+        "$root/scripts/manage-install.sh",
+        slurp("$REPO/scripts/manage-install.sh")
+    );
     my $marker = "$fixture->{base}/late-install";
     write_file( "$fixture->{bin}/install",
             "#!/bin/sh\n"

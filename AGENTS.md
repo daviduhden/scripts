@@ -24,7 +24,7 @@ repository's scope, say so instead of inventing support.
 | `windows/` | Batch installers/launchers and PowerShell utilities; Windows-only. `test-format/` contains `psfmt` and its tests. |
 | `tests-format/` | POSIX `sh` validators/formatters, Perl agent-knowledge validation and regression tests, and the Windows batch validator. |
 | `tests/` | Perl regression harnesses and standalone mock programs under `tests/fixtures/`; test-only, not installed. |
-| `Makefile` | POSIX-sh install and test entry points; recipes must remain BSD make compatible. |
+| `Makefile` | Declarative POSIX-sh/BSD make entry points. Install, uninstall, help, and format logic lives in `scripts/manage-install.sh`; keep recipes short and pass paths/lists through the environment. |
 | `VERSION` | Installed version metadata (`1.0.0`). |
 
 `make all` installs only `install-perl`. Developer validators and formatters
