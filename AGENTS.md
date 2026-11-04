@@ -23,6 +23,7 @@ repository's scope, say so instead of inventing support.
 | `shell/` | Bash helpers that are sourced interactively; they target Linux/SecureBlue and are not standalone programs. |
 | `windows/` | Batch installers/launchers and PowerShell utilities; Windows-only. `test-format/` contains `psfmt` and its tests. |
 | `tests-format/` | POSIX `sh` validators/formatters, Perl agent-knowledge validation and regression tests, and the Windows batch validator. |
+| `tests/` | Perl regression harnesses and standalone mock programs under `tests/fixtures/`; test-only, not installed. |
 | `Makefile` | POSIX-sh install and test entry points; recipes must remain BSD make compatible. |
 | `VERSION` | Installed version metadata (`1.0.0`). |
 
@@ -65,7 +66,8 @@ and bundled configuration names omit `.yaml`.
   standalone Perl helper program. A helper must be installed by the relevant
   Makefile target and discovered relative to the invoking script. Existing
   examples are `scripts/release-verify.pl`, `debian/bootargs.pl`,
-  `secureblue/xerj-config.pl`, and `openbsd/rename-link.pl`.
+  `secureblue/xerj-config.pl`, and `openbsd/rename-link.pl`. Test doubles that
+  must be Perl programs belong in `tests/fixtures/`, not in a heredoc.
 - Do not write predictable temporary or log paths under `/tmp`; use
   `mktemp`, `umask 077`, and a cleanup trap where appropriate.
 

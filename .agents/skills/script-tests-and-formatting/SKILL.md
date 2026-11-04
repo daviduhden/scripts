@@ -101,6 +101,8 @@ runtime dependencies.
      entry points;
    - keep fixtures in a `mktemp` tree with trap cleanup in shell tests, or use
      `File::Temp` in Perl tests;
+   - store reusable mock programs as standalone files under `tests/fixtures/`
+     instead of embedding them in a heredoc;
    - do not access the network, the user's home, or system configuration;
    - add it to `test-regression` and document it in the relevant README.
    - website sync filter coverage lives in

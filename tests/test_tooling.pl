@@ -32,38 +32,6 @@ use TestHarness qw(
 
 my $REPO = repo_root();
 
-my $MOCK = <<'PERL';
-#!__PERL__
-use strict;
-use warnings;
-
-use File::Basename qw(basename);
-
-my $name = basename($0);
-my @args = @ARGV;
-exit 0 if $name =~ /\A(?:perlcritic|checkmake|bmake)\z/;
-
-my $path = $args[-1];
-open my $input, '<', $path or exit 1;
-local $/;
-my $text = <$input>;
-close $input;
-
-my $drift = index($text, "# UNFORMATTED\n") >= 0;
-my $checking
-    = grep { $_ eq '-l' || $_ eq '--check' || $_ eq '-ast' } @args;
-if ($checking) {
-    print "$path\n" if $drift && $name eq 'shfmt';
-    exit($drift && $name ne 'shfmt' ? 1 : 0);
-}
-
-$text =~ s/# UNFORMATTED\n//g;
-open my $output, '>', $path or exit 1;
-print {$output} $text;
-close $output;
-exit 0;
-PERL
-
 sub build_fixture {
     my $base = new_tempdir('tooling-tests-');
     my $bin  = "$base/bin";
@@ -88,14 +56,16 @@ sub build_fixture {
     chmod 0755, "$bin/uname" or die "cannot chmod uname mock: $!";
 
     my $perl = find_command('perl') // $^X;
-    my $mock = $MOCK;
+    my $mock = slurp("$REPO/tests/fixtures/mock-command.pl");
     $mock =~ s/__PERL__/$perl/;
     for my $name (qw(shfmt perltidy mbake perlcritic checkmake bmake)) {
         write_file( "$bin/$name", $mock );
         chmod 0755, "$bin/$name" or die "cannot chmod $name mock: $!";
     }
 
-    write_file( "$bin/checkbashisms", "#!$perl\nuse strict;\nexit 0;\n" );
+    my $checkbashisms = slurp("$REPO/tests/fixtures/mock-checkbashisms.pl");
+    $checkbashisms =~ s/__PERL__/$perl/;
+    write_file( "$bin/checkbashisms", $checkbashisms );
     chmod 0755, "$bin/checkbashisms"
       or die "cannot chmod checkbashisms mock: $!";
 

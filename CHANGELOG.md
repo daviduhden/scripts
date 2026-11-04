@@ -20,6 +20,8 @@
 - Make the permission gate ignore Git-ignored artifacts and fix tracked modes.
 - Give every source script a filename extension and strip it only on install;
   move inline interpreter logic into focused helper programs.
+- Replace the embedded Perl mock in `tests/test_tooling.pl` with standalone
+  fixtures under `tests/fixtures/`.
 
 ## 1.0.0
 
