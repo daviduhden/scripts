@@ -21,14 +21,13 @@ From this directory:
 `my-settings.psd1` is user-supplied; the repository does not bundle a
 PSScriptAnalyzer settings file.
 
-If the module is missing, the script attempts to install it from PSGallery with
-`Install-Module PSScriptAnalyzer -Scope CurrentUser -Repository PSGallery
--Force -Confirm:$false`. It does not update an existing module or change
-repository trust settings or the execution policy. Installation failures return
-code 1 and display the manual installation command. Help and version commands
-do not require the module. Automatic installation is the explicitly requested
-exception to avoiding configuration changes and uses the user's module
-directory rather than this project.
+Formatting uses **PSScriptAnalyzer 1.25.0** for reproducible output. By default,
+a missing pinned module produces an error without downloading or installing
+anything. Install it explicitly with
+`Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser`,
+or run `psfmt.ps1 -install-dependency -c .` to opt in to installation from
+PSGallery. Existing other versions are left intact; repository trust settings
+and execution policy are unchanged. Help and version need no module.
 
 ## Interface
 
@@ -42,6 +41,7 @@ directory rather than this project.
 | `-l` | Prints only absolute paths of files that would change. |
 | `-c` | Checks formatting silently for CI. |
 | `-r` | Explicit recursion; directories are already recursive by default. |
+| `-install-dependency` | Permit installation of the pinned analyzer when missing. |
 | `-settings file.psd1` | Validates settings and passes them to Invoke-Formatter; otherwise uses its defaults. |
 | `-exclude pattern` | Excludes names or paths; may be repeated. |
 | `-h`, `-help` | Displays syntax, options, exit codes, and examples. |
@@ -106,8 +106,8 @@ Invoke-ScriptAnalyzer -Path .\psfmt.ps1
 ```
 
 The runner uses PowerShell and .NET without Pester. It requires an
-already-installed PSScriptAnalyzer module. Formatting cases use the actual
-installed module. Automatic installation branches are simulated to avoid
+already-installed PSScriptAnalyzer 1.25.0 module. Formatting cases use the actual
+installed module. Explicit dependency installation branches are simulated to avoid
 installing or uninstalling modules during tests. Inputs are generated under
 `tests/work` and archived under
 `tests/vendor/work`, excluded by the wrapper and the root `.gitignore`.

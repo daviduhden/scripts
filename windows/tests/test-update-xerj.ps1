@@ -19,6 +19,7 @@ $originalConfig = $env:XDG_CONFIG_HOME
 $originalCodex = $env:CODEX_HOME
 $updater = Join-Path $PSScriptRoot '../update-xerj.ps1'
 $global:xerjTestBadDigest = $false
+$global:xerjTestDuplicate = $false
 $global:xerjTestCodexCalls = 0
 
 function Assert-True {
@@ -47,6 +48,7 @@ function Invoke-WebRequest {
             $entry = $zip.CreateEntry("$directory/xerj.exe")
             $writer = [IO.StreamWriter]::new($entry.Open())
             try { $writer.Write('fixture binary; never execute') } finally { $writer.Dispose() }
+            if ($global:xerjTestDuplicate) { $null = $zip.CreateEntry("$directory/xerj.exe") }
         }
         finally { $zip.Dispose() }
     }
@@ -83,6 +85,23 @@ try {
     Assert-True ((Get-Content -Raw $openConfig) -eq $before) 'Configuration changed after checksum failure'
     Assert-True ((Get-Content -Raw $binary) -eq 'fixture binary; never execute') 'Binary changed after checksum failure'
     $global:xerjTestBadDigest = $false
+    $global:xerjTestDuplicate = $true
+    & $updater -Version 'v1.2.3' -ErrorAction SilentlyContinue
+    Assert-True ($LASTEXITCODE -eq 1) 'Duplicate executable entry accepted'
+    Assert-True ((Get-Content -Raw $binary) -eq 'fixture binary; never execute') 'Binary changed after archive rejection'
+    $global:xerjTestDuplicate = $false
+    # Windows sharing semantics must be tested on Windows, not inferred from Unix.
+    if ([Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([Runtime.InteropServices.OSPlatform]::Windows)) {
+        $locked = [IO.File]::Open($binary, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+        try {
+            & $updater -Version 'v1.2.3' -ErrorAction SilentlyContinue
+            Assert-True ($LASTEXITCODE -eq 1) 'Locked destination update unexpectedly succeeded'
+        }
+        finally { $locked.Dispose() }
+        Assert-True ((Get-Content -Raw $binary) -eq 'fixture binary; never execute') 'Locked original damaged'
+    }
+    else { Write-Output 'SKIP: Windows file-sharing failure test requires Windows' }
+    Assert-True (@(Get-ChildItem -LiteralPath (Split-Path $binary) -Filter '.xerj-*.tmp').Count -eq 0) 'Abandoned binary staging files'
     Set-Content ([IO.Path]::ChangeExtension($openConfig, '.jsonc')) '// retain this file'
     & $updater -Version 'v1.2.3' -OpenCode -ErrorAction SilentlyContinue
     Assert-True ($LASTEXITCODE -eq 1) 'Ambiguous JSONC was accepted'
@@ -93,7 +112,7 @@ finally {
     $env:LOCALAPPDATA = $originalLocal
     $env:XDG_CONFIG_HOME = $originalConfig
     $env:CODEX_HOME = $originalCodex
-    Remove-Variable -Name xerjTestBadDigest, xerjTestCodexCalls -Scope Global
+    Remove-Variable -Name xerjTestBadDigest, xerjTestDuplicate, xerjTestCodexCalls -Scope Global
     $resolved = [IO.Path]::GetFullPath($testRoot)
     $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\', '/')
     if ((Split-Path $resolved) -eq $tempRoot -and (Split-Path $resolved -Leaf) -match '^xerj-tests-[a-f0-9]{32}$') {

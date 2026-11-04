@@ -2,7 +2,7 @@
 
 [run-tests.ps1](run-tests.ps1) exercises the formatter in
 [../psfmt.ps1](../psfmt.ps1). It requires PowerShell 7 and an installed
-PSScriptAnalyzer module. It uses PowerShell and .NET directly rather than Pester.
+PSScriptAnalyzer 1.25.0 module. It uses PowerShell and .NET directly rather than Pester.
 
 From the repository root:
 

@@ -5,6 +5,7 @@
 # full interface and byte-preservation rules.
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$script:PsfmtAnalyzerVersion = '1.25.0'
 # Set UTF-8 for console output while this script runs; the caller's setting is
 # restored in finally.
 $previousOutputEncoding = [Console]::OutputEncoding
@@ -20,6 +21,7 @@ Usage: psfmt.ps1 [options] [file|directory ...]
   -l                 Print only paths of files that would change.
   -c                 Check formatting for CI; do not write files.
   -r                 Recurse (directories are recursive by default).
+  -install-dependency Install the pinned analyzer if missing (explicit opt-in).
   -settings FILE     Pass a .psd1 settings file to Invoke-Formatter.
   -exclude PATTERN   Exclude a name or path glob; repeat to add patterns.
   -h, -help          Show this help.
@@ -34,7 +36,8 @@ Ignored directories: .git, .svn, .hg, node_modules, bin, obj, vendor.
 Reparse points, symlinks and junctions (including path ancestors) are skipped.
 Exclusions match names, absolute paths or paths relative to the working
 directory, with '/' separators. Globs are case-insensitive; '*' spans '/'.
-Missing PSScriptAnalyzer is installed with Install-Module -Scope CurrentUser.
+PSScriptAnalyzer 1.25.0 is required. Missing modules are never downloaded
+unless -install-dependency is supplied.
 
 Exit codes: 0 success; 1 usage/read/parse/format/write/dependency error;
             2 files need formatting in -c mode (errors take precedence).
@@ -82,6 +85,7 @@ function Get-PsfmtOption {
     $literal = $false
     $help = $false
     $version = $false
+    $installDependency = $false
     for ($index = 0; $index -lt $Arguments.Count; $index++) {
         $argument = [string] $Arguments[$index]
         if ($literal) { $paths.Add($argument); continue }
@@ -92,6 +96,7 @@ function Get-PsfmtOption {
                 $mode = $argument
             }
             '-r' { }
+            '-install-dependency' { $installDependency = $true }
             { $_ -in '-h', '-help' } { $help = $true }
             '-version' { $version = $true }
             { $_ -in '-settings', '-exclude' } {
@@ -114,24 +119,28 @@ function Get-PsfmtOption {
             }
         }
     }
-    [pscustomobject]@{ Mode = $mode; Paths = $paths; Exclusions = $exclusions; Settings = $settings; Help = $help; Version = $version }
+    [pscustomobject]@{ Mode = $mode; Paths = $paths; Exclusions = $exclusions; Settings = $settings; Help = $help; Version = $version; InstallDependency = $installDependency }
 }
 
 <#
 .SYNOPSIS
-    Imports PSScriptAnalyzer, installing it for the current user when missing.
+    Imports the pinned PSScriptAnalyzer, optionally installing it when requested.
 .NOTES
-    This is psfmt's only configuration and network side effect: a missing module
-    is installed from PSGallery with -Scope CurrentUser. Module messages go to
+    With explicit -install-dependency, a missing pinned module is installed
+    from PSGallery with -Scope CurrentUser. Default checks never install it. Module messages go to
     the diagnostic stream so formatted code on stdout stays clean. A failure
     rethrows after printing the manual installation command.
 #>
 function Initialize-PsfmtEngine {
+    param([switch] $InstallDependency)
     # Redirect every non-success stream: dependency notices must not contaminate code stdout.
-    if (@(Get-Module -ListAvailable -Name PSScriptAnalyzer).Count -eq 0) {
+    if (@(Get-Module -ListAvailable -Name PSScriptAnalyzer | Where-Object { $_.Version -eq [version]$script:PsfmtAnalyzerVersion }).Count -eq 0) {
+        if (-not $InstallDependency) {
+            throw "PSScriptAnalyzer $script:PsfmtAnalyzerVersion is required. Run with -install-dependency or install that version manually."
+        }
         Write-PsfmtDiagnostic 'PSScriptAnalyzer is missing; installing it for the current user.'
         try {
-            $messages = @(Install-Module PSScriptAnalyzer -Scope CurrentUser -Repository PSGallery -Force -Confirm:$false 3>&1 4>&1 5>&1 6>&1)
+            $messages = @(Install-Module PSScriptAnalyzer -RequiredVersion $script:PsfmtAnalyzerVersion -Scope CurrentUser -Repository PSGallery -Force -Confirm:$false 3>&1 4>&1 5>&1 6>&1)
             foreach ($message in $messages) { Write-PsfmtDiagnostic ([string] $message) }
         }
         catch {
@@ -139,7 +148,7 @@ function Initialize-PsfmtEngine {
             throw "Cannot install PSScriptAnalyzer: $($_.Exception.Message)"
         }
     }
-    $messages = @(Import-Module PSScriptAnalyzer -ErrorAction Stop 3>&1 4>&1 5>&1 6>&1)
+    $messages = @(Import-Module PSScriptAnalyzer -RequiredVersion $script:PsfmtAnalyzerVersion -ErrorAction Stop 3>&1 4>&1 5>&1 6>&1)
     foreach ($message in $messages) { Write-PsfmtDiagnostic ([string] $message) }
     $null = Get-Command PSScriptAnalyzer\Invoke-Formatter -ErrorAction Stop
 }
@@ -462,7 +471,7 @@ try {
         if ([IO.Directory]::Exists($singlePath)) { throw 'Directory arguments require -w, -d, -l or -c.' }
     }
     elseif ($options.Paths.Count -eq 0) { $options.Paths.Add('.') }
-    Initialize-PsfmtEngine
+    Initialize-PsfmtEngine -InstallDependency:$options.InstallDependency
     $settingsPath = $null
     if ($null -ne $options.Settings) {
         $settingsPath = [IO.Path]::GetFullPath($options.Settings, $basePath)

@@ -5,7 +5,7 @@
 # installation branches are simulated with mock functions.
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-Import-Module PSScriptAnalyzer -ErrorAction Stop
+Import-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -ErrorAction Stop
 
 $wrapper = [IO.Path]::GetFullPath([IO.Path]::Combine($PSScriptRoot, '..', 'psfmt.ps1'))
 # Generated cases live below vendor so a later `psfmt -w .` never formats
@@ -352,6 +352,10 @@ Invoke-Case 'read-only and locked files remain intact; other files continue' {
     finally { $stream.Dispose(); [IO.File]::SetAttributes($readOnly, [IO.FileAttributes]::Normal) }
 }
 Invoke-Case 'failed atomic replacement removes temporary and preserves original' {
+    if (-not $IsWindows) {
+        $skipped.Add('File locking replacement semantics are Windows-only')
+        return
+    }
     $path = New-Source 'replace-error/source.ps1'
     $before = Get-BytesKey $path
     $stream = [IO.File]::Open($path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
@@ -431,8 +435,8 @@ Invoke-Case 'automatic installation is scoped and failures are clear (mocked, no
     $entry = New-Source 'dependency/run.ps1' @'
 function Get-Module { param([switch] $ListAvailable, [string] $Name); return @() }
 function Install-Module {
-    param([string] $Name, [string] $Scope, [string] $Repository, [switch] $Force, [switch] $Confirm)
-    if ($Name -ne 'PSScriptAnalyzer' -or $Scope -ne 'CurrentUser' -or $Repository -ne 'PSGallery') { throw 'Incorrect installation arguments' }
+    param([string] $Name, [string] $Scope, [string] $Repository, [string] $RequiredVersion, [switch] $Force, [switch] $Confirm)
+    if ($Name -ne 'PSScriptAnalyzer' -or $Scope -ne 'CurrentUser' -or $Repository -ne 'PSGallery' -or $RequiredVersion -ne '1.25.0') { throw 'Incorrect installation arguments' }
     if ($env:PSFMT_TEST_FAIL -eq '1') { throw 'Simulated gallery failure' }
     Write-Warning 'Simulated installation notice'
 }
@@ -441,11 +445,14 @@ exit $LASTEXITCODE
 '@
     $path = New-Source 'dependency/input.ps1'
     $result = Invoke-Tool -Entry $entry -Arguments @($wrapper, $path)
+    Assert-Code $result 1
+    Assert-True ($result.Err.Contains('PSScriptAnalyzer 1.25.0 is required')) 'Missing module did not explain opt-in'
+    $result = Invoke-Tool -Entry $entry -Arguments @($wrapper, '-install-dependency', $path)
     Assert-Code $result 0
     Assert-True ($result.Out -ceq ($formatted + [Environment]::NewLine) -and $result.Err.Contains('Simulated installation notice')) 'Installation polluted stdout'
     $env:PSFMT_TEST_FAIL = '1'
     try {
-        $result = Invoke-Tool -Entry $entry -Arguments @($wrapper, $path)
+        $result = Invoke-Tool -Entry $entry -Arguments @($wrapper, '-install-dependency', $path)
         Assert-Code $result 1
         Assert-True ($result.Out -eq '' -and $result.Err.Contains('Install-Module PSScriptAnalyzer -Scope CurrentUser')) 'Installation error lacks recovery command'
     }

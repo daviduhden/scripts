@@ -189,29 +189,35 @@ if not exist "%INSTALL_DIR%\bin" (
 
 rem Keep the previous manifest so obsolete files we installed can be removed.
 set "OLD_MANIFEST=%TEMP%\nf_old_%RANDOM%%RANDOM%.txt"
+set "NEW_MANIFEST=%INSTALL_DIR%\installed-files.txt.new"
 if exist "%INSTALL_DIR%\installed-files.txt" copy /y "%INSTALL_DIR%\installed-files.txt" "%OLD_MANIFEST%" >nul 2>&1
 
-> "%INSTALL_DIR%\installed-files.txt" echo perl-path.txt
->> "%INSTALL_DIR%\installed-files.txt" echo installed-files.txt
->> "%INSTALL_DIR%\installed-files.txt" echo VERSION
+> "%NEW_MANIFEST%" echo perl-path.txt
+>> "%NEW_MANIFEST%" echo installed-files.txt
+>> "%NEW_MANIFEST%" echo VERSION
 
-> "%INSTALL_DIR%\perl-path.txt" echo %PERL_EXE%
+rem Write the interpreter path without letting cmd parse &, |, <, > or ^ in
+rem the path. Delayed expansion is local to this block.
+setlocal EnableDelayedExpansion
+> "%INSTALL_DIR%\perl-path.txt" echo(!PERL_EXE!
+endlocal
 if exist "%REPO%VERSION" copy /y "%REPO%VERSION" "%INSTALL_DIR%\VERSION" >nul 2>&1
 
 for %%N in (%PROGRAMS%) do call :install_one "%%N" "perl" "launcher.cmd"
 for %%N in (%PS_PROGRAMS%) do call :install_one "%%N" "windows" "powershell-launcher.cmd"
 if defined INSTALL_FAIL (
     echo [ERROR] one or more files could not be installed.
+    if exist "%NEW_MANIFEST%" del /f /q "%NEW_MANIFEST%" >nul 2>&1
+    exit /b 2
+)
+move /y "%NEW_MANIFEST%" "%INSTALL_DIR%\installed-files.txt" >nul
+if errorlevel 1 (
+    echo [ERROR] cannot publish installed-files.txt
     exit /b 2
 )
 
 if exist "%OLD_MANIFEST%" call :cleanup_obsolete "%OLD_MANIFEST%"
 if exist "%OLD_MANIFEST%" del /f /q "%OLD_MANIFEST%" >nul 2>&1
-
-rem --------------------------------------------------------------------
-rem User PATH (HKCU\Environment\Path only, idempotent)
-rem --------------------------------------------------------------------
-if "%OPT_PATH%"=="1" call :update_user_path
 
 rem --------------------------------------------------------------------
 rem Post-install verification
@@ -223,6 +229,13 @@ if defined VERIFY_FAIL (
     echo.
     echo [ERROR] post-install verification failed.
     exit /b 2
+)
+
+rem --------------------------------------------------------------------
+rem User PATH (HKCU\Environment\Path only, idempotent). Do this only after a
+rem successful verification so a broken install is not added to PATH.
+rem --------------------------------------------------------------------
+if "%OPT_PATH%"=="1" call :update_user_path
 )
 
 rem --------------------------------------------------------------------
@@ -449,8 +462,8 @@ if errorlevel 1 (
     set "INSTALL_FAIL=1"
     exit /b 0
 )
->> "%INSTALL_DIR%\installed-files.txt" echo %SCRIPT_FOLDER%\%NAME%
->> "%INSTALL_DIR%\installed-files.txt" echo bin\%LNAME%.cmd
+>> "%NEW_MANIFEST%" echo %SCRIPT_FOLDER%\%NAME%
+>> "%NEW_MANIFEST%" echo bin\%LNAME%.cmd
 exit /b 0
 
 rem Walk the previous installed-files.txt and delete entries that this version no
@@ -519,6 +532,17 @@ rem forwarding and exit status.
 call :verify_launcher "normalize-files"
 for %%N in (%PROGRAMS%) do call :verify_script "%%N"
 for %%N in (%PS_PROGRAMS%) do call :verify_ps_script "%%N"
+where pwsh >nul 2>&1
+if not errorlevel 1 (
+    pwsh -NoProfile -File "%INSTALL_DIR%\windows\psfmt.ps1" -version >nul 2>&1
+    if errorlevel 1 (
+        echo [WARN] psfmt.ps1 did not run under pwsh; check the execution policy.
+    ) else (
+        echo   OK   psfmt.ps1 -Version
+    )
+) else (
+    echo [WARN] pwsh not found; psfmt requires PowerShell 7 at runtime.
+)
 exit /b 0
 
 rem Parse the installed PowerShell script without executing it.

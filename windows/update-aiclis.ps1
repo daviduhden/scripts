@@ -3,10 +3,11 @@
 # Codex CLI, OpenCode CLI/TUI and Bun installer and updater for Windows.
 # - Installs and updates Codex and OpenCode for the current user (no admin).
 # - Bun: installs or updates the Oven-sh.Bun package through winget.
-# - OpenCode: standalone binary downloaded from opencode.ai.
+# - OpenCode: GitHub release binary verified against the published SHA-256 digest.
 # - Codex: GitHub release zip with the three binaries plus codex-code-mode-host.
 # - Keeps versioned copies and prepends the local folders to the user PATH.
-# - Repairs PATH and adds PowerShell wrappers: codex --yolo, opencode --auto.
+# - Repairs PATH. PowerShell wrappers (codex --yolo, opencode --auto) are
+#   opt-in with -Wrappers.
 # - Leaves winget installations untouched unless -RemoveWinget is given.
 #
 # Parameters:
@@ -17,6 +18,8 @@
 # -Check                        Show installed and available versions, change nothing.
 # -RemoveWinget                 Uninstall the winget copies of Codex and OpenCode;
 #                               Bun is installed through winget and is left in place.
+# -Wrappers                     Install profile functions that add --yolo/--auto.
+#                               Off by default.
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
@@ -34,7 +37,9 @@ param(
 
     [switch]$Check,
 
-    [switch]$RemoveWinget
+    [switch]$RemoveWinget,
+
+    [switch]$Wrappers
 )
 
 Set-StrictMode -Version Latest
@@ -57,7 +62,7 @@ $script:CodexRoot       = Join-Path (Join-Path (Join-Path $env:LOCALAPPDATA 'Pro
 $script:CodexBin        = Join-Path $script:CodexRoot 'bin'
 $script:CodexVersions   = Join-Path $script:CodexRoot 'versions'
 $script:CodexExe        = Join-Path $script:CodexBin 'codex.exe'
-$script:OpenCodeMetaUrl = 'https://opencode.ai/update/api/latest/cli/npm'
+$script:OpenCodeMetaUrl = 'https://api.github.com/repos/anomalyco/opencode/releases/latest'
 $script:CodexLatestApi  = 'https://api.github.com/repos/openai/codex/releases/latest'
 $script:PathChanged     = $false
 $script:HadError        = $false
@@ -275,7 +280,24 @@ function Set-CliWrapper {
     $body = "& $Name.exe $DefaultArgument @args"
     $block = "$start`r`nfunction global:$Name { $body }`r`n$end"
     $profilePath = $PROFILE.CurrentUserAllHosts
-    $content = if (Test-Path -LiteralPath $profilePath) { [IO.File]::ReadAllText($profilePath) } else { '' }
+    $encoding = [Text.UTF8Encoding]::new($false)
+    $content = ''
+    if (Test-Path -LiteralPath $profilePath) {
+        $bytes = [IO.File]::ReadAllBytes($profilePath)
+        if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
+            $encoding = [Text.UTF8Encoding]::new($true)
+        }
+        elseif ($bytes.Length -ge 2 -and $bytes[0] -eq 0xFF -and $bytes[1] -eq 0xFE) {
+            $encoding = [Text.UnicodeEncoding]::new($false, $true)
+        }
+        elseif ($bytes.Length -ge 2 -and $bytes[0] -eq 0xFE -and $bytes[1] -eq 0xFF) {
+            $encoding = [Text.UnicodeEncoding]::new($true, $true)
+        }
+        $content = $encoding.GetString($bytes)
+        if ($encoding.GetPreamble().Length -gt 0) {
+            $content = $content.TrimStart([char]0xFEFF)
+        }
+    }
     $pattern = '(?ms)^' + [regex]::Escape($start) + '\r?\n.*?^' + [regex]::Escape($end) + '(?=\r?$)'
     if ([regex]::IsMatch($content, $pattern)) {
         $updated = [regex]::Replace($content, $pattern, [System.Text.RegularExpressions.MatchEvaluator]{ param($match) $block })
@@ -284,7 +306,18 @@ function Set-CliWrapper {
     }
     if ($updated -cne $content) {
         New-Item -ItemType Directory -Path (Split-Path -Parent $profilePath) -Force | Out-Null
-        [IO.File]::WriteAllText($profilePath, $updated, [Text.UTF8Encoding]::new($true))
+        $temporary = "$profilePath.$([guid]::NewGuid().ToString('N')).tmp"
+        try {
+            [IO.File]::WriteAllText($temporary, $updated, $encoding)
+            if (Test-Path -LiteralPath $profilePath) {
+                [IO.File]::Replace($temporary, $profilePath,
+                    "$profilePath.bak.$([guid]::NewGuid().ToString('N'))")
+            }
+            else { [IO.File]::Move($temporary, $profilePath) }
+        }
+        finally {
+            if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary }
+        }
         Write-Info "PowerShell profile updated: $Name $DefaultArgument ($profilePath)"
     }
     Set-Item -Path "Function:global:$Name" -Value ([scriptblock]::Create($body))
@@ -368,39 +401,37 @@ function Get-RemoteText {
 .PARAMETER TargetExe
     Active executable to replace.
 .NOTES
-    Renames the existing target to a timestamped .old-* file, copies the source,
-    and then deletes the backup. If the copy fails, restores the backup when
-    possible and rethrows. A target that cannot be renamed is overwritten in
-    place by Copy-Item -Force.
+    Copies to a unique same-directory file, verifies the copy, then activates
+    with File.Replace (or File.Move for a new target). Locked targets fail
+    without an in-place overwrite. Recovery copies survive failed activation.
 #>
 function Set-CurrentExe {
     param([string]$SourceExe, [string]$TargetExe)
-
-    $stamp = [DateTime]::Now.ToString('yyyyMMddHHmmss')
-    $oldExe = "$TargetExe.old-$stamp"
-    $moved = $false
-
-    if (Test-Path -LiteralPath $TargetExe) {
-        try {
-            Move-Item -LiteralPath $TargetExe -Destination $oldExe -Force
-            $moved = $true
-        } catch {
-            # If it cannot be moved (for example, because it is locked), we try to overwrite it.
-        }
-    }
-
+    $pending = "$TargetExe.pending-$([guid]::NewGuid().ToString('N'))"
+    $oldExe = "$TargetExe.old-$([guid]::NewGuid().ToString('N'))"
     try {
-        Copy-Item -LiteralPath $SourceExe -Destination $TargetExe -Force
-    } catch {
-        if ($moved -and -not (Test-Path -LiteralPath $TargetExe)) {
-            Move-Item -LiteralPath $oldExe -Destination $TargetExe -Force
+        [IO.File]::Copy($SourceExe, $pending, $false)
+        if ((Get-FileHash -LiteralPath $SourceExe -Algorithm SHA256).Hash -ne
+            (Get-FileHash -LiteralPath $pending -Algorithm SHA256).Hash) {
+            throw 'Executable staging verification failed.'
         }
+        if (Test-Path -LiteralPath $TargetExe) {
+            $item = Get-Item -LiteralPath $TargetExe -Force
+            if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+                throw "Refusing nonregular executable destination: $TargetExe"
+            }
+            [IO.File]::Replace($pending, $TargetExe, $oldExe)
+        }
+        else { [IO.File]::Move($pending, $TargetExe) }
+    }
+    catch {
+        if (Test-Path -LiteralPath $oldExe) { Write-Warn "Recovery copy retained: $oldExe" }
         throw
     }
-
-    if ($moved) {
-        Remove-Item -LiteralPath $oldExe -Force -ErrorAction SilentlyContinue
+    finally {
+        if (Test-Path -LiteralPath $pending) { Remove-Item -LiteralPath $pending }
     }
+    if (Test-Path -LiteralPath $oldExe) { Remove-Item -LiteralPath $oldExe }
 }
 
 # ---------------------------------------------------------------------------
@@ -415,10 +446,10 @@ function Set-CurrentExe {
 function Get-OpenCodeLatestVersion {
     $raw = Get-RemoteText -Uri $script:OpenCodeMetaUrl
     $meta = $raw | ConvertFrom-Json
-    if ([string]::IsNullOrWhiteSpace($meta.version)) {
+    if ([string]::IsNullOrWhiteSpace($meta.tag_name)) {
         throw 'Could not resolve the latest OpenCode version.'
     }
-    return (Normalize-Version $meta.version)
+    return (Normalize-Version $meta.tag_name)
 }
 
 <#
@@ -457,7 +488,7 @@ function Remove-OldOpenCodeVersions {
     -Check only reports installed and available versions. A normal run downloads
     and extracts a temporary zip, stores the binary under versions\<version>,
     points bin\opencode.exe at it, verifies the reported version, and prunes old
-    version directories. Downloads and version strings come from opencode.ai.
+    version directories. Downloads and version strings come from the official GitHub release metadata.
 #>
 function Install-OpenCode {
     param([string]$Version)
@@ -486,8 +517,20 @@ function Install-OpenCode {
         return
     }
 
+    if ($version -cnotmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$') {
+        throw 'Invalid OpenCode release version.'
+    }
     $asset = "opencode-windows-$platform.zip"
-    $url = "https://opencode.ai/files/bin/$version/$asset"
+    $release = (Get-RemoteText -Uri "https://api.github.com/repos/anomalyco/opencode/releases/tags/v$version") | ConvertFrom-Json
+    $assets = @($release.assets | Where-Object { $_.name -ceq $asset })
+    if ($assets.Count -ne 1 -or $assets[0].digest -cnotmatch '^sha256:[0-9a-f]{64}$') {
+        throw 'Expected one OpenCode release asset with a published SHA-256 digest.'
+    }
+    $url = [string]$assets[0].browser_download_url
+    if (-not $url.StartsWith('https://github.com/anomalyco/opencode/releases/download/', [StringComparison]::Ordinal)) {
+        throw 'Unexpected OpenCode release URL.'
+    }
+    $expectedDigest = $assets[0].digest.Substring(7)
     $versionsDir = Join-Path $script:OpenCodeRoot 'versions'
     $versionDir = Join-Path $versionsDir $version
     $versionExe = Join-Path $versionDir 'opencode.exe'
@@ -500,18 +543,32 @@ function Install-OpenCode {
             Write-Info "OpenCode: downloading $version ($platform)"
             Invoke-Download -Uri $url -OutFile $zip
 
-            $extractDir = Join-Path $tempRoot 'extract'
-            Write-Info 'OpenCode: extracting'
-            Expand-Archive -LiteralPath $zip -DestinationPath $extractDir -Force
-
-            $found = Get-ChildItem -LiteralPath $extractDir -Recurse -Filter 'opencode.exe' |
-                Select-Object -First 1
-            if ($null -eq $found) {
-                throw 'The downloaded package does not contain opencode.exe.'
+            if ((Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expectedDigest) {
+                throw 'OpenCode release SHA-256 mismatch.'
             }
-
-            New-Item -ItemType Directory -Force -Path $versionDir | Out-Null
-            Copy-Item -LiteralPath $found.FullName -Destination $versionExe -Force
+            Add-Type -AssemblyName System.IO.Compression.FileSystem
+            $archive = [IO.Compression.ZipFile]::OpenRead($zip)
+            try {
+                $entries = @($archive.Entries | Where-Object { $_.FullName -ceq 'opencode.exe' })
+                if ($entries.Count -ne 1 -or $entries[0].Length -le 0 -or
+                    $entries[0].Length -gt 1073741824 -or
+                    (($entries[0].ExternalAttributes -shr 16) -band 0xF000) -eq 0xA000) {
+                    throw 'Expected exactly one regular opencode.exe entry.'
+                }
+                New-Item -ItemType Directory -Force -Path $versionDir | Out-Null
+                $pending = Join-Path $versionDir ('.opencode-' + [guid]::NewGuid().ToString('N') + '.tmp')
+                try {
+                    [IO.Compression.ZipFileExtensions]::ExtractToFile($entries[0], $pending)
+                    if (Test-Path -LiteralPath $versionExe) {
+                        [IO.File]::Replace($pending, $versionExe, "$versionExe.bak.$([guid]::NewGuid().ToString('N'))")
+                    }
+                    else { [IO.File]::Move($pending, $versionExe) }
+                }
+                finally {
+                    if (Test-Path -LiteralPath $pending) { Remove-Item -LiteralPath $pending }
+                }
+            }
+            finally { $archive.Dispose() }
         } finally {
             Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
         }
@@ -679,6 +736,9 @@ function Install-Codex {
     $target = Get-CodexTarget
     $version = Normalize-Version $Version
     if ([string]::IsNullOrWhiteSpace($version)) { $version = Get-CodexLatestVersion }
+    if ($version -cnotmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$') {
+        throw 'Invalid Codex release version.'
+    }
 
     $installed = Get-ExeVersion -ExePath $script:CodexExe
     $versionDir = Join-Path $script:CodexVersions $version
@@ -699,7 +759,17 @@ function Install-Codex {
 
     if (-not (Test-Path -LiteralPath $versionExe) -or $Force) {
         $asset = "codex-$target.exe.zip"
-        $url = "https://github.com/openai/codex/releases/download/rust-v$version/$asset"
+        $api = "https://api.github.com/repos/openai/codex/releases/tags/rust-v$version"
+        $release = (Get-RemoteText -Uri $api) | ConvertFrom-Json
+        $assets = @($release.assets | Where-Object { $_.name -ceq $asset })
+        if ($assets.Count -ne 1 -or $assets[0].digest -cnotmatch '^sha256:[0-9a-f]{64}$') {
+            throw 'Expected one Codex release asset with a published SHA-256 digest.'
+        }
+        $url = [string]$assets[0].browser_download_url
+        if (-not $url.StartsWith('https://github.com/openai/codex/releases/download/', [StringComparison]::Ordinal)) {
+            throw 'Unexpected Codex release URL.'
+        }
+        $expectedDigest = $assets[0].digest.Substring(7)
 
         $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ("codex-install-" + [Guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
@@ -707,26 +777,42 @@ function Install-Codex {
             $zip = Join-Path $tempRoot $asset
             Write-Info "Codex: downloading $version ($target)"
             Invoke-Download -Uri $url -OutFile $zip
-
-            $extractDir = Join-Path $tempRoot 'extract'
-            Write-Info 'Codex: extracting'
-            Expand-Archive -LiteralPath $zip -DestinationPath $extractDir -Force
-
-            $files = @(Get-ChildItem -LiteralPath $extractDir -Recurse -File)
-            $main = $files | Where-Object { $_.Name -ieq "codex-$target.exe" } | Select-Object -First 1
-            $runner = $files | Where-Object { $_.Name -ieq 'codex-command-runner.exe' } | Select-Object -First 1
-            $sandbox = $files | Where-Object { $_.Name -ieq 'codex-windows-sandbox-setup.exe' } | Select-Object -First 1
-
-            if ($null -eq $main -or $null -eq $runner -or $null -eq $sandbox) {
-                throw 'The zip does not contain the expected three binaries (codex, codex-command-runner, and codex-windows-sandbox-setup).'
+            if ((Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expectedDigest) {
+                throw 'Codex release SHA-256 mismatch.'
             }
 
             New-Item -ItemType Directory -Force -Path $binDir | Out-Null
             New-Item -ItemType Directory -Force -Path $resourcesDir | Out-Null
-
-            Copy-Item -LiteralPath $main.FullName -Destination (Join-Path $binDir 'codex.exe') -Force
-            Copy-Item -LiteralPath $runner.FullName -Destination (Join-Path $resourcesDir 'codex-command-runner.exe') -Force
-            Copy-Item -LiteralPath $sandbox.FullName -Destination (Join-Path $resourcesDir 'codex-windows-sandbox-setup.exe') -Force
+            $entries = @(
+                @{ Name = "codex-$target.exe"; Destination = (Join-Path $binDir 'codex.exe') },
+                @{ Name = 'codex-command-runner.exe'; Destination = (Join-Path $resourcesDir 'codex-command-runner.exe') },
+                @{ Name = 'codex-windows-sandbox-setup.exe'; Destination = (Join-Path $resourcesDir 'codex-windows-sandbox-setup.exe') }
+            )
+            Add-Type -AssemblyName System.IO.Compression.FileSystem
+            $archive = [IO.Compression.ZipFile]::OpenRead($zip)
+            try {
+                foreach ($wanted in $entries) {
+                    $entryMatches = @($archive.Entries | Where-Object { $_.Name -ceq $wanted.Name })
+                    if ($entryMatches.Count -ne 1 -or $entryMatches[0].Length -le 0 -or
+                        $entryMatches[0].Length -gt 536870912 -or
+                        (($entryMatches[0].ExternalAttributes -shr 16) -band 0xF000) -eq 0xA000) {
+                        throw "Expected exactly one regular $($wanted.Name) entry."
+                    }
+                    $pending = Join-Path (Split-Path -Parent $wanted.Destination) ('.' + [guid]::NewGuid().ToString('N') + '.tmp')
+                    try {
+                        [IO.Compression.ZipFileExtensions]::ExtractToFile($entryMatches[0], $pending)
+                        if (Test-Path -LiteralPath $wanted.Destination) {
+                            [IO.File]::Replace($pending, $wanted.Destination,
+                                "$($wanted.Destination).bak.$([guid]::NewGuid().ToString('N'))")
+                        }
+                        else { [IO.File]::Move($pending, $wanted.Destination) }
+                    }
+                    finally {
+                        if (Test-Path -LiteralPath $pending) { Remove-Item -LiteralPath $pending }
+                    }
+                }
+            }
+            finally { $archive.Dispose() }
 
             # Manifest using the same format as the official package.
             [ordered]@{
@@ -755,7 +841,16 @@ function Install-Codex {
     if (-not (Test-Path -LiteralPath $codeModeHostExe) -or $Force) {
         try {
             $hostAsset = "codex-code-mode-host-$target.exe.zip"
-            $hostUrl = "https://github.com/openai/codex/releases/download/rust-v$version/$hostAsset"
+            $hostApi = "https://api.github.com/repos/openai/codex/releases/tags/rust-v$version"
+            $hostRelease = (Get-RemoteText -Uri $hostApi) | ConvertFrom-Json
+            $hostAssets = @($hostRelease.assets | Where-Object { $_.name -ceq $hostAsset })
+            if ($hostAssets.Count -ne 1 -or $hostAssets[0].digest -cnotmatch '^sha256:[0-9a-f]{64}$') {
+                throw 'Expected one code-mode host asset with a published SHA-256 digest.'
+            }
+            $hostUrl = [string]$hostAssets[0].browser_download_url
+            if (-not $hostUrl.StartsWith('https://github.com/openai/codex/releases/download/', [StringComparison]::Ordinal)) {
+                throw 'Unexpected code-mode host URL.'
+            }
 
             $hostTemp = Join-Path ([IO.Path]::GetTempPath()) ("codex-code-mode-host-" + [Guid]::NewGuid().ToString('N'))
             New-Item -ItemType Directory -Force -Path $hostTemp | Out-Null
@@ -763,20 +858,34 @@ function Install-Codex {
                 $hostZip = Join-Path $hostTemp $hostAsset
                 Write-Info "Codex: downloading $hostAsset"
                 Invoke-Download -Uri $hostUrl -OutFile $hostZip
-
-                $hostExtract = Join-Path $hostTemp 'extract'
-                Write-Info 'Codex: extracting'
-                Expand-Archive -LiteralPath $hostZip -DestinationPath $hostExtract -Force
-
-                $hostExe = Get-ChildItem -LiteralPath $hostExtract -Recurse -File |
-                    Where-Object { $_.Name -ieq "codex-code-mode-host-$target.exe" } |
-                    Select-Object -First 1
-                if ($null -eq $hostExe) {
-                    throw "$hostAsset does not contain codex-code-mode-host-$target.exe."
+                if ((Get-FileHash -LiteralPath $hostZip -Algorithm SHA256).Hash.ToLowerInvariant() -cne $hostAssets[0].digest.Substring(7)) {
+                    throw 'Code-mode host SHA-256 mismatch.'
                 }
 
-                New-Item -ItemType Directory -Force -Path $binDir | Out-Null
-                Copy-Item -LiteralPath $hostExe.FullName -Destination $codeModeHostExe -Force
+                Add-Type -AssemblyName System.IO.Compression.FileSystem
+                $hostArchive = [IO.Compression.ZipFile]::OpenRead($hostZip)
+                try {
+                    $hostEntries = @($hostArchive.Entries | Where-Object { $_.Name -ceq "codex-code-mode-host-$target.exe" })
+                    if ($hostEntries.Count -ne 1 -or $hostEntries[0].Length -le 0 -or
+                        $hostEntries[0].Length -gt 536870912 -or
+                        (($hostEntries[0].ExternalAttributes -shr 16) -band 0xF000) -eq 0xA000) {
+                        throw "$hostAsset does not contain exactly one regular code-mode host."
+                    }
+                    New-Item -ItemType Directory -Force -Path $binDir | Out-Null
+                    $hostPending = Join-Path $binDir ('.codex-host-' + [guid]::NewGuid().ToString('N') + '.tmp')
+                    try {
+                        [IO.Compression.ZipFileExtensions]::ExtractToFile($hostEntries[0], $hostPending)
+                        if (Test-Path -LiteralPath $codeModeHostExe) {
+                            [IO.File]::Replace($hostPending, $codeModeHostExe,
+                                "$codeModeHostExe.bak.$([guid]::NewGuid().ToString('N'))")
+                        }
+                        else { [IO.File]::Move($hostPending, $codeModeHostExe) }
+                    }
+                    finally {
+                        if (Test-Path -LiteralPath $hostPending) { Remove-Item -LiteralPath $hostPending }
+                    }
+                }
+                finally { $hostArchive.Dispose() }
             } finally {
                 Remove-Item -LiteralPath $hostTemp -Recurse -Force -ErrorAction SilentlyContinue
             }
@@ -919,7 +1028,8 @@ foreach ($cli in @(
     if (-not $cli.Enabled) { continue }
     try {
         if ($cli.Name -eq 'bun') { $cli.ExePath = Find-BunExe }
-        Repair-CliEnvironment -Name $cli.Name -ExePath $cli.ExePath -DefaultArgument $cli.DefaultArgument
+        $defaultArgument = if ($Wrappers) { $cli.DefaultArgument } else { '' }
+        Repair-CliEnvironment -Name $cli.Name -ExePath $cli.ExePath -DefaultArgument $defaultArgument
     } catch { Write-Fail "$($cli.Name): environment setup failed: $($_.Exception.Message)"; $script:HadError = $true }
 }
 

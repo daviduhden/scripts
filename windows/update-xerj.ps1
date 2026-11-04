@@ -38,16 +38,38 @@ function Write-Fail {
     Write-Information "[ERROR] $Message" -InformationAction Continue
 }
 
+# Both paths must be in the destination directory. File.Replace preserves the
+# old destination if a locked executable or another failure prevents activation.
+function Complete-FileReplacement {
+    param([string]$Pending, [string]$Path)
+    if (Test-Path -LiteralPath $Path) {
+        $item = Get-Item -LiteralPath $Path -Force
+        if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw "Refusing to replace a directory or reparse point: $Path"
+        }
+        $backup = "$Path.bak.$([guid]::NewGuid().ToString('N'))"
+        try {
+            [IO.File]::Replace($Pending, $Path, $backup)
+        }
+        catch {
+            if (Test-Path -LiteralPath $backup) { Write-Info "Recovery copy retained at $backup" }
+            throw
+        }
+        # Keep the recovery copy: callers can recover the prior version/config.
+        Write-Info "Previous file retained at $backup"
+    }
+    else {
+        [IO.File]::Move($Pending, $Path)
+    }
+}
+
 function Save-Config {
     param([string]$Path, [string]$Text)
     $null = New-Item -ItemType Directory -Force -Path (Split-Path $Path)
-    if (Test-Path -LiteralPath $Path) {
-        Copy-Item -LiteralPath $Path -Destination "$Path.bak.$([guid]::NewGuid().ToString('N'))"
-    }
     $temporary = "$Path.$([guid]::NewGuid().ToString('N')).tmp"
     try {
         [IO.File]::WriteAllText($temporary, $Text, [Text.UTF8Encoding]::new($false))
-        Move-Item -LiteralPath $temporary -Destination $Path -Force
+        Complete-FileReplacement $temporary $Path
     }
     finally {
         if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary }
@@ -94,14 +116,25 @@ try {
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $zip = [IO.Compression.ZipFile]::OpenRead($archive)
     try {
-        $entry = $zip.GetEntry("$($asset.Substring(0, $asset.Length - 4))/xerj.exe")
-        if (-not $entry) { throw 'Expected xerj.exe missing from release.' }
+        $expected = "$($asset.Substring(0, $asset.Length - 4))/xerj.exe"
+        $entries = @($zip.Entries | Where-Object { $_.FullName -ceq $expected })
+        if ($entries.Count -ne 1) { throw 'Expected exactly one xerj.exe in release.' }
+        $entry = $entries[0]
+        if ($entry.Length -le 0 -or $entry.Length -gt 536870912 -or
+            (($entry.ExternalAttributes -shr 16) -band 0xF000) -eq 0xA000) {
+            throw 'Invalid executable entry in release.'
+        }
         $root = Join-Path $env:LOCALAPPDATA 'Programs/xerj'
         $null = New-Item -ItemType Directory -Force -Path $root
         $binary = Join-Path $root 'xerj.exe'
-        $pending = Join-Path $stage 'xerj.exe'
-        [IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $pending)
-        Copy-Item -LiteralPath $pending -Destination $binary -Force
+        $pending = Join-Path $root ('.xerj-' + [guid]::NewGuid().ToString('N') + '.tmp')
+        try {
+            [IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $pending)
+            Complete-FileReplacement $pending $binary
+        }
+        finally {
+            if (Test-Path -LiteralPath $pending) { Remove-Item -LiteralPath $pending }
+        }
     }
     finally { $zip.Dispose() }
     Write-Info "Installed $tag at $binary"

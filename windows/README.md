@@ -35,10 +35,12 @@ From PowerShell, check AI CLI versions without installing updates:
 ```
 
 Other updater parameters are `-Target All|Codex|OpenCode|Bun`,
-`-OpenCodeVersion`, `-CodexVersion`, `-Force`, `-Check`, and `-RemoveWinget`.
-The last option removes the winget copies of OpenCode and Codex after
-installation; Bun is installed through winget and is left in place. Codex and
-OpenCode otherwise use upstream downloads.
+`-OpenCodeVersion`, `-CodexVersion`, `-Force`, `-Check`, `-RemoveWinget`, and
+`-Wrappers`. The last option installs optional profile functions that add
+`--yolo`/`--auto`; wrappers are off by default. `-RemoveWinget` removes the
+winget copies of OpenCode and Codex after installation; Bun is installed
+through winget and is left in place. Codex and OpenCode use upstream downloads
+and both require the exact SHA-256 digest published in GitHub release metadata.
 
 Run history cleanup in the intended user's session. `SWIVAL_PROJECT_HOME`
 selects the project whose `.swival` state is removed; it defaults to the working
@@ -103,3 +105,26 @@ and Codex, without executing xerj or modifying real client configurations:
 ```powershell
 pwsh -NoProfile -File windows/tests/test-update-xerj.ps1
 ```
+
+## Verified and recoverable release updates
+
+OpenCode downloads now use the official `anomalyco/opencode` GitHub release
+metadata and require an exact asset with a published SHA-256 digest. The ZIP
+must contain exactly one regular root `opencode.exe`; only that entry is read.
+The check trusts GitHub HTTPS and its release metadata, not an independent
+signature. Older releases without digest metadata are refused.
+
+xerj verifies the archive's checksum, rejects duplicate executable entries and
+prepares the binary next to its destination. Existing binaries/configurations
+are replaced with `File.Replace` and unique recovery copies; a locked binary
+fails without being overwritten in place. Successful xerj replacements retain
+`.bak.*` files for manual recovery and pruning. AI CLI activation likewise uses
+a verified same-directory pending file and has no overwrite fallback for locked
+targets. These filesystems must support the requested replacement operation.
+
+`test-format/psfmt.ps1` requires PSScriptAnalyzer 1.25.0 and never installs a
+missing module unless `-install-dependency` is explicitly selected. The
+installer writes `installed-files.txt` through a temporary manifest and updates
+the user PATH only after post-install verification succeeds. A PowerShell
+launcher is exercised with `psfmt.ps1 -version` when `pwsh` is available. See the
+[formatter guide](test-format/README.md) for offline and installation behavior.
