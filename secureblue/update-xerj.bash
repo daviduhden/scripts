@@ -4,7 +4,7 @@
 # Installs a checksum-verified static release into ~/.local/bin without root.
 # Optional client flags register stdio MCP with Codex, Crush, or OpenCode.
 # The engine must be started separately; no service is installed or started.
-# Requires curl, Python 3, sha256sum, and standard GNU utilities.
+# Requires curl, Perl with core modules, sha256sum, and standard GNU utilities.
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.

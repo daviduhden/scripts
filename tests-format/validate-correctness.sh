@@ -370,7 +370,7 @@ function check(line, raw) {
     # ---- pipe to shell / eval / temp files / TOCTOU ----
     if (line ~ /(curl|wget|ftp)[^;|&]*\|[[:space:]]*(ba)?sh([[:space:]]|$)/)
         emit("ERROR", NR, "piping a remote script directly into a shell", "ShellCheck SC2320", "Download to a file, verify it, then execute it")
-    if (lang != "perl" && lang != "python" && line ~ /(^|[^[:alnum:]_])eval([[:space:]]|$)/)
+    if (lang != "perl" && line ~ /(^|[^[:alnum:]_])eval([[:space:]]|$)/)
         emit("WARNING", NR, "eval usage", "POSIX sh(1)", "Avoid eval; pass arguments explicitly")
     if (line ~ /\[[[:space:]]+-[ef][[:space:]]+[^]]*\][[:space:]]*(&&|;)[[:space:]]*rm[[:space:]]/)
         emit("INFO", NR, "check-then-remove pattern (TOCTOU-prone)", "POSIX sh(1)", "Use rm -f and test within the same operation")
@@ -621,7 +621,7 @@ scan_one() {
 			*bash*) lang=bash ;;
 			*ksh*) lang=ksh ;;
 			*perl*) lang=perl ;;
-			*python*) lang=python ;;
+
 			*sh*) lang='sh' ;;
 			esac
 			;;

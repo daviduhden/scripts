@@ -54,7 +54,7 @@ OPENBSD_SCRIPTS = \
 	openbsd/rename-link.pl
 
 SECUREBLUE_SCRIPTS = \
-	secureblue/arti-config.py \
+	secureblue/arti-config.pl \
 	secureblue/down-music.bash \
 	secureblue/install-arti-service.bash \
 	secureblue/install-openrsync.bash \
@@ -81,17 +81,16 @@ TESTS_FORMAT_SCRIPTS = \
 	tests-format/fix-permissions.sh \
 	tests-format/install-knfmt-linux.sh \
 	tests-format/validate-correctness.sh \
-	scripts/validate-agent-knowledge.py \
+	scripts/validate-agent-knowledge.pl \
 	tests-format/validate-make.sh \
 	tests-format/validate-manpages.sh \
 	tests-format/validate-perl.sh \
-	tests-format/validate-python.sh \
 	tests-format/validate-shell.sh
 
 # Public Perl programs are listed in perl/programs.txt.
 PERL_PROGRAMS_MANIFEST = perl/programs.txt
 
-.PHONY: all clean install-debian install-openbsd install-secureblue install-shell install-shell-bash install-shell-bash-unlock install-shell-bash-copy install-shell-openbsd install-perl install-tests-format uninstall-debian uninstall-openbsd uninstall-secureblue uninstall-shell uninstall-perl uninstall-tests-format test test-validate test-python check format test-tooling test-delivery test-manpages test-regression test-agent-knowledge fix-permissions check-permissions check-agent-knowledge help
+.PHONY: all clean install-debian install-openbsd install-secureblue install-shell install-shell-bash install-shell-bash-unlock install-shell-bash-copy install-shell-openbsd install-perl install-tests-format uninstall-debian uninstall-openbsd uninstall-secureblue uninstall-shell uninstall-perl uninstall-tests-format test test-validate check format test-tooling test-delivery test-manpages test-regression test-agent-knowledge fix-permissions check-permissions check-agent-knowledge help
 
 # OS-specific sets install the same command names, so they cannot share a
 # single BINDIR. 'all' installs only the OS-independent runtime helper; choose
@@ -118,7 +117,7 @@ install-openbsd:
 install-secureblue:
 	@echo "${INFO} Installing SecureBlue helpers"
 	@set -e; install -d "${DESTBIN}"
-	@set -e; for f in ${SECUREBLUE_SCRIPTS}; do base=$${f##*/}; name=$${base%.bash}; name=$${name%.pl}; name=$${name%.py}; printf '%s Installing %s -> %s\n' "${INFO}" "$$f" "${DESTBIN}/$$name"; install -m 0755 "$$f" "${DESTBIN}/$$name"; done
+	@set -e; for f in ${SECUREBLUE_SCRIPTS}; do base=$${f##*/}; name=$${base%.bash}; name=$${name%.pl}; printf '%s Installing %s -> %s\n' "${INFO}" "$$f" "${DESTBIN}/$$name"; install -m 0755 "$$f" "${DESTBIN}/$$name"; done
 	@set -e; if [ -d secureblue/systemd ]; then install -d -m 0755 "${DEST_SYSTEMD_USER}" || exit 1; for f in secureblue/systemd/*.service; do [ -f "$$f" ] || continue; printf '%s Installing %s -> %s\n' "${INFO}" "$$f" "${DEST_SYSTEMD_USER}/$${f##*/}"; install -m 0644 "$$f" "${DEST_SYSTEMD_USER}/$${f##*/}" || exit 1; done; fi
 	@set -e; wrapper="${DESTBIN}/sudo-wrapper"; if [ -x "$$wrapper" ]; then for link in sudo visudo sudoedit; do if [ -e "${DESTBIN}/$$link" ] && [ ! -L "${DESTBIN}/$$link" ]; then printf '%s ERROR: %s exists and is not a wrapper symlink; refusing to overwrite\n' "${INFO}" "${DESTBIN}/$$link" >&2; exit 1; fi; printf '%s Symlinking %s -> %s\n' "${INFO}" "${DESTBIN}/$$link" "$$wrapper"; ln -sf "$$wrapper" "${DESTBIN}/$$link"; done; fi; echo "${INFO} SecureBlue helpers installed"
 
@@ -150,7 +149,7 @@ install-perl:
 install-tests-format:
 	@set -e; echo "${INFO} Installing Tests/Format scripts" && install -d "${DEST_TESTS_FORMAT}"
 	@set -e; for cfg in "tests-format/clang-format.yaml:clang-format-all" "tests-format/clang-tidy.yaml:clang-tidy-all" "tests-format/fourmolu-all.yaml:fourmolu-all"; do src=$${cfg%%:*}; dst=$${cfg##*:}; install -m 0644 "$$src" "${DEST_TESTS_FORMAT}/$$dst"; done
-	@set -e; for f in ${TESTS_FORMAT_SCRIPTS}; do base=$${f##*/}; name=$${base%.sh}; name=$${name%.py}; printf '%s Installing %s -> %s\n' "${INFO}" "$$f" "${DEST_TESTS_FORMAT}/$$name"; install -m 0755 "$$f" "${DEST_TESTS_FORMAT}/$$name"; if [ "${TESTS_FORMAT_LINKS}" = "1" ]; then install -d "${DESTBIN}"; ln -sf "${DEST_TESTS_FORMAT}/$$name" "${DESTBIN}/$$name"; fi; done
+	@set -e; for f in ${TESTS_FORMAT_SCRIPTS}; do base=$${f##*/}; name=$${base%.sh}; name=$${name%.pl}; printf '%s Installing %s -> %s\n' "${INFO}" "$$f" "${DEST_TESTS_FORMAT}/$$name"; install -m 0755 "$$f" "${DEST_TESTS_FORMAT}/$$name"; if [ "${TESTS_FORMAT_LINKS}" = "1" ]; then install -d "${DESTBIN}"; ln -sf "${DEST_TESTS_FORMAT}/$$name" "${DESTBIN}/$$name"; fi; done
 	@echo "${INFO} Tests/Format helpers installed in ${DEST_TESTS_FORMAT}"
 
 uninstall-debian:
@@ -163,7 +162,7 @@ uninstall-openbsd:
 	@echo "${INFO} OpenBSD helpers removed from ${DESTBIN}"
 
 uninstall-secureblue:
-	@set -e; for f in ${SECUREBLUE_SCRIPTS}; do base=$${f##*/}; name=$${base%.bash}; name=$${name%.pl}; name=$${name%.py}; rm -f -- "${DESTBIN}/$$name"; done
+	@set -e; for f in ${SECUREBLUE_SCRIPTS}; do base=$${f##*/}; name=$${base%.bash}; name=$${name%.pl}; rm -f -- "${DESTBIN}/$$name"; done
 	@set -e; for f in secureblue/systemd/*.service; do [ -f "$$f" ] || continue; rm -f -- "${DEST_SYSTEMD_USER}/$${f##*/}"; done
 	@set -e; for link in sudo visudo sudoedit; do if [ -L "${DESTBIN}/$$link" ]; then rm -f -- "${DESTBIN}/$$link"; fi; done
 	@echo "${INFO} SecureBlue helpers and units removed"
@@ -173,7 +172,7 @@ uninstall-perl:
 	@echo "${INFO} Perl helpers removed from ${DESTBIN}"
 
 uninstall-tests-format:
-	@set -e; for f in ${TESTS_FORMAT_SCRIPTS}; do base=$${f##*/}; name=$${base%.sh}; name=$${name%.py}; rm -f -- "${DEST_TESTS_FORMAT}/$$name"; if [ "${TESTS_FORMAT_LINKS}" = "1" ]; then rm -f -- "${DESTBIN}/$$name"; fi; done
+	@set -e; for f in ${TESTS_FORMAT_SCRIPTS}; do base=$${f##*/}; name=$${base%.sh}; name=$${name%.pl}; rm -f -- "${DEST_TESTS_FORMAT}/$$name"; if [ "${TESTS_FORMAT_LINKS}" = "1" ]; then rm -f -- "${DESTBIN}/$$name"; fi; done
 	@set -e; for cfg in clang-format-all clang-tidy-all fourmolu-all; do rm -f -- "${DEST_TESTS_FORMAT}/$$cfg"; done
 	@echo "${INFO} Tests/Format helpers removed"
 
@@ -189,17 +188,14 @@ test: test-validate
 check: test-validate test-manpages
 
 format:
-	@status=0; for validator in python shell perl make; do /bin/sh "tests-format/validate-$$validator.sh" --format . || status=1; done; exit "$$status"
+	@status=0; for validator in shell perl make; do /bin/sh "tests-format/validate-$$validator.sh" --format . || status=1; done; exit "$$status"
 
-test-validate: check-agent-knowledge test-agent-knowledge test-python
+test-validate: check-agent-knowledge test-agent-knowledge
 	@echo "Running shell script validation..." && /bin/sh tests-format/validate-shell.sh --check .
 	@echo "Running perl script validation..." && /bin/sh tests-format/validate-perl.sh --check .
 	@echo "Running make validation..." && /bin/sh tests-format/validate-make.sh --check .
 	@echo "Checking file permissions (read-only)..." && /bin/sh tests-format/fix-permissions.sh --check .
 	@echo "Running correctness audit..." && /bin/sh tests-format/validate-correctness.sh --target all .
-
-test-python:
-	@echo "Running python script validation..." && /bin/sh tests-format/validate-python.sh --check .
 
 test-manpages:
 	@echo "Running man page validation..." && /bin/sh tests-format/validate-manpages.sh .
@@ -209,14 +205,13 @@ test-regression: test-tooling test-delivery
 	@echo "Running correctness regression tests..." && /bin/sh tests-format/test-validate-correctness.sh
 	@echo "Running ssh-menu regression test..." && perl tests-format/test-ssh-menu.pl
 	@echo "Running normalize-files regression test..." && perl tests-format/test-normalize-files.pl
-	@echo "Running website sync filter tests..." && PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_sync_website_filters.py'
+	@echo "Running website sync filter tests..." && prove -Itests tests/test_sync_website_filters.pl
 
 test-delivery:
-	@PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_delivery_transactions.py' -v
-	@PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_release_updates.py' -v
+	@prove -Itests tests/test_delivery_transactions.pl tests/test_release_updates.pl
 
 test-tooling:
-	@PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_tooling.py' -v
+	@prove -Itests tests/test_tooling.pl
 
 fix-permissions:
 	@/bin/sh tests-format/fix-permissions.sh .
@@ -225,10 +220,10 @@ check-permissions:
 	@/bin/sh tests-format/fix-permissions.sh --check .
 
 check-agent-knowledge:
-	@python3 scripts/validate-agent-knowledge.py --scope worktree
+	@perl scripts/validate-agent-knowledge.pl --scope worktree
 
 test-agent-knowledge:
-	@PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/agent_knowledge_validator -v
+	@prove tests/agent_knowledge_validator/test_validator.pl
 
 help:
 	@printf "Usage: make [target]\n\nTargets:\n  all                      Install the OS-independent runtime helper (Perl only)\n  install-debian           Install Debian helper scripts into ${DESTBIN}\n  install-openbsd          Install OpenBSD helper scripts into ${DESTBIN}\n  install-secureblue       Install SecureBlue helpers into ${DESTBIN} and units into ${DEST_SYSTEMD_USER}\n  install-shell            Install SecureBlue Bash shell helpers\n  install-shell-bash       Install shell aliases into ${BASH_CONF_DST_DIR} (with chattr -i/+i)\n  install-shell-openbsd    Guidance for installing shell helpers on OpenBSD\n  install-perl             Install perl helper scripts into ${DESTBIN}\n  install-tests-format     Install developer validators/formatters into ${DEST_TESTS_FORMAT}\n  uninstall-debian         Remove Debian helpers from ${DESTBIN}\n  uninstall-openbsd        Remove OpenBSD helpers and wrapper links\n  uninstall-secureblue     Remove SecureBlue helpers and user units\n  uninstall-perl           Remove Perl helpers\n  uninstall-tests-format   Remove developer validators/formatters\n  uninstall-shell          Remove installed shell helpers\n  check                    Run validation without formatting or caches\n  format                   Apply formatters (reports drift as failure)\n  test                     Run checks and isolated regression tests\n  test-validate            Run only read-only validators\n  test-manpages            Run mandoc lint when mandoc is installed\n  test-regression          Run only the regression tests\n  test-tooling             Run validator/installer temporary-tree regressions\n  test-delivery            Run delivery/release transaction regressions\n  test-agent-knowledge     Run the agent-knowledge validator contract tests\n  fix-permissions          Correct file modes from file(1) content\n  check-permissions        Report wrong file modes (read-only, rc != 0)\n  check-agent-knowledge    Enforce agent/skills synchronization for repository changes\n  clean                    No-op clean target\n  help                     Show this help\n\nVariables: PREFIX=${PREFIX} DESTDIR=${DESTDIR} BINDIR=${BINDIR} SYSTEMD_USER_UNIT_DIR=${SYSTEMD_USER_UNIT_DIR} TESTS_FORMAT_DIR=${TESTS_FORMAT_DIR} TESTS_FORMAT_LINKS=${TESTS_FORMAT_LINKS}\n"

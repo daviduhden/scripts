@@ -19,26 +19,22 @@ description: >-
 
 ## Understand the test split
 
-`make check` runs agent-knowledge validation and contract tests, cache-free
-Ruff formatting/lint checks, shell, Perl, Make, permission, correctness, and
-manual-page checks. `make test` completes validation before isolated
-regressions (including under parallel make): tooling/installers, permissions,
-correctness, both Perl programs, delivery transactions, release verification,
-and website synchronization filters.
-Python test recipes set `PYTHONDONTWRITEBYTECODE=1`.
+`make check` runs agent-knowledge validation and contract tests, shell, Perl,
+Make, permission, correctness, and manual-page checks. `make test` completes
+validation before isolated regressions (including under parallel make):
+tooling/installers, permissions, correctness, both Perl programs, delivery
+transactions, release verification, and website synchronization filters.
 
-The four language validators default to `--check`; only `--format` rewrites
-sources. `make format` invokes all four explicitly. Formatting drift exits 2
+The three language validators default to `--check`; only `--format` rewrites
+sources. `make format` invokes all three explicitly. Formatting drift exits 2
 even if repaired, so inspect the diff and rerun checks. Safe `mktemp` logs
 remain for inspection; transient failure, skip and format lists are cleaned.
-Ruff check mode uses `--no-cache` and must not remove pre-existing caches.
 
 Use `--strict` to fail when optional tools or Perl modules are missing.
 Non-strict runs record `[SKIP]` diagnostics and counts rather than claiming
 those checks passed. Make dialect/platform omissions are expected skips.
-Ruff remains required whenever Python files exist. Make evaluation is opt-in
-via `--make-dry-run`: even `-n` can execute commands while parsing untrusted
-Makefiles. `perl -c` loads modules and executes compile-time blocks, so those
+Make evaluation is opt-in via `--make-dry-run`: even `-n` can execute commands
+while parsing untrusted Makefiles. `perl -c` loads modules and executes compile-time blocks, so those
 sources must also be trusted.
 
 Windows batch/PowerShell checks run natively. Platform CI runs safe checks and
@@ -91,7 +87,7 @@ runtime dependencies.
     optional tool with an OpenBSD port/package mapping; keep that file
     informational and verify package paths before recording them.
    - for agent instruction synchronization, use
-     `validate-agent-knowledge.py`; `make test-validate` runs it against the
+     `validate-agent-knowledge.pl`; `make test-validate` runs it against the
      current worktree. Pull request comparisons require
      `--scope range --base BASE_REF --head HEAD_REF`.
      The agent workflow runs the shared contract tests and range
@@ -99,16 +95,16 @@ runtime dependencies.
      Windows xerj updater suite is `pwsh -NoProfile -File windows/tests/test-update-xerj.ps1`;
      it uses temporary paths and mocked downloads/clients, not real installs.
 6. To add a regression test:
-   - use POSIX `sh` or core-module Perl for portable shell/tool tests; use the
-     Python standard library when a filesystem harness needs to exercise both
-     platform-specific sync scripts without sourcing their deployment entry
-     points;
+   - use POSIX `sh` or core-module Perl for portable shell/tool tests; use Perl
+     (`File::Temp`, `IPC::Open3`) when a filesystem harness needs to exercise
+     both platform-specific sync scripts without sourcing their deployment
+     entry points;
    - keep fixtures in a `mktemp` tree with trap cleanup in shell tests, or use
-     `tempfile.TemporaryDirectory` in Python tests;
+     `File::Temp` in Perl tests;
    - do not access the network, the user's home, or system configuration;
    - add it to `test-regression` and document it in the relevant README.
    - website sync filter coverage lives in
-     `tests/test_sync_website_filters.py`; it runs both the rsync and copy
+     `tests/test_sync_website_filters.pl`; it runs both the rsync and copy
      staging paths, tests initial and existing destinations, and preserves a
      temporary `.sync.lock` without touching a real document root.
 7. The permission policy is content-based: directories and scripts are 0755,
@@ -151,12 +147,9 @@ Makefiles whose generated `config.mk` is absent. On OpenBSD, `mbake` and
   reports drift without rewriting.
 - `validate-perl.sh --format` runs `perltidy` in place; it uses `-npro` so a developer
   profile does not change the result.
-- `validate-python.sh --check` uses cache-free Ruff checks. `--format` applies
-  formatting and clears Ruff caches in its cleanup; both report drift as a
-  failure. Keep the `require_cmd`, `run_validate_python`, `main "$@"` pattern.
-- `make test-tooling` covers all four validator modes, strict missing tools,
-  make execution opt-in, installation paths with spaces, and early failures
-  using temporary paths and offline tool doubles. Installer failure tests must
+- `make test-tooling` covers the shell, Perl, and Make validator modes, strict
+  missing tools, make execution opt-in, installation paths with spaces, and
+  early failures using temporary paths and offline tool doubles. Installer failure tests must
   also verify cleanup: the shell-config copy recipe restores its immutable
   attribute in an exit trap even when a copy fails.
 - `fix-permissions.sh --help` now exits 0; other usage errors exit 2.
@@ -180,7 +173,7 @@ the repository. Add only knowledge that will help future work; omit
 execution-specific notes and cosmetic edits. Review affected specialized
 agent instructions for consistency and run
 `make check-agent-knowledge` (or
-`python3 scripts/validate-agent-knowledge.py --scope worktree`). The automated check
+`perl scripts/validate-agent-knowledge.pl --scope worktree`). The automated check
 covers structure and resolvable local references; semantic relevance still
 requires review. Report the synchronization result in the final summary and
 do not claim completion if it was skipped or failed.

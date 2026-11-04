@@ -71,7 +71,7 @@ filter_site_tree() {
 
 	for name in \
 		.git .github .agents .claude .codex .cursor .vscode .idea \
-		.devcontainer .zed .cache .pytest_cache .ruff_cache .mypy_cache \
+		.devcontainer .zed .cache \
 		.htmltest node_modules t tests docs tmp tmp_archive build dist; do
 		path="$dir/$name"
 		if [ -e "$path" ] || [ -L "$path" ]; then rm -rf -- "$path" || return 1; fi
@@ -84,8 +84,7 @@ filter_site_tree() {
 		-o -name .agents -o -name .claude -o -name .codex \
 		-o -name .cursor -o -name .vscode -o -name .idea \
 		-o -name .devcontainer -o -name .zed -o -name .cache \
-		-o -name .pytest_cache -o -name .ruff_cache -o -name .mypy_cache \
-		-o -name .htmltest -o -name node_modules -o -name __pycache__ \) \
+		-o -name .htmltest -o -name node_modules \) \
 		-prune -exec rm -rf {} + || return 1
 	find "$dir" -mindepth 1 \
 		\( -path "$dir/.sync.lock" -o -path "$dir/.sync.lock/*" \) -prune -o \
@@ -93,8 +92,7 @@ filter_site_tree() {
 		\( -name .git -o -name .github -o -name .agents -o -name .claude \
 		-o -name .codex -o -name .cursor -o -name .vscode -o -name .idea \
 		-o -name .devcontainer -o -name .zed -o -name .cache \
-		-o -name .pytest_cache -o -name .ruff_cache -o -name .mypy_cache \
-		-o -name .htmltest -o -name node_modules -o -name __pycache__ \
+		-o -name .htmltest -o -name node_modules \
 		-o -name AGENTS.md -o -name CLAUDE.md -o -name GEMINI.md \
 		-o -name copilot-instructions.md -o -name .gitignore \
 		-o -name .gitmodules -o -name .gitattributes -o -name .htmltest.yml \
@@ -106,9 +104,9 @@ filter_site_tree() {
 		[ -L "$dir/scripts/openbsd-tools.txt" ]; then
 		rm -f -- "$dir/scripts/openbsd-tools.txt" || return 1
 	fi
-	if [ -e "$dir/scripts/validate-agent-knowledge.py" ] ||
-		[ -L "$dir/scripts/validate-agent-knowledge.py" ]; then
-		rm -f -- "$dir/scripts/validate-agent-knowledge.py" || return 1
+	if [ -e "$dir/scripts/validate-agent-knowledge.pl" ] ||
+		[ -L "$dir/scripts/validate-agent-knowledge.pl" ]; then
+		rm -f -- "$dir/scripts/validate-agent-knowledge.pl" || return 1
 	fi
 }
 
@@ -251,12 +249,11 @@ copy_from_source() {
 			--exclude="*.rej" --exclude="/docs/" --exclude="/t/" \
 			--exclude="/tests/" --exclude="/tmp/" \
 			--exclude="/tmp_archive/" --exclude="/.cache/" \
-			--exclude="/.pytest_cache/" --exclude="/.ruff_cache/" \
-			--exclude="/.mypy_cache/" --exclude="/.htmltest/" \
-			--exclude="/__pycache__/" --exclude="/node_modules/" \
+			--exclude="/.htmltest/" \
+			--exclude="/node_modules/" \
 			--exclude="/build/" --exclude="/dist/" \
 			--exclude="/scripts/openbsd-tools.txt" \
-			--exclude="/scripts/validate-agent-knowledge.py" \
+			--exclude="/scripts/validate-agent-knowledge.pl" \
 			--exclude=".sync.lock" \
 			"$srcdir"/ "$WWW_DIR"/; then
 			return 1

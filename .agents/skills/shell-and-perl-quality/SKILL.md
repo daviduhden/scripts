@@ -43,9 +43,10 @@ description: >-
   SIGPIPE status is handled. Capture the output first or use `sed -n '1p'`.
 - Do not use `eval`, `curl | sh`, or unquoted command strings. If `eval` is
   unavoidable, document why and keep the input bounded.
-- Do not embed Python or Perl source in shell or Perl scripts (`-c`, `-e`,
-  `-n`, or a heredoc). Use native tools or a standalone helper program that the
-  Makefile installs and the invoking script discovers relative to itself.
+- Do not introduce Python code. Do not embed Perl source in shell or Perl
+  scripts (`-c`, `-e`, `-n`, or a heredoc). Use native tools or a standalone
+  helper program that the Makefile installs and the invoking script discovers
+  relative to itself.
 - Prefer focused helpers over a single omnibus helper when the helper has
   platform-specific dependencies.
 - Use `mktemp` and `umask 077` for diagnostic logs and state files; never use
@@ -149,7 +150,7 @@ the repository. Add only knowledge that will help future work; omit
 execution-specific notes and cosmetic edits. Review affected specialized
 agent instructions for consistency and run
 `make check-agent-knowledge` (or
-`python3 scripts/validate-agent-knowledge.py --scope worktree`). The automated check
+`perl scripts/validate-agent-knowledge.pl --scope worktree`). The automated check
 covers structure and resolvable local references; semantic relevance still
 requires review. Report the synchronization result in the final summary and
 do not claim completion if it was skipped or failed.

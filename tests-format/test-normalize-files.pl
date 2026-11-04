@@ -654,9 +654,9 @@ subtest 'undecodable file name: content processed, rename skipped' => sub {
 # glob_match translates shell-style patterns, so regex metacharacters such as
 # + must stay literal and malformed classes must not die.
 subtest 'glob_match is robust' => sub {
-    is( NormalizeFiles::glob_match( '*.py', 'a.py' ), 1,
-        'simple glob matches' );
-    is( NormalizeFiles::glob_match( '*.py', 'a.txt' ),
+    is( NormalizeFiles::glob_match( '*.tmp', 'a.tmp' ),
+        1, 'simple glob matches' );
+    is( NormalizeFiles::glob_match( '*.tmp', 'a.txt' ),
         0, 'simple glob rejects' );
     is( NormalizeFiles::glob_match( 'a+b', 'a+b' ), 1, 'plus is literal' );
     is( NormalizeFiles::glob_match( 'a+b', 'aab' ),

@@ -9,7 +9,7 @@ set -eu
 #   are currently set.
 # - Policy:
 #     directories                     -> 0755
-#     scripts (shell/perl/python/...) -> 0755
+#     scripts (shell/Perl/...) -> 0755
 #     native executables (ELF, ...)   -> 0755
 #     Makefiles                       -> 0755
 #     everything else (text, config,
@@ -125,11 +125,6 @@ classify_file() {
 	*perl\ script*)
 		CLASS='exec'
 		DESC='Perl script'
-		return
-		;;
-	*python*script*)
-		CLASS='exec'
-		DESC='Python script'
 		return
 		;;
 	*awk\ script*)
@@ -437,9 +432,7 @@ main() {
 	# gitfiles are pruned; only regular files and directories are
 	# visited (symlinks and special files are skipped by construction).
 	find "$ROOT_DIR" \
-		\( -name .git -o -name .ruff_cache -o -name __pycache__ \
-		-o -name node_modules -o -name .pytest_cache \
-		-o -name .mypy_cache \) -prune -o \
+		\( -name .git -o -name node_modules \) -prune -o \
 		\( -type d -o -type f \) \
 		-exec "$SELF" --worker {} +
 

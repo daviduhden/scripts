@@ -14,7 +14,8 @@ set -euo pipefail
 # fails, it falls back to the main branch. The download is protected by TLS
 # but is not checked against a separate checksum or signature. An existing
 # configuration is preserved unless --replace-config is selected. Publication
-# is rolled back if the unit cannot be activated; Python 3.11+ validates TOML.
+# is rolled back if the unit cannot be activated; the standalone Perl helper
+# validates the supported TOML subset.
 #
 # If socat is installed, the optional arti-socks-proxy.service bridge is
 # installed too; bridge failures are warnings and do not fail the main unit.
@@ -48,23 +49,28 @@ net_curl() {
 	curl -fLsS --retry 5 "$@"
 }
 
-# Templates are installed next to the scripts as a systemd/ subdirectory, so
-# resolve them relative to this file rather than the current directory.
+# Resolve templates and the standalone helper relative to this file, not the
+# current directory. The Makefile installs unit templates under
+# PREFIX/lib/systemd/user and the helper under BINDIR; keep the sibling layout
+# for running directly from a checkout.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SERVICE_SRC="${SCRIPT_DIR}/systemd/arti.service"
 BRIDGE_SRC="${SCRIPT_DIR}/systemd/arti-socks-proxy.service"
-# The Makefile installs unit templates under PREFIX/lib/systemd/user; keep
-# the sibling layout for running directly from a checkout.
+PERL_CMD="${PERL_CMD:-perl}"
 if [[ ! -f $SERVICE_SRC ]]; then
 	SERVICE_SRC="${SCRIPT_DIR}/../lib/systemd/user/arti.service"
 	BRIDGE_SRC="${SCRIPT_DIR}/../lib/systemd/user/arti-socks-proxy.service"
 fi
-ARTI_HELPER="${SCRIPT_DIR}/arti-config.py"
-if [[ ! -f $ARTI_HELPER ]]; then
-	ARTI_HELPER="${SCRIPT_DIR}/arti-config"
-fi
-if [[ ! -f $ARTI_HELPER ]]; then
-	ARTI_HELPER="${SCRIPT_DIR}/../libexec/scripts/arti-config"
+if [[ -z ${ARTI_HELPER:-} ]]; then
+	for candidate in \
+		"${SCRIPT_DIR}/arti-config.pl" \
+		"${SCRIPT_DIR}/arti-config" \
+		"${SCRIPT_DIR}/../libexec/scripts/arti-config"; do
+		if [[ -f $candidate ]]; then
+			ARTI_HELPER=$candidate
+			break
+		fi
+	done
 fi
 ARTI_REPO_RAW="https://gitlab.torproject.org/tpo/core/arti/-/raw"
 ARTI_EXAMPLE_PATH="crates/arti/src/arti-example-config.toml"
@@ -96,14 +102,14 @@ config_url_for_ref() {
 check_prereqs() {
 	require_cmd systemctl
 	require_cmd curl
-	require_cmd python3
+	require_cmd "$PERL_CMD"
 	require_cmd systemd-analyze
 	[[ -f $ARTI_HELPER ]] || {
-		error "arti-config.py helper not found"
+		error "arti-config helper not found"
 		exit 1
 	}
-	python3 "$ARTI_HELPER" validate /dev/null || {
-		error "Python 3.11+ with tomllib is required"
+	"$PERL_CMD" "$ARTI_HELPER" validate /dev/null || {
+		error "arti-config helper failed to run with $PERL_CMD"
 		exit 1
 	}
 	if [[ ! -f $SERVICE_SRC ]]; then
@@ -133,7 +139,7 @@ setup_paths() {
 # Render each complete path as a quoted systemd argument. Percent signs are
 # escaped as specifiers, and command arguments also escape dollar expansion.
 render_unit() {
-	python3 "$ARTI_HELPER" render \
+	"$PERL_CMD" "$ARTI_HELPER" render \
 		"$1" "$2" "$CONFIG_DIR" "$DATA_DIR" "$STATE_DIR" "$CACHE_DIR"
 }
 
@@ -189,7 +195,7 @@ install_arti_unit_and_config() {
 	fi
 	local config_to_check="$CONFIG_FILE"
 	[[ -f $ARTI_STAGE/arti.toml ]] && config_to_check="$ARTI_STAGE/arti.toml"
-	python3 "$ARTI_HELPER" validate "$config_to_check"
+	"$PERL_CMD" "$ARTI_HELPER" validate "$config_to_check"
 	ARTI_WAS_ACTIVE=no
 	ARTI_WAS_ENABLED=no
 	if systemctl --user is-active --quiet arti.service; then ARTI_WAS_ACTIVE=yes; fi

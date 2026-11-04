@@ -13,11 +13,13 @@
 - Require `--force` for `clean-logs` and make Crush data removal opt-in.
 - Move systemd user units out of `BINDIR`, add `DESTDIR`, and stop overwriting
   an existing real `sudo` binary.
-- Remove embedded Python from shell scripts in favour of native tools, core
-  Perl modules, and the standalone `arti-config.py` helper.
+- Remove embedded Python from shell scripts in favour of native tools and
+  standalone Perl helpers.
+- Migrate the agent-knowledge validator, Arti helper, and all Python test
+  suites to Perl; remove Ruff/Python setup from CI and the Python validator.
 - Make the permission gate ignore Git-ignored artifacts and fix tracked modes.
 - Give every source script a filename extension and strip it only on install;
-  move inline Perl/Python logic into focused helper programs.
+  move inline interpreter logic into focused helper programs.
 
 ## 1.0.0
 

@@ -10,8 +10,8 @@ set -euo pipefail
 # - Install into /usr/local/go
 # - Ensure /usr/local/go/bin is in system-wide PATH via /etc/profile
 #
-# Requirements: root privileges, network access, curl, Python 3, install,
-# awk, mv, uname, and mktemp. Only Linux is supported.
+# Requirements: root privileges, network access, curl, Perl, install, awk,
+# mv, uname, and mktemp. Only Linux is supported.
 #
 # Side effects:
 #  - Replaces /usr/local/go with the downloaded release

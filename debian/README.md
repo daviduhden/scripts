@@ -96,7 +96,7 @@ release asset metadata. It reads only one regular root `edit` entry and refuses
 ambiguous/missing digest metadata. `update-btop.bash` extracts its GitHub
 source-tarball fallback into a unique directory, rejecting links, special files,
 duplicates, traversal and oversized archives. Go, msedit and btop use core Perl
-modules and native tools rather than embedded Python. btop source authenticity
+modules and native tools rather than Python. btop source authenticity
 still trusts Git/HTTPS; no independent tag signature is verified.
 
 Argon prepares and validates both installers before executing either. Script

@@ -19,20 +19,14 @@ jobs:
   linux:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    env:
-      PYTHONDONTWRITEBYTECODE: "1"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
-        with:
-          python-version: "3.11"
       - name: Install analysis tools in the disposable runner
         run: |
           sudo apt-get update
           sudo apt-get install -y shellcheck shfmt devscripts ksh bmake perltidy libperl-critic-perl mandoc rsync
-          python -m pip install 'ruff==0.17.3' mbake
       - name: Check and test without invoking administrative utilities
         run: |
           export TMPDIR="$RUNNER_TEMP/validation"
@@ -104,11 +98,9 @@ jobs:
           release: "7.8"
           copyback: false
           prepare: |
-            pkg_add -I bash python%3.12 git rsync--
-            ln -sf /usr/local/bin/python3.12 /usr/local/bin/python3
+            pkg_add -I bash git rsync--
           run: |
             set -eu
-            export PYTHONDONTWRITEBYTECODE=1
             for script in openbsd/*.ksh; do ksh -n "$script"; done
             /bin/sh tests-format/validate-correctness.sh --target openbsd .
             make test-regression

@@ -96,9 +96,10 @@ and [Codex MCP](https://learn.chatgpt.com/docs/extend/mcp).
 
 ## Arti installation transactions
 
-`install-arti-service.bash` uses the standalone `arti-config.py` helper
-(Python 3.11+ with `tomllib`) and `systemd-analyze`. The helper is installed
-with the SecureBlue target; no Python heredoc is embedded in the shell script.
+`install-arti-service.bash` uses the standalone `arti-config.pl` helper
+(core Perl modules) and `systemd-analyze`. The helper is installed with the
+SecureBlue target; no Python or inline Perl source is embedded in the shell
+script.
 It preserves an existing `arti.toml` by default. Select
 `--replace-config` to replace it with the upstream example; the old file is
 retained in a unique `arti.toml.bak.*` backup. Downloads are prepared in a

@@ -101,14 +101,14 @@ tool is missing, report the check as skipped rather than passed.
   Go stages a fresh checked tree and retains `.go-backup.*` for recovery;
   msedit requires the exact GitHub asset digest; btop fallback archives require
   one bounded source root without links or traversal. These helpers use core
-  Perl modules (`JSON::PP`, `Archive::Tar`) or native tools, not embedded
-  Python. Argon requires operator-pinned digests or explicit
+  Perl modules (`JSON::PP`, `Archive::Tar`) or native tools; Python is not
+  used. Argon requires operator-pinned digests or explicit
   `--trust-upstream`; reviewed local scripts can avoid downloads. Never
   validate by executing their administrative entry points.
 
 - Arti installation preserves existing TOML unless `--replace-config` is
   selected. TOML validation and unit rendering are delegated to the standalone
-  `secureblue/arti-config.py` helper (installed with the SecureBlue target),
+  `secureblue/arti-config.pl` helper (installed with the SecureBlue target),
   never an embedded heredoc. Validate the rendered systemd unit before
   publishing and exercise activation rollback with mocked systemctl. Escape
   complete systemd arguments, including `%` specifiers and `$` expansion in
@@ -131,13 +131,13 @@ tool is missing, report the check as skipped rather than passed.
 
 - A script was added to the directory but not to `*_SCRIPTS` or the README.
 - A source script is missing its extension, or an installed name still
-  contains `.bash`, `.ksh`, `.sh`, `.pl`, `.py`, or a bundled `.yaml` suffix.
+  contains `.bash`, `.ksh`, `.sh`, `.pl`, or a bundled `.yaml` suffix.
   Source files always carry an extension; install targets strip it.
 - Two OS-specific targets were installed into the same `BINDIR`; they share
   command names and cannot coexist.
 - `install-secureblue` installs units under `${PREFIX}/lib/systemd/user`
   (`SYSTEMD_USER_UNIT_DIR`) and never deletes `${BINDIR}/systemd`.
-- A new inline `perl -e`/`-n`/`-c` program or Python `-c`/heredoc appeared in
+- A new inline `perl -e`/`-n`/`-c` program appeared in
   a shell script; move it to a focused helper installed by the target.
 - GNU-only options in `openbsd/`: bare `mktemp`, `sort -V`, `sed -r`,
   `readlink -e`, `find -printf`, `xargs --null`.
@@ -162,7 +162,7 @@ the repository. Add only knowledge that will help future work; omit
 execution-specific notes and cosmetic edits. Review affected specialized
 agent instructions for consistency and run
 `make check-agent-knowledge` (or
-`python3 scripts/validate-agent-knowledge.py --scope worktree`). The automated check
+`perl scripts/validate-agent-knowledge.pl --scope worktree`). The automated check
 covers structure and resolvable local references; semantic relevance still
 requires review. Report the synchronization result in the final summary and
 do not claim completion if it was skipped or failed.

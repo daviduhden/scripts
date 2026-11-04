@@ -22,7 +22,7 @@ repository's scope, say so instead of inventing support.
 | `secureblue/` | Bash helpers for SecureBlue's rpm-ostree environment, user services, and `run0`; `systemd/` holds user-unit templates. |
 | `shell/` | Bash helpers that are sourced interactively; they target Linux/SecureBlue and are not standalone programs. |
 | `windows/` | Batch installers/launchers and PowerShell utilities; Windows-only. `test-format/` contains `psfmt` and its tests. |
-| `tests-format/` | POSIX `sh` validators/formatters, Perl regression tests, Python agent-knowledge validation and Ruff validation, and the Windows batch validator. |
+| `tests-format/` | POSIX `sh` validators/formatters, Perl agent-knowledge validation and regression tests, and the Windows batch validator. |
 | `Makefile` | POSIX-sh install and test entry points; recipes must remain BSD make compatible. |
 | `VERSION` | Installed version metadata (`1.0.0`). |
 
@@ -32,8 +32,8 @@ targets install the same command names, so they cannot share one `BINDIR`.
 `DESTDIR` is supported for staging. SecureBlue user units install under
 `${PREFIX}/lib/systemd/user`; developer tools install under
 `${PREFIX}/libexec/scripts` (`TESTS_FORMAT_DIR`). Source scripts always carry
-an extension; installed command names omit `.bash`, `.ksh`, `.sh`, `.pl`, and
-`.py`, and bundled configuration names omit `.yaml`.
+an extension; installed command names omit `.bash`, `.ksh`, `.sh`, and `.pl`,
+and bundled configuration names omit `.yaml`.
 
 ## Conventions
 
@@ -50,9 +50,9 @@ an extension; installed command names omit `.bash`, `.ksh`, `.sh`, `.pl`, and
   unguarded `set -o pipefail`, here-strings, process substitution, and
   `$'...'` in that tree.
 - `tests-format/` scripts use `#!/bin/sh` and POSIX constructs.
-- `tests-format/validate-python.sh` checks Python formatting/lint without
-  caches by default. `--format` applies formatting and clears Ruff caches;
-  drift counts as a validation issue. Ruff is required when Python files exist.
+- `tests-format/validate-perl.sh` checks syntax, Perl::Critic, and formatting;
+  only `--format` rewrites sources. There is no Python validator or runtime
+  dependency in the maintained tree.
 - Windows batch files use CRLF, `DisableDelayedExpansion`, quoted paths, and
   `exit /b %ERRORLEVEL%` in launchers. PowerShell formatter/tests require
   PowerShell 7; the installer uses Windows PowerShell for registry and syntax
@@ -60,11 +60,11 @@ an extension; installed command names omit `.bash`, `.ksh`, `.sh`, `.pl`, and
 - Reuse the existing helper names and patterns instead of adding a second
   logging, elevation, or install mechanism.
 - Most scripts do not implement `--help`; do not assume it exists.
-- Do not embed Python or Perl source in Bash, sh, or Perl scripts with
-  `-c`, `-e`, `-n`, or a heredoc. Use native shell tools or a standalone helper
-  program. A helper must be installed by the relevant Makefile target and
-  discovered relative to the invoking script. Existing examples are
-  `scripts/release-verify.pl`, `debian/bootargs.pl`,
+- Do not introduce Python code. Do not embed Perl source in Bash, sh, or Perl
+  scripts with `-c`, `-e`, `-n`, or a heredoc. Use native shell tools or a
+  standalone Perl helper program. A helper must be installed by the relevant
+  Makefile target and discovered relative to the invoking script. Existing
+  examples are `scripts/release-verify.pl`, `debian/bootargs.pl`,
   `secureblue/xerj-config.pl`, and `openbsd/rename-link.pl`.
 - Do not write predictable temporary or log paths under `/tmp`; use
   `mktemp`, `umask 077`, and a cleanup trap where appropriate.
@@ -92,14 +92,14 @@ make install-perl
 make install-tests-format
 ```
 
-`make check` runs agent-knowledge validation and contract tests, Python,
-shell, Perl, Makefile, permissions, correctness, and manual-page checks.
+`make check` runs agent-knowledge validation and contract tests, shell,
+Perl, Makefile, permissions, correctness, and manual-page checks.
 The permission check skips Git-ignored artifacts; normalize modes once with
 `make fix-permissions` after a clone with a restrictive umask.
 `make test` completes validation before isolated regression tests, including
 validator/installation, Perl, and website synchronization regressions; this
-ordering also holds with parallel make. Python tests disable bytecode caches.
-Windows checks have their own native CI job.
+ordering also holds with parallel make. Perl tests use temporary trees and
+core modules. Windows checks have their own native CI job.
 
 Read-only checks that do not apply formatting:
 
@@ -111,13 +111,13 @@ perltidy -npro -ast -se -o /dev/null perl/normalize-files.pl
 perltidy -npro -ast -se -o /dev/null perl/ssh-menu.pl
 ```
 
-`validate-shell.sh`, `validate-perl.sh`, `validate-make.sh`, and
-`validate-python.sh` accept `--check` (default), `--format`, and `--strict`
-before the root directory. Check mode does not rewrite sources or caches;
-logs use safe temporary files and remain under `${TMPDIR:-/tmp}`. Only
-`--format` applies formatting; drift still exits 2. `make format` invokes
-all four formatters. Strict mode fails on missing optional tools or Perl
-modules, while platform-inapplicable Make checks remain explicit skips.
+`validate-shell.sh`, `validate-perl.sh`, and `validate-make.sh` accept
+`--check` (default), `--format`, and `--strict` before the root directory.
+Check mode does not rewrite sources or caches; logs use safe temporary files
+and remain under `${TMPDIR:-/tmp}`. Only `--format` applies formatting; drift
+still exits 2. `make format` invokes all three formatters. Strict mode fails
+on missing optional tools or Perl modules, while platform-inapplicable Make
+checks remain explicit skips.
 The Makefile validator evaluates make only with `--make-dry-run`; use that
 option on trusted input because even dry-run parsing can execute commands.
 Perl syntax checks likewise execute compile-time blocks in trusted sources.
@@ -168,7 +168,7 @@ pwsh -NoProfile -File .\windows\test-format\tests\run-tests.ps1
   preserve the active `.sync.lock`, public content, and linked maintenance
   scripts. Keep the exclusion lists equivalent across Debian and OpenBSD, and
   validate both initial and update paths against temporary trees only.
-  `tests/test_sync_website_filters.py` exercises rsync and copy fallback paths
+  `tests/test_sync_website_filters.pl` exercises rsync and copy fallback paths
   when their tools are available, verifies stale-file cleanup and lock
   preservation, and never sources the full deployment scripts.
 - Do not commit, push, or tag unless asked. Change `VERSION` only for an
@@ -204,7 +204,7 @@ Before declaring a task complete:
 
 1. Make a relevant, substantive update to at least one agent instruction or skill for every project change. If no reusable change is warranted, record the reason in the relevant operational documentation; do not silently omit synchronization.
 2. Check changed guidance against the implementation, examples, commands, paths, validation behavior, and cross-references.
-3. Run `make check-agent-knowledge` (or `python3 scripts/validate-agent-knowledge.py --scope worktree`) and the checks appropriate to the changed code. The automated check verifies structural conditions and local references; semantic relevance still requires agent review.
+3. Run `make check-agent-knowledge` (or `perl scripts/validate-agent-knowledge.pl --scope worktree`) and the checks appropriate to the changed code. The automated check verifies structural conditions and local references; semantic relevance still requires agent review.
 4. If synchronization or validation cannot be completed, state the exact limitation and mark the task incomplete. Do not claim completion.
 
 This applies to edits to AGENTS.md, skills, agent definitions, and these rules as well. Perform one complete synchronization review at task end; rerun the check only after correcting a detected failure.
@@ -225,10 +225,10 @@ Final reports must include an **Agent & Skills Synchronization** section with ag
 
 ### Shared Agent Knowledge Validation Contract
 
-Use `python3 scripts/validate-agent-knowledge.py --scope worktree` for local
-changes and `python3 -m unittest discover -s tests/agent_knowledge_validator -v`
-for its contract tests. The validator requires Python 3.11+ and Git, uses only
-the Python standard library, and publishes contract version `1.0.0`. All
+Use `perl scripts/validate-agent-knowledge.pl --scope worktree` for local
+changes and `prove tests/agent_knowledge_validator/test_validator.pl` for its
+contract tests. The validator requires Perl 5.14+ (JSON::PP core) and Git, uses only core
+modules, and publishes contract version `1.0.0`. All
 adopting repositories share the same CLI, AK001-AK006 identifiers, output
 schema, and exit codes (`0` pass, `1` policy failure, `2` execution/configuration
 error). For a pull request, pass both revisions with
