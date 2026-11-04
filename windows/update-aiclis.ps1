@@ -50,23 +50,24 @@ try {
     # Best effort: the HTTPS endpoints need TLS 1.2, and a failure to change the
     # process-wide setting is ignored.
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-} catch { }
+}
+catch { }
 
 # ---------------------------------------------------------------------------
 # Paths and constants
 # ---------------------------------------------------------------------------
-$script:OpenCodeRoot    = Join-Path (Join-Path $env:LOCALAPPDATA 'Programs') 'OpenCode'
-$script:OpenCodeBin     = Join-Path $script:OpenCodeRoot 'bin'
-$script:OpenCodeExe     = Join-Path $script:OpenCodeBin 'opencode.exe'
-$script:CodexRoot       = Join-Path (Join-Path (Join-Path $env:LOCALAPPDATA 'Programs') 'OpenAI') 'Codex'
-$script:CodexBin        = Join-Path $script:CodexRoot 'bin'
-$script:CodexVersions   = Join-Path $script:CodexRoot 'versions'
-$script:CodexExe        = Join-Path $script:CodexBin 'codex.exe'
+$script:OpenCodeRoot = Join-Path (Join-Path $env:LOCALAPPDATA 'Programs') 'OpenCode'
+$script:OpenCodeBin = Join-Path $script:OpenCodeRoot 'bin'
+$script:OpenCodeExe = Join-Path $script:OpenCodeBin 'opencode.exe'
+$script:CodexRoot = Join-Path (Join-Path (Join-Path $env:LOCALAPPDATA 'Programs') 'OpenAI') 'Codex'
+$script:CodexBin = Join-Path $script:CodexRoot 'bin'
+$script:CodexVersions = Join-Path $script:CodexRoot 'versions'
+$script:CodexExe = Join-Path $script:CodexBin 'codex.exe'
 $script:OpenCodeMetaUrl = 'https://api.github.com/repos/anomalyco/opencode/releases/latest'
-$script:CodexLatestApi  = 'https://api.github.com/repos/openai/codex/releases/latest'
-$script:PathChanged     = $false
-$script:HadError        = $false
-$script:ManagedDirs     = @()
+$script:CodexLatestApi = 'https://api.github.com/repos/openai/codex/releases/latest'
+$script:PathChanged = $false
+$script:HadError = $false
+$script:ManagedDirs = @()
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -99,13 +100,14 @@ function Get-PlatformTag {
     $arch = $null
     try {
         $arch = [string][System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
-    } catch {
+    }
+    catch {
         $arch = $env:PROCESSOR_ARCHITECTURE
     }
     switch -Regex ($arch) {
         '^(X64|AMD64)$' { return 'x64' }
-        '^Arm64$'       { return 'arm64' }
-        default         { throw "Unsupported architecture: $arch" }
+        '^Arm64$' { return 'arm64' }
+        default { throw "Unsupported architecture: $arch" }
     }
 }
 
@@ -145,7 +147,8 @@ function Get-ExeVersion {
         if ([string]::IsNullOrWhiteSpace($out)) { return $null }
         $token = ($out -split '\s+')[-1]
         return (Normalize-Version $token)
-    } catch {
+    }
+    catch {
         return $null
     }
 }
@@ -195,26 +198,27 @@ function Add-PathEntry {
         $kind = [Microsoft.Win32.RegistryValueKind]::ExpandString
         if ($key.GetValueNames() -contains 'Path') { $kind = $key.GetValueKind('Path') }
         $entries = @($userPath -split ';' | Where-Object {
-            $value = $_.TrimEnd('\')
-            if ([string]::IsNullOrWhiteSpace($value)) { return $false }
-            return -not (@($script:ManagedDirs | Where-Object { $_.TrimEnd('\') -ieq $value }).Count)
-        })
+                $value = $_.TrimEnd('\')
+                if ([string]::IsNullOrWhiteSpace($value)) { return $false }
+                return -not (@($script:ManagedDirs | Where-Object { $_.TrimEnd('\') -ieq $value }).Count)
+            })
         $newUserPath = (@($script:ManagedDirs) + $entries) -join ';'
         if ($newUserPath -ne $userPath) {
             $key.SetValue('Path', $newUserPath, $kind)
             Write-Info "User PATH updated: $Directory"
             $script:PathChanged = $true
         }
-    } finally {
+    }
+    finally {
         $key.Close()
     }
 
     # Current process PATH so we can verify immediately.
     $procEntries = @($env:Path -split ';' | Where-Object {
-        $value = $_.TrimEnd('\')
-        if ([string]::IsNullOrWhiteSpace($value)) { return $false }
-        return -not (@($script:ManagedDirs | Where-Object { $_.TrimEnd('\') -ieq $value }).Count)
-    })
+            $value = $_.TrimEnd('\')
+            if ([string]::IsNullOrWhiteSpace($value)) { return $false }
+            return -not (@($script:ManagedDirs | Where-Object { $_.TrimEnd('\') -ieq $value }).Count)
+        })
     $env:Path = (@($script:ManagedDirs) + $procEntries) -join ';'
 }
 
@@ -300,8 +304,9 @@ function Set-CliWrapper {
     }
     $pattern = '(?ms)^' + [regex]::Escape($start) + '\r?\n.*?^' + [regex]::Escape($end) + '(?=\r?$)'
     if ([regex]::IsMatch($content, $pattern)) {
-        $updated = [regex]::Replace($content, $pattern, [System.Text.RegularExpressions.MatchEvaluator]{ param($match) $block })
-    } else {
+        $updated = [regex]::Replace($content, $pattern, [System.Text.RegularExpressions.MatchEvaluator] { param($match) $block })
+    }
+    else {
         $updated = $content + "`r`n$block`r`n"
     }
     if ($updated -cne $content) {
@@ -371,7 +376,8 @@ function Invoke-Download {
         try {
             Invoke-WebRequest -Uri $Uri -OutFile $OutFile -UseBasicParsing -TimeoutSec 900
             return
-        } catch {
+        }
+        catch {
             if ($i -eq $attempts) { throw }
             Write-Warn "Download failed (attempt $i/$attempts): $($_.Exception.Message)"
             Start-Sleep -Seconds 3
@@ -470,8 +476,8 @@ function Remove-OldOpenCodeVersions {
     if (-not (Test-Path -LiteralPath $versionsDir)) { return }
 
     $dirs = @(Get-ChildItem -LiteralPath $versionsDir -Directory |
-        Where-Object { $_.Name -ne $CurrentVersion } |
-        Sort-Object -Property LastWriteTime -Descending)
+            Where-Object { $_.Name -ne $CurrentVersion } |
+            Sort-Object -Property LastWriteTime -Descending)
 
     $dirs | Select-Object -Skip ([Math]::Max($Keep - 1, 0)) | ForEach-Object {
         Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
@@ -499,7 +505,8 @@ function Install-OpenCode {
         try {
             if ([string]::IsNullOrWhiteSpace($Version)) { $latest = Get-OpenCodeLatestVersion }
             else { $latest = Normalize-Version $Version }
-        } catch {
+        }
+        catch {
             Write-Warn "Could not check the latest version: $($_.Exception.Message)"
         }
         Write-Info "OpenCode: installed $(if ($installed) { $installed } else { 'none' }), available $(if ($latest) { $latest } else { 'unknown' })"
@@ -569,7 +576,8 @@ function Install-OpenCode {
                 }
             }
             finally { $archive.Dispose() }
-        } finally {
+        }
+        finally {
             Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
@@ -615,7 +623,7 @@ function Get-CodexLatestVersion {
 function Get-CodexTarget {
     $platform = Get-PlatformTag
     switch ($platform) {
-        'x64'   { return 'x86_64-pc-windows-msvc' }
+        'x64' { return 'x86_64-pc-windows-msvc' }
         'arm64' { return 'aarch64-pc-windows-msvc' }
         default { throw "Unsupported architecture for Codex: $platform" }
     }
@@ -657,14 +665,16 @@ function Set-CodexVisibleBin {
         if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
             # rmdir removes the junction without touching the target directory.
             & cmd.exe /c rmdir "$script:CodexBin" | Out-Null
-        } else {
+        }
+        else {
             Remove-Item -LiteralPath $script:CodexBin -Recurse -Force
         }
     }
 
     try {
         New-Item -ItemType Junction -Path $script:CodexBin -Target (Join-Path $VersionDir 'bin') -Force | Out-Null
-    } catch {
+    }
+    catch {
         # No junction: copy the binaries and resources directly to the managed root.
         Write-Warn 'Codex: could not create the junction; using a direct copy instead.'
         New-Item -ItemType Directory -Force -Path $script:CodexBin | Out-Null
@@ -695,8 +705,8 @@ function Remove-OldCodexVersions {
     if (-not (Test-Path -LiteralPath $script:CodexVersions)) { return }
 
     $dirs = @(Get-ChildItem -LiteralPath $script:CodexVersions -Directory |
-        Where-Object { $_.Name -ne $CurrentVersion } |
-        Sort-Object -Property LastWriteTime -Descending)
+            Where-Object { $_.Name -ne $CurrentVersion } |
+            Sort-Object -Property LastWriteTime -Descending)
 
     $dirs | Select-Object -Skip ([Math]::Max($Keep - 1, 0)) | ForEach-Object {
         Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
@@ -725,7 +735,8 @@ function Install-Codex {
         try {
             if ([string]::IsNullOrWhiteSpace($Version)) { $latest = Get-CodexLatestVersion }
             else { $latest = Normalize-Version $Version }
-        } catch {
+        }
+        catch {
             Write-Warn "Could not check the latest version: $($_.Exception.Message)"
         }
         Write-Info "Codex: installed $(if ($installed) { $installed } else { 'none' }), available $(if ($latest) { $latest } else { 'unknown' })"
@@ -832,7 +843,8 @@ function Install-Codex {
                 New-Item -ItemType Directory -Force -Path $pathDir | Out-Null
                 Copy-Item -LiteralPath $rg.Source -Destination (Join-Path $pathDir 'rg.exe') -Force
             }
-        } finally {
+        }
+        finally {
             Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
@@ -886,10 +898,12 @@ function Install-Codex {
                     }
                 }
                 finally { $hostArchive.Dispose() }
-            } finally {
+            }
+            finally {
                 Remove-Item -LiteralPath $hostTemp -Recurse -Force -ErrorAction SilentlyContinue
             }
-        } catch {
+        }
+        catch {
             Write-Warn "Codex: could not install codex-code-mode-host.exe: $($_.Exception.Message)"
         }
     }
@@ -929,9 +943,11 @@ function Install-Bun {
     if ($Check) {
         Write-Info 'Bun: installed version (winget)'
         & $winget.Source list @packageArgs
-        if ($LASTEXITCODE -eq -1978335212) { # APPINSTALLER_CLI_ERROR_NO_APPLICATIONS_FOUND
+        if ($LASTEXITCODE -eq -1978335212) {
+            # APPINSTALLER_CLI_ERROR_NO_APPLICATIONS_FOUND
             Write-Info 'Bun: not installed through winget.'
-        } elseif ($LASTEXITCODE -ne 0) {
+        }
+        elseif ($LASTEXITCODE -ne 0) {
             throw "winget list failed (exit code $LASTEXITCODE)."
         }
         Write-Info 'Bun: available version (winget)'
@@ -945,11 +961,14 @@ function Install-Bun {
     if ($Force) { $installArgs += '--force' }
     Write-Info 'Bun: installing or updating through winget'
     & $winget.Source install @installArgs
-    if ($LASTEXITCODE -eq -1978335189) { # APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE
+    if ($LASTEXITCODE -eq -1978335189) {
+        # APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE
         Write-Info 'Bun: already up to date. Nothing to do.'
-    } elseif ($LASTEXITCODE -ne 0) {
+    }
+    elseif ($LASTEXITCODE -ne 0) {
         throw "winget install failed (exit code $LASTEXITCODE)."
-    } else {
+    }
+    else {
         Write-Info 'Bun: installed or updated successfully.'
     }
 }
@@ -977,10 +996,12 @@ function Remove-WingetPackages {
             & winget uninstall --id $id --silent --disable-interactivity --accept-source-agreements | Out-Null
             if ($LASTEXITCODE -eq 0) {
                 Write-Info "winget: $id uninstalled"
-            } else {
+            }
+            else {
                 Write-Warn "winget: could not uninstall $id (exit code $LASTEXITCODE); it may be in use."
             }
-        } catch {
+        }
+        catch {
             Write-Warn "winget: error uninstalling ${id}: $($_.Exception.Message)"
         }
     }
@@ -1021,16 +1042,17 @@ if ($RemoveWinget -and -not $Check) {
 # OpenCode and Codex come first so their directories are prepended before Bun's
 # winget Links directory (which may contain shims for the same commands).
 foreach ($cli in @(
-    @{ Enabled = $doOpenCode; Name = 'opencode'; ExePath = $script:OpenCodeExe; DefaultArgument = '--auto' }
-    @{ Enabled = $doCodex; Name = 'codex'; ExePath = $script:CodexExe; DefaultArgument = '--yolo' }
-    @{ Enabled = $doBun; Name = 'bun'; ExePath = $null; DefaultArgument = '' }
-)) {
+        @{ Enabled = $doOpenCode; Name = 'opencode'; ExePath = $script:OpenCodeExe; DefaultArgument = '--auto' }
+        @{ Enabled = $doCodex; Name = 'codex'; ExePath = $script:CodexExe; DefaultArgument = '--yolo' }
+        @{ Enabled = $doBun; Name = 'bun'; ExePath = $null; DefaultArgument = '' }
+    )) {
     if (-not $cli.Enabled) { continue }
     try {
         if ($cli.Name -eq 'bun') { $cli.ExePath = Find-BunExe }
         $defaultArgument = if ($Wrappers) { $cli.DefaultArgument } else { '' }
         Repair-CliEnvironment -Name $cli.Name -ExePath $cli.ExePath -DefaultArgument $defaultArgument
-    } catch { Write-Fail "$($cli.Name): environment setup failed: $($_.Exception.Message)"; $script:HadError = $true }
+    }
+    catch { Write-Fail "$($cli.Name): environment setup failed: $($_.Exception.Message)"; $script:HadError = $true }
 }
 
 if ($doOpenCode) {

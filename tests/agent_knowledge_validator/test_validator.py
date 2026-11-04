@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -55,10 +56,24 @@ class ValidatorContractTests(unittest.TestCase):
 
     def git(self, *arguments: str, check: bool = True) -> str:
         result = subprocess.run(
-            ["git", "-C", str(self.repo), *arguments],
+            [
+                "git",
+                "-c",
+                "commit.gpgsign=false",
+                "-c",
+                "tag.gpgsign=false",
+                "-C",
+                str(self.repo),
+                *arguments,
+            ],
             text=True,
             capture_output=True,
             check=False,
+            env={
+                **os.environ,
+                "GIT_CONFIG_GLOBAL": os.devnull,
+                "GIT_CONFIG_SYSTEM": os.devnull,
+            },
         )
         if check and result.returncode:
             self.fail(result.stderr)
@@ -82,6 +97,11 @@ class ValidatorContractTests(unittest.TestCase):
             text=True,
             capture_output=True,
             check=False,
+            env={
+                **os.environ,
+                "GIT_CONFIG_GLOBAL": os.devnull,
+                "GIT_CONFIG_SYSTEM": os.devnull,
+            },
         )
 
     def update_agent(self) -> None:

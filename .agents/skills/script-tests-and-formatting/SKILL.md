@@ -67,7 +67,16 @@ runtime dependencies.
    ```
 3. Inspect `git diff`. If `make format` was explicitly used, review its
    rewrites and never commit unrelated formatting.
-4. To add a validator:
+4. Installation and removal:
+   - developer tools install under `${PREFIX}/libexec/scripts`
+     (`TESTS_FORMAT_DIR`), not `BINDIR`; `TESTS_FORMAT_LINKS=1` adds
+     compatibility symlinks;
+   - `make all` installs only the Perl runtime helper; use the explicit
+     `install-tests-format` target for validators;
+   - every install target has a matching `uninstall-*` target and honors
+     `DESTDIR`.
+
+5. To add a validator:
    - write it as POSIX `sh` unless it needs Perl;
    - use `mktemp` and a cleanup trap;
    - print a clear log path and use meaningful exit codes;
@@ -89,7 +98,7 @@ runtime dependencies.
      check; the platform workflow runs native/isolated checks. The standalone
      Windows xerj updater suite is `pwsh -NoProfile -File windows/tests/test-update-xerj.ps1`;
      it uses temporary paths and mocked downloads/clients, not real installs.
-5. To add a regression test:
+6. To add a regression test:
    - use POSIX `sh` or core-module Perl for portable shell/tool tests; use the
      Python standard library when a filesystem harness needs to exercise both
      platform-specific sync scripts without sourcing their deployment entry
@@ -102,7 +111,7 @@ runtime dependencies.
      `tests/test_sync_website_filters.py`; it runs both the rsync and copy
      staging paths, tests initial and existing destinations, and preserves a
      temporary `.sync.lock` without touching a real document root.
-6. The permission policy is content-based: directories and scripts are 0755,
+7. The permission policy is content-based: directories and scripts are 0755,
    data is 0644, Makefiles are 0755. Use `--check` to report and
    `--dry-run` to preview. Only `make fix-permissions` applies changes.
 

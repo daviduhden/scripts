@@ -12,10 +12,10 @@ use `bash debian/<script>.bash` with the privileges required by that script.
 
 | Script | Purpose |
 | --- | --- |
-| [add-gh-cli-repo.bash](add-gh-cli-repo.bash) | Adds the official GitHub CLI APT repository with a deb822 source and keyring, then installs `gh`. |
-| [add-i2pd-repo.bash](add-i2pd-repo.bash) | Adds the Purple I2P APT repository, installs `i2pd`, and starts its service on supported init systems. |
-| [add-lynis-repo.bash](add-lynis-repo.bash) | Adds the CISOfy APT repository and installs Lynis. |
-| [add-tor-repo.bash](add-tor-repo.bash) | Adds the Tor Project APT repository, installs Tor, and configures its service. |
+| [add-gh-cli-repo.bash](add-gh-cli-repo.bash) | Adds the official GitHub CLI APT repository with a deb822 source and a fingerprint-checked keyring, then installs `gh`. |
+| [add-i2pd-repo.bash](add-i2pd-repo.bash) | Adds the Purple I2P APT repository with a fingerprint-checked keyring, installs `i2pd`, and starts its service on supported init systems. |
+| [add-lynis-repo.bash](add-lynis-repo.bash) | Adds the CISOfy APT repository with a fingerprint-checked keyring and installs Lynis. |
+| [add-tor-repo.bash](add-tor-repo.bash) | Adds the Tor Project APT repository with a fingerprint-checked keyring, installs Tor, and configures its service. |
 | [ai-purge-history.bash](ai-purge-history.bash) | Deletes Codex, Copilot, OpenCode, and project-local Swival history/state while retaining configuration and credentials. Crush data is preserved unless `--include-crush-data` is given. Supports `--dry-run`/`-n` or `DRY_RUN=1`. |
 | [clean-logs.bash](clean-logs.bash) | Deletes compressed logs under `/var/log` and `.old` files older than 7 days in `/var/log`, `/var/tmp`, `/tmp` and `/etc`. Real deletion requires `--force`; `--older-than DAYS` changes the age. |
 | [enable-tor-transport.bash](enable-tor-transport.bash) | Installs Tor transport support and rewrites APT sources to use it, keeping timestamped source backups. |
@@ -102,6 +102,8 @@ alternatives are `ARGON_EEPROM_SHA256` and `ARGON_CONTROL_SHA256`. Set
 `ARGON_EEPROM_SCRIPT` and `ARGON_CONTROL_SCRIPT` to reviewed local regular files
 to avoid downloads; the same digest requirements apply. Obtain reviewed hashes
 through a trusted channel: calculating a hash from an unreviewed download does
-not establish its authenticity. `--trust-upstream` preserves the upstream
+not establish its authenticity. Monero pins the binaryFate fingerprint and the
+upstream `monerod.service` SHA-256; `BINARYFATE_FPR` and
+`MONEROD_UNIT_SHA256` allow an explicitly reviewed rotation. `--trust-upstream` preserves the upstream
 bootstrap option but executes its unpinned contents as root. Reboot options are
 unchanged. Never execute these utilities as a validation step.

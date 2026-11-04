@@ -118,9 +118,11 @@ Symbolic link creation is explicitly recorded as skipped if Windows does not
 permit it; junctions are tested independently. See
 [tests/README.md](tests/README.md) for details.
 
-The previous validation reported **50 passed cases, 0 failures, and 1 skipped
-case** on Windows 11 Pro (build 26300), PowerShell 7.6.6, and PSScriptAnalyzer
-1.25.0. Symbolic link creation was skipped because Windows did not permit it;
+The previous native validation reported **50 passed cases, 0 failures, and 1
+skipped case** on Windows 11 Pro (build 26300), PowerShell 7.6.6, and
+PSScriptAnalyzer 1.25.0. A Linux-hosted run with PowerShell 7.6.9 reports
+49 passed, 2 skipped (the Windows-only file-locking and junction cases), and
+0 failures. Symbolic link creation was skipped because Windows did not permit it;
 junctions and their cycles were tested. Cancellation was checked using
 `PowerShell.Stop()` before the write committed rather than a physical Ctrl+C
 keystroke. Automatic installation used controlled simulations without modifying

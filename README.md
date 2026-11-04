@@ -10,9 +10,12 @@ Shell, Perl, and PowerShell utilities for system administration and maintenance 
 ├── openbsd/       # Scripts for OpenBSD systems
 ├── perl/          # Perl scripts (portable)
 ├── secureblue/    # Scripts for SecureBlue
-├── windows/       # Windows batch and PowerShell scripts
+├── scripts/       # Standalone agent-knowledge validator
 ├── shell/         # Shell helpers for interactive shells
-└── tests-format/  # Validation, formatting and permission tools
+├── tests/         # Isolated regression suites
+├── tests-format/  # Validation, formatting and permission tools
+├── docs/          # Architecture, troubleshooting and audit records
+└── windows/       # Windows batch and PowerShell scripts
 ```
 
 Each directory documents its scripts, requirements, and usage:
@@ -228,10 +231,14 @@ commands even with `-n`. Likewise, `perl -c` executes compile-time blocks and
 loads modules; these source validators assume trusted input.
 
 The platform CI workflow runs analysis and isolated regression tests on Linux,
-Windows, and an OpenBSD 7.8 VM. It installs analysis dependencies only in those
-disposable runners; it never runs the administrative utilities against the
-host. Actions are pinned to verified commit hashes. Windows/OpenBSD jobs need
-their native environments; a local Linux pass does not establish their result.
+Windows, and an OpenBSD 7.8 VM. Linux runs the full strict validators and
+`make test`; Windows runs the installer checks, `psfmt -c`, PSScriptAnalyzer,
+and the mocked suites; OpenBSD runs `ksh -n`, the correctness audit, and
+regressions (its port set does not provide every GNU-only validator). It
+installs analysis dependencies only in those disposable runners; it never runs
+the administrative utilities against the host. Actions are pinned to verified
+commit hashes. Windows/OpenBSD jobs need their native environments; a local
+Linux pass does not establish their result.
 
 
 ## File permissions

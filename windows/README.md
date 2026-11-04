@@ -6,7 +6,7 @@ checkout or an extracted copy; its paths are resolved relative to the installer.
 | Script | Purpose |
 | --- | --- |
 | [install-windows.bat](install-windows.bat) | Installs public Perl programs, the PowerShell scripts in this directory, and `test-format/psfmt.ps1`; creates command launchers and optionally adds their directory to the user PATH. |
-| [update-aiclis.ps1](update-aiclis.ps1) | Installs or updates Codex, OpenCode, and Bun for the current user, maintains versioned copies and PATH entries, and adds PowerShell wrappers. |
+| [update-aiclis.ps1](update-aiclis.ps1) | Installs or updates Codex, OpenCode, and Bun for the current user, maintains versioned copies and PATH entries, and optionally adds PowerShell wrappers with `-Wrappers`. |
 | [update-xerj.ps1](update-xerj.ps1) | Installs/updates SHA-256-verified xerj for the current user; `-Codex`, `-Crush`, and `-OpenCode` optionally register its stdio MCP server. |
 | [ai-purge-history.ps1](ai-purge-history.ps1) | Deletes Codex, Copilot, OpenCode, and project-local Swival history/state. It removes the entire `%LOCALAPPDATA%\crush` directory, including any configuration stored there. Use `-DryRun` to preview. |
 | [launcher.cmd](launcher.cmd) | Internal template for installed Perl launchers. Uses the recorded Perl interpreter and forwards arguments and exit status. |
@@ -108,8 +108,9 @@ pwsh -NoProfile -File windows/tests/test-update-xerj.ps1
 
 ## Verified and recoverable release updates
 
-OpenCode downloads now use the official `anomalyco/opencode` GitHub release
-metadata and require an exact asset with a published SHA-256 digest. The ZIP
+Codex and OpenCode downloads use the official GitHub release metadata and
+require an exact asset with a published SHA-256 digest. Codex reads only the
+expected executable entries from its ZIP; OpenCode reads only `opencode.exe`. The ZIP
 must contain exactly one regular root `opencode.exe`; only that entry is read.
 The check trusts GitHub HTTPS and its release metadata, not an independent
 signature. Older releases without digest metadata are refused.

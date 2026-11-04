@@ -255,18 +255,6 @@ is_up_to_date() {
 	return 1
 }
 
-run_update() {
-	local latest_tag
-
-	latest_tag="$(resolve_latest_tag)"
-	log "Latest release tag: ${latest_tag}"
-
-	if is_up_to_date "$latest_tag"; then
-		exit 0
-	fi
-	build_and_install "$latest_tag"
-}
-
 main() {
 	local latest_tag
 	require_root

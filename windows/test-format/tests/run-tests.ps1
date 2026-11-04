@@ -440,7 +440,8 @@ function Install-Module {
     if ($env:PSFMT_TEST_FAIL -eq '1') { throw 'Simulated gallery failure' }
     Write-Warning 'Simulated installation notice'
 }
-& $args[0] @($args | Select-Object -Skip 1)
+$tail = @($args | Select-Object -Skip 1)
+& $args[0] @tail
 exit $LASTEXITCODE
 '@
     $path = New-Source 'dependency/input.ps1'

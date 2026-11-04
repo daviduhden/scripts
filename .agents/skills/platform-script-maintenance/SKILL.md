@@ -51,15 +51,19 @@ GNU options, paths, privilege tools, and service commands. Do not add `sudo`,
    - for a public Perl program, add it to `perl/programs.txt` instead of a
      shell list;
    - update the install description if command names change.
-5. Keep the target's conventions:
+5. Honor `DESTDIR` in new install rules and add a matching `uninstall-*`
+   target. Developer tools belong under `${PREFIX}/libexec/scripts`, units
+   under `${PREFIX}/lib/systemd/user`, and runtime commands in `BINDIR`.
+
+6. Keep the target's conventions:
    - Bash: `set -euo pipefail`, quoted expansions, `main "$@"`.
    - ksh: `set -eu`, `typeset`, `print`, guarded `pipefail` if needed.
    - POSIX `sh`: no arrays, `[[ ]]`, `local`, or `pipefail`.
-6. Make update scripts idempotent. Check installed versions, upsert
+7. Make update scripts idempotent. Check installed versions, upsert
    configuration keys, and do not duplicate PATH or firewall entries.
-7. For privileged or destructive code, follow `system-change-safety` before
+8. For privileged or destructive code, follow `system-change-safety` before
    writing the implementation.
-8. Run the validations below. Do not run the script against the host.
+9. Run the validations below. Do not run the script against the host.
    For website sync changes, exercise the source filtering and stale-path
    cleanup against temporary source and destination trees, including a
    destination with an active `.sync.lock`. Keep the known internal-path list
