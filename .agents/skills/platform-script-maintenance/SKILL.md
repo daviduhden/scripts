@@ -93,6 +93,16 @@ tool is missing, report the check as skipped rather than passed.
 
 ## Common problems
 
+- `secureblue/update-xerj.bash` installs the static musl release per user in
+  `~/.local/bin`, without rpm-ostree layering or run0. Verify the archive's own
+  SHA-256 and exact checksum filename before reading the expected binary.
+  Client flags register stdio MCP only: Codex uses its CLI, Crush a managed
+  `crushrc` block, and OpenCode `mcp.xerj` in strict JSON. Preserve other
+  settings and backups; refuse existing JSONC for manual merging. The user
+  must run an authenticated node separately and supply `XERJ_AUTH` when local
+  key discovery cannot find its data directory. Do not execute this updater
+  during validation.
+
 - A script was added to the directory but not to `*_SCRIPTS` or the README.
 - The installed name still contains `.bash`, `.ksh`, `.sh`, or `.pl`; the
   Makefile strips one of those suffixes.

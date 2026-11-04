@@ -58,6 +58,7 @@ SECUREBLUE_SCRIPTS = \
 	secureblue/update-lyrebird.bash \
 	secureblue/update-perl-modules.bash \
 	secureblue/update-xd-torrent.bash \
+	secureblue/update-xerj.bash \
 	secureblue/ai-purge-history.bash
 
 TESTS_FORMAT_SCRIPTS = \

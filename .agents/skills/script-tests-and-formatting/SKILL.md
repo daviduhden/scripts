@@ -78,7 +78,10 @@ Important boundaries:
    - for agent instruction synchronization, use
      `validate-agent-knowledge.py`; `make test-validate` runs it against the
      current worktree, while `--base REF` supports pull request comparisons.
-     No CI workflow is currently configured in this repository.
+     The PR workflow runs the shared agent-knowledge contract tests and range
+     check; platform validation remains local. The standalone Windows xerj
+     updater suite is `pwsh -NoProfile -File windows/tests/test-update-xerj.ps1`;
+     it uses temporary paths and mocked downloads/clients, not real installs.
 5. To add a regression test:
    - use POSIX `sh` or core-module Perl for portable shell/tool tests; use the
      Python standard library when a filesystem harness needs to exercise both

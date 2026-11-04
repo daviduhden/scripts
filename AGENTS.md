@@ -132,8 +132,8 @@ pwsh -NoProfile -File .\windows\test-format\tests\run-tests.ps1
   - real execution: running the system-changing script itself.
 - Record the exact command and result. Report skipped optional tools as
   skipped, not passed.
-- There is no CI in the current tree. Do not claim that a platform was tested
-  unless it was.
+- The PR workflow validates agent knowledge only. Platform validation remains
+  local; do not claim that a platform was tested unless it was.
 - Before changing a script, read its platform README and check `git status`.
   Do not revert, reformat, or commit unrelated changes.
 - Website sync stages a full repository checkout outside the document root,
