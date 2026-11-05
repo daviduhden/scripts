@@ -58,6 +58,9 @@ and bundled configuration names omit `.yaml`.
   findings must be fixed rather than suppressed. Restricted-PATH tests must
   provide every external command the validators call; OpenBSD has no `printf`
   shell builtin.
+- Keep the canonical agent validator tidy with both the CI distribution's
+  `perltidy` and newer releases; avoid formatting constructs whose line
+  breaking differs between versions.
 - Windows batch files use CRLF, `DisableDelayedExpansion`, quoted paths, and
   `exit /b %ERRORLEVEL%` in launchers. PowerShell formatter/tests require
   PowerShell 7; the installer uses Windows PowerShell for registry and syntax

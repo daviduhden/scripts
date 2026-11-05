@@ -28,6 +28,9 @@
 - Fix Platform Validation failures: strict shellcheck findings, the OpenBSD
   restricted-PATH `printf` dependency, and the Windows installer validator's
   `findstr` pattern.
+- Make the canonical validator tidy across perltidy versions, preserve
+  symlink targets on OpenBSD, and skip POSIX-only normalize-files cases on
+  Windows while keeping stable snapshot comparisons.
 
 ## 1.0.0
 

@@ -598,6 +598,8 @@ subtest 'staging leaves no temporary files behind' => sub {
 # rename. This checks the all-or-nothing behavior of a rename group, including
 # the report's applied count.
 subtest 'partial rename failure rolls the group back' => sub {
+    plan skip_all => 'case-only rename is not meaningful on Windows'
+      if $WINDOWS;
     my $tmp = newtmp();
     my $fx  = File::Spec->catfile( $tmp, 'X' );
     write_raw( $fx, "alpha\n" );
@@ -639,6 +641,8 @@ subtest 'partial rename failure rolls the group back' => sub {
 # 0xFF cannot be part of a valid UTF-8 sequence. The file name must be left
 # alone, but the file's bytes are still normalized by path.
 subtest 'undecodable file name: content processed, rename skipped' => sub {
+    plan skip_all => 'raw 0xFF filenames are not supported on Windows'
+      if $WINDOWS;
     my $tmp = newtmp();
     my $raw = pack( 'C*', 0x62, 0x61, 0x64, 0xFF, 0x2E, 0x74, 0x78, 0x74 );
     my $p   = File::Spec->catfile( $tmp, $raw );
@@ -726,7 +730,8 @@ subtest 'bounded reads distinguish empty, oversized and invalid inputs' => sub {
         'missing file reports failure' );
     my $link = File::Spec->catfile( $tmp, 'link.txt' );
 
-    if ( symlink( $path, $link ) ) {
+    my $made = eval { symlink( $path, $link ) };
+    if ($made) {
         ok( !defined NormalizeFiles::read_all( $link, 100 ),
             'symlink rejected' );
     }

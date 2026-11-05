@@ -90,6 +90,14 @@ description: >-
 - Windows replacement recovery must use unique backup names, check restoration,
   and retain/report the original recovery copy when restoration fails. Simulated
   failure tests do not establish native Windows filesystem compatibility.
+- When comparing file snapshots on Windows, ignore device and inode fields that
+  are not stable between `lstat` and `stat`; compare mode, size, mtime, and
+  ctime instead.
+- Resolve symlink targets with `readlink` and use `abs_path` only as a
+  normalization fallback; `abs_path` can fail under an OpenBSD unveil sandbox.
+- Windows test cases that require case-only renames, raw non-UTF-8 filenames,
+  or symlink creation must skip explicitly instead of relying on POSIX
+  filesystem behavior.
 - Review retained critic diagnostics in
   [the individual Perl audit](../../../docs/perl-audit.md); do not convert its
   justifications into global exclusions or broad `no critic` directives.

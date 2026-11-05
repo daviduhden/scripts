@@ -667,8 +667,16 @@ sub remove_known_host_entry {
     # not silently replaced by a regular file.
     my $target = $known_hosts;
     if ( -l $known_hosts ) {
-        my $resolved = abs_path($known_hosts);
-        $target = $resolved if defined $resolved && length $resolved;
+        my $resolved = readlink $known_hosts;
+        if ( defined $resolved && length $resolved ) {
+            if ( !File::Spec->file_name_is_absolute($resolved) ) {
+                my $link_dir = parent_dir($known_hosts);
+                $link_dir = '.' unless defined $link_dir && length $link_dir;
+                $resolved = File::Spec->catfile( $link_dir, $resolved );
+            }
+            my $final = abs_path($resolved);
+            $target = defined $final && length $final ? $final : $resolved;
+        }
     }
     my $dir = parent_dir($target);
     $dir = '.' unless defined $dir && length $dir;

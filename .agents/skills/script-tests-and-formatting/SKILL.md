@@ -157,6 +157,13 @@ Makefiles whose generated `config.mk` is absent. On OpenBSD, `mbake` and
   mishandle a pattern combining a backslash and wildcard such as
   `windows\*.ps1`; require a plain literal token such as `collect_ps_program`
   instead.
+- Keep `scripts/validate-agent-knowledge.pl` tidy with both the Ubuntu
+  `perltidy` package used by CI and newer releases. Long method chains can be
+  split differently across versions, so prefer short assignments and separate
+  method calls.
+- The Windows job runs `test-normalize-files.pl`; keep POSIX-only cases
+  (case-only rename rollback, raw 0xFF filenames, symlink creation) guarded by
+  explicit Windows skips.
 - `validate-perl.sh --format` runs `perltidy` in place; it uses `-npro` so a developer
   profile does not change the result.
 - `make test-tooling` covers the shell, Perl, and Make validator modes, strict

@@ -1596,7 +1596,9 @@ sub atomic_write {
 sub same_snapshot {
     my ( $before, $after ) = @_;
     return 0 unless @$before && @$after;
-    for my $index ( 0, 1, 2, 7, 9, 10 ) {
+    my @indices = ( 2, 7, 9, 10 );
+    unshift @indices, 0, 1 unless is_windows();
+    for my $index (@indices) {
         return 0 if $before->[$index] != $after->[$index];
     }
     return 1;
