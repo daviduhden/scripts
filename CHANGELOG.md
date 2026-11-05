@@ -34,6 +34,9 @@
 - Fix the remaining platform failures: correctness-probe false positives,
   OpenBSD unveil path resolution for `/tmp`-style paths, and Windows
   normalize-files collision/directory cases.
+- Harden Windows `normalize-files` reads by skipping snapshot comparisons on
+  handles with unstable metadata, and unveil both original and resolved
+  OpenBSD paths.
 
 ## 1.0.0
 

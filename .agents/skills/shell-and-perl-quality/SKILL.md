@@ -90,12 +90,14 @@ description: >-
 - Windows replacement recovery must use unique backup names, check restoration,
   and retain/report the original recovery copy when restoration fails. Simulated
   failure tests do not establish native Windows filesystem compatibility.
-- When comparing file snapshots on Windows, ignore device and inode fields that
-  are not stable between `lstat` and `stat`; compare mode, size, mtime, and
-  ctime instead.
+- When comparing file snapshots on Windows, ignore device, inode, and ctime
+  fields that are not stable between `lstat` and `stat`; compare mode, size,
+  and mtime instead. `read_all` skips its pre/post snapshot gate on Windows
+  because handle metadata can differ even for an unchanged file.
 - Resolve symlink targets with `readlink` and use `abs_path` only as a
   normalization fallback; `abs_path` can fail under an OpenBSD unveil sandbox.
-  Resolve `/tmp`-style paths before `unveil(2)` as well.
+  Unveil both the resolved `/tmp`-style path and the original spelling, since
+  access may be checked against either.
 - Windows test cases that require case-only renames, case-insensitive
   collisions, raw non-UTF-8 filenames, nested directory renames, or symlink
   creation must skip explicitly instead of relying on POSIX filesystem

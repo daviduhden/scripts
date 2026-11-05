@@ -177,7 +177,13 @@ sub setup_openbsd_sandbox {
               unless defined $repo_unveil && length $repo_unveil;
         }
         $unveil->( $target_unveil, 'rwc' );
-        $unveil->( $repo_unveil,   'rwc' );
+        $unveil->( $target_raw,    'rwc' )
+          if $target_raw ne $target_unveil;
+        $unveil->( $repo_unveil, 'rwc' );
+        $unveil->( $repo_raw,    'rwc' )
+          if defined $repo_raw
+          && defined $repo_unveil
+          && $repo_raw ne $repo_unveil;
 
         # The single-source VERSION file next to this program.
         my ( undef, $dir ) = fileparse($0);
@@ -192,6 +198,8 @@ sub setup_openbsd_sandbox {
             $report_abs = $report_dir
               unless defined $report_abs && length $report_abs;
             $unveil->( $report_abs, 'rwc' );
+            $unveil->( $report_dir, 'rwc' )
+              if $report_dir ne $report_abs;
         }
 
         if ($use_git) {
@@ -1657,11 +1665,14 @@ sub read_all {
         return;
     }
     open my $fh, '<:raw', $path or return;
-    my @opened = stat($fh);
-    if ( !same_snapshot( \@before, \@opened ) ) {
-        close $fh;
-        $! = EAGAIN;
-        return;
+    my $check_snapshot = !is_windows();
+    if ($check_snapshot) {
+        my @opened = stat($fh);
+        if ( !same_snapshot( \@before, \@opened ) ) {
+            close $fh;
+            $! = EAGAIN;
+            return;
+        }
     }
     my $data = '';
     while (1) {
@@ -1684,14 +1695,19 @@ sub read_all {
             return;
         }
     }
-    my @after = stat($fh);
-    return unless close $fh;
-    my @current = lstat($path);
-    if (   !same_snapshot( \@before, \@after )
-        || !same_snapshot( \@before, \@current ) )
-    {
-        $! = EAGAIN;
-        return;
+    if ($check_snapshot) {
+        my @after = stat($fh);
+        return unless close $fh;
+        my @current = lstat($path);
+        if (   !same_snapshot( \@before, \@after )
+            || !same_snapshot( \@before, \@current ) )
+        {
+            $! = EAGAIN;
+            return;
+        }
+    }
+    else {
+        return unless close $fh;
     }
     @$snapshot = @before if $snapshot;
     return $data;
