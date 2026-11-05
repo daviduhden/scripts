@@ -25,6 +25,9 @@
   compatible.
 - Replace the embedded Perl mock in `tests/test_tooling.pl` with standalone
   fixtures under `tests/fixtures/`.
+- Fix Platform Validation failures: strict shellcheck findings, the OpenBSD
+  restricted-PATH `printf` dependency, and the Windows installer validator's
+  `findstr` pattern.
 
 ## 1.0.0
 

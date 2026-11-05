@@ -54,6 +54,10 @@ and bundled configuration names omit `.yaml`.
 - `tests-format/validate-perl.sh` checks syntax, Perl::Critic, and formatting;
   only `--format` rewrites sources. There is no Python validator or runtime
   dependency in the maintained tree.
+- Platform CI runs shellcheck in strict mode, so shellcheck info and warning
+  findings must be fixed rather than suppressed. Restricted-PATH tests must
+  provide every external command the validators call; OpenBSD has no `printf`
+  shell builtin.
 - Windows batch files use CRLF, `DisableDelayedExpansion`, quoted paths, and
   `exit /b %ERRORLEVEL%` in launchers. PowerShell formatter/tests require
   PowerShell 7; the installer uses Windows PowerShell for registry and syntax

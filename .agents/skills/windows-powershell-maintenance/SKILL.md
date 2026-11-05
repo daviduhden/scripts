@@ -128,6 +128,10 @@ already-installed PSScriptAnalyzer; it does not install it.
 - The validator now checks that `psfmt.ps1` exists and declares PowerShell 7,
   and that the launcher mentions `pwsh.exe` and `powershell.exe`. It still does
   not execute any of them.
+- The installer discovery check requires the literal `collect_ps_program`
+  token rather than the `windows\*.ps1` glob: `findstr /l /c:` is unreliable
+  for patterns containing both a backslash and `*`. Keep that function name
+  stable or update the validator with the change.
 
 ## Maintenance & Continuous Learning
 

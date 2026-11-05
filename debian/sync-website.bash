@@ -56,7 +56,9 @@ error() {
 filter_site_tree() {
 	local dir="$1" name path preserve_lock=0
 	[ -d "$dir" ] || return 1
-	[ "${2:-}" = "preserve-lock" ] && preserve_lock=1 || true
+	if [ "${2:-}" = "preserve-lock" ]; then
+		preserve_lock=1
+	fi
 
 	for name in \
 		README.md CODE_OF_CONDUCT.md CODEOFCONDUCT.md CONTRIBUTING.md \
@@ -305,10 +307,10 @@ ATOMIC_RELEASE=""
 ATOMIC_PREVIOUS=""
 
 check_atomic_target() {
-	[ -L "$WWW_DIR" ] && [ -d "$WWW_DIR" ] || {
+	if [ ! -L "$WWW_DIR" ] || [ ! -d "$WWW_DIR" ]; then
 		error 'Atomic mode requires an existing symlink docroot.'
 		return 1
-	}
+	fi
 }
 
 replace_public_link() {

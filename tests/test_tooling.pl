@@ -41,7 +41,7 @@ sub build_fixture {
     for my $name (
         qw(
         uname find sed grep mktemp rm sort wc tr awk dirname mkdir sh bash
-        cat perl
+        cat printf perl
         )
       )
     {

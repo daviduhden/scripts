@@ -301,7 +301,7 @@ run_ldconfig() {
 }
 
 show_post_install_info() {
-	local variant="${1:-$DEFAULT_PRELOAD_VARIANT}"
+	local variant="$DEFAULT_PRELOAD_VARIANT"
 	local so_name so_path
 
 	if [ "$variant" = "default" ]; then

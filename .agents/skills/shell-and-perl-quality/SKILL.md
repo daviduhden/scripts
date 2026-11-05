@@ -54,6 +54,11 @@ description: >-
 - In `openbsd/`, use `typeset` inside functions and avoid `local`, `declare`,
   `readarray`, `mapfile`, `shopt`, here-strings, process substitution, and
   `$'...'`. The project validator rejects them.
+- Avoid `cmd1 && cmd2 || cmd3` for control flow; shellcheck reports SC2015 and
+  strict CI fails. Use an explicit `if` block.
+- When a test replaces `PATH` with a mock directory, link every external
+  command the exercised validator calls. OpenBSD `ksh` has no `printf`
+  builtin, so `printf` must be present as a command.
 - In `tests-format/`, stay POSIX: no arrays, `[[ ]]`, `local`, or `pipefail`.
 - Sourced `shell/` helpers must not assume they are executed; avoid `exit`
   and use `return` where appropriate.

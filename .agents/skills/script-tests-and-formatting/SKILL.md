@@ -150,6 +150,13 @@ Makefiles whose generated `config.mk` is absent. On OpenBSD, `mbake` and
 - `make format` reported drift after rewriting; review the diff and rerun checks.
 - `validate-shell.sh --format` runs `shfmt -w`; its default `--check` mode
   reports drift without rewriting.
+- Platform CI runs `validate-shell.sh --check --strict`; shellcheck info and
+  warning findings are failures. Fix them rather than suppressing them
+  without a documented reason.
+- Windows batch validators run on a real Windows runner. `findstr /l /c:` can
+  mishandle a pattern combining a backslash and wildcard such as
+  `windows\*.ps1`; require a plain literal token such as `collect_ps_program`
+  instead.
 - `validate-perl.sh --format` runs `perltidy` in place; it uses `-npro` so a developer
   profile does not change the result.
 - `make test-tooling` covers the shell, Perl, and Make validator modes, strict
