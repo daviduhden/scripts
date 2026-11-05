@@ -31,6 +31,9 @@
 - Make the canonical validator tidy across perltidy versions, preserve
   symlink targets on OpenBSD, and skip POSIX-only normalize-files cases on
   Windows while keeping stable snapshot comparisons.
+- Fix the remaining platform failures: correctness-probe false positives,
+  OpenBSD unveil path resolution for `/tmp`-style paths, and Windows
+  normalize-files collision/directory cases.
 
 ## 1.0.0
 

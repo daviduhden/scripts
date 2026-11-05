@@ -138,7 +138,7 @@ detect_host() {
 # deliberately flat, conservative list used by the command probe below.
 # ------------------------------------------------------------------
 
-KEYWORDS='if then else elif fi for while until do done case esac in function select time local typeset declare readonly export unset set shift return exit break continue echo printf print read cd eval exec source . : true false test [ [[ command builtin env umask ulimit wait trap hash type pwd getopts let whence emulate autoload newgrp'
+KEYWORDS='if then else elif fi for while until do done case esac in function select time local typeset declare readonly export unset set shift return exit break continue echo printf print read cd eval exec source . : true false test [ [[ command builtin env umask ulimit wait trap hash type pwd getopts let whence emulate autoload newgrp shopt'
 
 # ------------------------------------------------------------------
 # Commands known to exist on each platform (used by the probe that
@@ -152,7 +152,7 @@ COMMON_CMDS='awk bash basename bmake bzip2 cat cc chgrp chmod chown chsh clang c
 
 OPENBSD_CMDS='doas rcctl sysmerge sysupgrade syspatch dbupdate pkg_add pkg_delete pkg_info acme-client crush lynis signify'
 
-DEBIAN_CMDS='apt apt-get apt-cache dpkg dpkg-query lsb_release needrestart runuser lscpu lspci lsusb free uptime ip ss journalctl systemctl update-rc.d chkconfig service sv herd rc-update rc-service s6-rc s6-svc systemd runit runit-init openrc-init shepherd s6-svscan tor torsocks i2pd monerod monero-wallet-cli monero-lws-daemon useradd groupadd logname sha256sum certbot lynis systemcheck nproc sysctl btop fastfetch edit signify go'
+DEBIAN_CMDS='apt apt-get apt-cache dpkg dpkg-query lsb_release needrestart runuser lscpu lspci lsusb free uptime ip ss journalctl systemctl update-rc.d chkconfig service sv herd rc-update rc-service s6-rc s6-svc systemd runit runit-init openrc-init shepherd s6-svscan tor torsocks i2pd monerod monero-wallet-cli monero-lws-daemon useradd groupadd logname sha256sum certbot lynis systemcheck nproc sysctl btop fastfetch edit signify go dracut dtc lsinitrd'
 
 SECUREBLUE_CMDS='rpm rpm-ostree bootc ujust flatpak fwupdmgr fwupdtool fpaste run0 run0edit runuser journalctl systemctl ip ss lsblk blkid free uptime logname brew brew-proxy pipx task kpackagetool6 7z socat clamonacc clamdscan freshclam clamd semanage restorecon getenforce setenforce setsebool yt-dlp ffmpeg cargo rustc rustup go nproc dmesg sysctl lynis'
 
@@ -524,7 +524,7 @@ skip_hd == 1 {
     # the pattern list up to the first ')'. Function definitions
     # ("name() {") are unaffected: the character before the ')' is
     # '(', which is not part of a case pattern.
-    if (line ~ /^[[:space:]]*[][A-Za-z0-9_.*?|[:space:]-]+\)/)
+    if (line ~ /^[[:space:]]*[][A-Za-z0-9_.*?|:[:space:]-]+\)/)
         sub(/^[^)]*\)/, "", line)
 
     # Continuation of a command line ending with a backslash:
@@ -728,6 +728,7 @@ scan_one() {
 	awk -f "$VCEXTAWK" "$f" 2>/dev/null | sort -u |
 		while IFS= read -r c; do
 			[ -n "$c" ] || continue
+			[ "$c" = "QQUOTED" ] && continue
 			case " $KEYWORDS " in
 			*" $c "*) continue ;;
 			esac

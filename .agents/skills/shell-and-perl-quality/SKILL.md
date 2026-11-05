@@ -95,9 +95,11 @@ description: >-
   ctime instead.
 - Resolve symlink targets with `readlink` and use `abs_path` only as a
   normalization fallback; `abs_path` can fail under an OpenBSD unveil sandbox.
-- Windows test cases that require case-only renames, raw non-UTF-8 filenames,
-  or symlink creation must skip explicitly instead of relying on POSIX
-  filesystem behavior.
+  Resolve `/tmp`-style paths before `unveil(2)` as well.
+- Windows test cases that require case-only renames, case-insensitive
+  collisions, raw non-UTF-8 filenames, nested directory renames, or symlink
+  creation must skip explicitly instead of relying on POSIX filesystem
+  behavior.
 - Review retained critic diagnostics in
   [the individual Perl audit](../../../docs/perl-audit.md); do not convert its
   justifications into global exclusions or broad `no critic` directives.

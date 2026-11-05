@@ -198,6 +198,9 @@ subtest 'ASCII name already valid: no changes required' => sub {
 # collision, keep both byte streams, and refuse to overwrite one with the
 # other; exit 2 means a human must resolve the conflict.
 subtest 'collisions are detected and skipped (case-sensitive)' => sub {
+    plan skip_all =>
+      'case-insensitive Windows filesystem cannot hold both names'
+      if $WINDOWS;
     my $tmp = newtmp();
     my $a   = File::Spec->catfile( $tmp, 'Foo.txt' );
     my $b   = File::Spec->catfile( $tmp, 'foo.txt' );
@@ -213,6 +216,9 @@ subtest 'collisions are detected and skipped (case-sensitive)' => sub {
 };
 
 subtest 'case-insensitive collision (different files)' => sub {
+    plan skip_all =>
+      'case-insensitive Windows filesystem cannot hold both names'
+      if $WINDOWS;
     my $tmp = newtmp();
     my $a   = File::Spec->catfile( $tmp, 'README.TXT' );
     my $b   = File::Spec->catfile( $tmp, 'readme.txt' );
@@ -238,6 +244,8 @@ subtest 'case-only rename' => sub {
 };
 
 subtest 'nested directories are renamed deepest-first' => sub {
+    plan skip_all => 'nested directory rename semantics differ on Windows'
+      if $WINDOWS;
     my $tmp = newtmp();
     my $sub = File::Spec->catdir( $tmp, 'Tema 1', 'Sub Dir' );
     make_path($sub);

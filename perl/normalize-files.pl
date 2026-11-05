@@ -164,9 +164,20 @@ sub setup_openbsd_sandbox {
             $unveil->( $inc, 'r' );
         }
 
-        # The tree being processed, plus repository metadata for git.
-        $unveil->( $target_raw, 'rwc' );
-        $unveil->( $repo_raw,   'rwc' );
+        # The tree being processed, plus repository metadata for git. Resolve
+        # /tmp-style symlinks before unveil so the kernel checks the same path
+        # the program later opens.
+        my $target_unveil = abs_path($target_raw);
+        $target_unveil = $target_raw
+          unless defined $target_unveil && length $target_unveil;
+        my $repo_unveil;
+        if ( defined $repo_raw && length $repo_raw ) {
+            $repo_unveil = abs_path($repo_raw);
+            $repo_unveil = $repo_raw
+              unless defined $repo_unveil && length $repo_unveil;
+        }
+        $unveil->( $target_unveil, 'rwc' );
+        $unveil->( $repo_unveil,   'rwc' );
 
         # The single-source VERSION file next to this program.
         my ( undef, $dir ) = fileparse($0);
@@ -176,7 +187,11 @@ sub setup_openbsd_sandbox {
 
         # --report may point outside the processed tree.
         if ( defined $cfg->{report} ) {
-            $unveil->( dirname( $cfg->{report} ), 'rwc' );
+            my $report_dir = dirname( $cfg->{report} );
+            my $report_abs = abs_path($report_dir);
+            $report_abs = $report_dir
+              unless defined $report_abs && length $report_abs;
+            $unveil->( $report_abs, 'rwc' );
         }
 
         if ($use_git) {
@@ -1596,8 +1611,8 @@ sub atomic_write {
 sub same_snapshot {
     my ( $before, $after ) = @_;
     return 0 unless @$before && @$after;
-    my @indices = ( 2, 7, 9, 10 );
-    unshift @indices, 0, 1 unless is_windows();
+    my @indices = ( 2, 7, 9 );
+    unshift @indices, 0, 1, 10 unless is_windows();
     for my $index (@indices) {
         return 0 if $before->[$index] != $after->[$index];
     }
@@ -1726,7 +1741,7 @@ sub process_content {
         my $sniff = read_sniff( $n->{raw_path}, 8192 );
         if ( !defined $sniff ) {
             $R->{errors}++;
-            emit_error( 'cannot read: ' . disp( $n->{rel} ) );
+            emit_error( 'cannot sniff: ' . disp( $n->{rel} ) );
             next;
         }
 
