@@ -179,6 +179,12 @@ sub setup_openbsd_sandbox {
         $unveil->( $target_unveil, 'rwc' );
         $unveil->( $target_raw,    'rwc' )
           if $target_raw ne $target_unveil;
+        my $target_parent = dirname($target_unveil);
+        $unveil->( $target_parent, 'rx' )
+          if defined $target_parent && length $target_parent;
+        my $raw_parent = dirname($target_raw);
+        $unveil->( $raw_parent, 'rx' )
+          if $raw_parent ne $target_parent;
         $unveil->( $repo_unveil, 'rwc' );
         $unveil->( $repo_raw,    'rwc' )
           if defined $repo_raw
@@ -766,7 +772,8 @@ sub scan_tree {
     while ( my $d = pop @stack ) {
         my $dh;
         if ( !opendir( $dh, $d->{raw} ) ) {
-            emit_error( 'cannot open directory: ' . disp( $d->{raw} ) );
+            emit_error(
+                'cannot open directory: ' . disp( $d->{raw} ) . " : $!" );
             $CFG->{_result}{errors}++ if $CFG->{_result};
             next;
         }

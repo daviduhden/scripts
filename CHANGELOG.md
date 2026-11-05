@@ -35,8 +35,8 @@
   OpenBSD unveil path resolution for `/tmp`-style paths, and Windows
   normalize-files collision/directory cases.
 - Harden Windows `normalize-files` reads by skipping snapshot comparisons on
-  handles with unstable metadata, and unveil both original and resolved
-  OpenBSD paths.
+  handles with unstable metadata, and unveil both original/resolved OpenBSD
+  paths with their parent directories.
 
 ## 1.0.0
 

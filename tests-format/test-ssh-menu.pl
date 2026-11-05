@@ -160,7 +160,8 @@ if ( $kh_after !~ /^\|1\|hash-of-something\|key/m ) {
     close $lt;
 
     my $link = File::Spec->catfile( $tmp, 'known_hosts_link' );
-    if ( symlink( $link_target, $link ) ) {
+    my $made = eval { symlink( $link_target, $link ) };
+    if ($made) {
         local $ENV{SSH_MENU_KNOWN_HOSTS} = $link;
 
         # One listable host: delete is menu item 2.

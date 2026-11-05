@@ -96,8 +96,9 @@ description: >-
   because handle metadata can differ even for an unchanged file.
 - Resolve symlink targets with `readlink` and use `abs_path` only as a
   normalization fallback; `abs_path` can fail under an OpenBSD unveil sandbox.
-  Unveil both the resolved `/tmp`-style path and the original spelling, since
-  access may be checked against either.
+  Unveil both the resolved `/tmp`-style path and the original spelling, plus
+  the parent directory with `rx`, since path traversal may be checked against
+  either form.
 - Windows test cases that require case-only renames, case-insensitive
   collisions, raw non-UTF-8 filenames, nested directory renames, or symlink
   creation must skip explicitly instead of relying on POSIX filesystem
