@@ -208,6 +208,14 @@ set_config_directive() {
 	printf '%s %s\n' "$directive" "$value" >>"$file"
 }
 
+# Remove a directive and any commented copies. Used for options that newer
+# ClamAV releases no longer accept, so reruns clean up older configurations.
+remove_config_directive() {
+	local file="$1" directive="$2"
+
+	sed -i -e "/^#\\?${directive}[[:space:]]/d" "$file"
+}
+
 # Configure the scan instance to use a UNIX socket, on-access monitoring of
 # /var/home, and bounded log growth, then enable it at boot.
 configure_clamd() {
@@ -223,8 +231,10 @@ configure_clamd() {
 		User "$CLAMAV_USER"
 	set_config_directive /etc/clamd.d/scan.conf \
 		LogFile /var/log/clamav/clamd.log
-	set_config_directive /etc/clamd.d/scan.conf \
-		ScanOnAccess yes
+	# ScanOnAccess only exists in ClamAV <= 0.101. On-access scanning is
+	# now enabled by OnAccessIncludePath and performed by clamonacc, so
+	# drop the obsolete directive that older runs may have written.
+	remove_config_directive /etc/clamd.d/scan.conf ScanOnAccess
 	set_config_directive /etc/clamd.d/scan.conf \
 		OnAccessIncludePath /var/home
 	set_config_directive /etc/clamd.d/scan.conf \

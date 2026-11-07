@@ -131,6 +131,10 @@ tool is missing, report the check as skipped rather than passed.
   key discovery cannot find its data directory. Do not execute this updater
   during validation.
 
+- `secureblue/setup-clamav.bash` must not write `ScanOnAccess`: that directive
+  only applies to ClamAV <= 0.101. Current releases enable on-access scanning
+  through `OnAccessIncludePath`, with `clamonacc` performing the scans, so
+  reruns must also delete the obsolete directive left by older configurations.
 - A script was added to the directory but not to `*_SCRIPTS` or the README.
 - A source script is missing its extension, or an installed name still
   contains `.bash`, `.ksh`, `.sh`, `.pl`, or a bundled `.yaml` suffix.
