@@ -166,7 +166,9 @@ Makefiles whose generated `config.mk` is absent. On OpenBSD, `mbake` and
   explicit Windows skips.
 - The OpenBSD VM job sets `TMPDIR` under `GITHUB_WORKSPACE`; `normalize-files`
   also canonicalizes its root there because `/tmp` can be a symlink that
-  unveil resolves separately.
+  unveil resolves separately. Its regression suite disables the sandbox with
+  `NORMALIZE_FILES_NO_SANDBOX=1` because the VM veil rejects the temporary
+  trees the suite creates.
 - The correctness command probe must ignore the internal `QQUOTED` placeholder
   and accept case labels containing `:`. Keep Debian-only tools such as
   `dracut`, `dtc`, and `lsinitrd` in `DEBIAN_CMDS` so the Ubuntu runner does

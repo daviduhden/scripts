@@ -37,7 +37,8 @@
 - Harden Windows `normalize-files` reads by skipping snapshot comparisons on
   handles with unstable metadata, and unveil both original/resolved OpenBSD
   paths with `rwcx` and their parent directories. Run OpenBSD regressions
-  with `TMPDIR` under the workspace instead of `/tmp`.
+  with `TMPDIR` under the workspace and `NORMALIZE_FILES_NO_SANDBOX=1` because
+  the VM veil rejects temporary trees.
 
 ## 1.0.0
 

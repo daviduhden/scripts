@@ -32,6 +32,11 @@ require $SCRIPT;
 # Windows lacks the POSIX permission-bit behavior some tests rely on.
 my $WINDOWS = ( $^O eq 'MSWin32' ) ? 1 : 0;
 
+# The suite creates temporary trees inside the test process. OpenBSD unveil in
+# the isolated VM cannot see those trees, so exercise the filesystem behavior
+# without the sandbox here; production runs keep the sandbox enabled.
+$ENV{NORMALIZE_FILES_NO_SANDBOX} = 1;
+
 # ---------------------------------------------------------------- helpers
 
 # Read a file as bytes without newline translation. Returning undef on open

@@ -138,6 +138,7 @@ sub windows_path_encoding {
 # the program may touch, lock the veil, then pledge. No-op on other systems.
 sub setup_openbsd_sandbox {
     my ( $cfg, $target_raw, $repo_raw ) = @_;
+    return if $ENV{NORMALIZE_FILES_NO_SANDBOX};
     return unless is_openbsd();
 
     my $use_git = ( $repo_raw && !$cfg->{no_git} ) ? 1 : 0;
