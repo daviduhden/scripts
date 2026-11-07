@@ -2146,6 +2146,14 @@ sub run {
         exit 3;
     }
 
+    # OpenBSD unveil resolves symlinks; operate on the resolved root so the
+    # path used for scanning matches the unveiled path (notably /tmp).
+    if ( is_openbsd() ) {
+        my $resolved = abs_path($target_raw);
+        $target_raw = $resolved
+          if defined $resolved && length $resolved;
+    }
+
     my $R = reset_report();
     $CFG->{_result} = $R;
 

@@ -103,4 +103,6 @@ jobs:
             set -eu
             for script in openbsd/*.ksh; do ksh -n "$script"; done
             /bin/sh tests-format/validate-correctness.sh --target openbsd .
+            mkdir -p "$GITHUB_WORKSPACE/.tmp"
+            export TMPDIR="$GITHUB_WORKSPACE/.tmp"
             make test-regression
