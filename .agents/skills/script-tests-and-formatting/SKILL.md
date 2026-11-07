@@ -38,10 +38,20 @@ while parsing untrusted Makefiles. `perl -c` loads modules and executes compile-
 sources must also be trusted.
 
 Windows batch/PowerShell checks run natively. Platform CI runs safe checks and
-regressions on Linux, Windows, and an OpenBSD 7.8 VM; it must never execute
-administrative scripts against a host. Pin Actions to verified upstream
-commit hashes and document changes to runner dependencies separately from
-runtime dependencies.
+regressions on Ubuntu 24.04, Windows Server 2025 (`windows-2025`), and an
+OpenBSD 8.0 VM; it must never execute administrative scripts against a host.
+The Windows job pins `PSScriptAnalyzer` 1.25.0. `actions/checkout` is pinned to
+v7.0.1 and `vmactions/openbsd-vm` to v1.4.9 by full commit SHA. Keep runner
+images, VM releases, analyzer versions, and action SHAs as separate
+dependencies: re-check the upstream repository and release notes, confirm the
+SHA belongs to the documented tag, and run `actionlint` before changing a pin.
+Do not substitute floating `ubuntu-latest` or `windows-latest` labels in a job
+whose behavior depends on a specific image.
+`zizmor` 1.32.0 must report zero findings in regular, pedantic and auditor
+modes. The two `shell: cmd` steps are the only inline exception: the repository
+batch installer and launchers must run under CMD, so the `misfeature` finding
+is suppressed with that specific justification. Do not replace those steps
+with a wrapper that hides whether the batch files actually ran.
 
 ## Procedure
 
@@ -125,6 +135,37 @@ make test-regression
 make check-permissions
 ```
 
+### CI workflow checks
+
+Workflow syntax and expression validation is static:
+
+```sh
+actionlint .github/workflows/*.yml
+```
+
+Run `yamllint` only when a repository configuration exists, so the check
+reflects project policy rather than yamllint defaults; this tree currently has
+no `.yamllint` configuration. Do not run the workflow to validate a pin.
+
+Current platform CI pins:
+
+| Dependency | Pin | Notes |
+| --- | --- | --- |
+| `actions/checkout` | `v7.0.1` | `3d3c42e5aac5ba805825da76410c181273ba90b1` |
+| `vmactions/openbsd-vm` | `v1.4.9` | `f1ca8bc8ecc5b6ef7218e5b914836e067e1546d3` |
+| `PSScriptAnalyzer` | `1.25.0` | Latest stable release |
+| OpenBSD VM | `8.0` | Current stable release |
+| Windows runner | `windows-2025` | Windows Server 2025 |
+| Platform Linux runner | `ubuntu-24.04` | Ubuntu 24.04 |
+| Agent-knowledge runner | `ubuntu-latest` | Needs only Git and Perl |
+
+Before changing a pin, read the upstream release notes or changelog, confirm the
+tag resolves to the recorded commit, check that the job's commands still work
+with the new image or release, and run `actionlint`. Keep the version comment
+next to the SHA. OpenBSD VM setup uses package names such as `pkg_add -I bash
+git rsync--`; check for release-specific paths rather than assuming a version
+bump is only a string change.
+
 Individual read-only checks:
 
 ```sh
@@ -153,7 +194,7 @@ Makefiles whose generated `config.mk` is absent. On OpenBSD, `mbake` and
 - Platform CI runs `validate-shell.sh --check --strict`; shellcheck info and
   warning findings are failures. Fix them rather than suppressing them
   without a documented reason.
-- Windows batch validators run on a real Windows runner. `findstr /l /c:` can
+- Windows batch validators run on the `windows-2025` runner. `findstr /l /c:` can
   mishandle a pattern combining a backslash and wildcard such as
   `windows\*.ps1`; require a plain literal token such as `collect_ps_program`
   instead.

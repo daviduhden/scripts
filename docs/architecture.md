@@ -35,5 +35,5 @@ an operator decision.
 ## Tests and CI
 
 `make check` is the read-only validation gate. `make test` runs isolated
-regressions after validation. Platform CI runs Linux, Windows, and OpenBSD 7.8
+regressions after validation. Platform CI runs Linux, Windows, and OpenBSD 8.0
 checks; native platform behavior cannot be established by a Linux-only run.

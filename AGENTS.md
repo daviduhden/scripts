@@ -169,7 +169,7 @@ pwsh -NoProfile -File .\windows\test-format\tests\run-tests.ps1
 - Record the exact command and result. Report skipped optional tools as
   skipped, not passed.
 - PR workflows validate agent knowledge and run isolated Linux, Windows, and
-  OpenBSD 7.8 platform checks. Actions use verified commit hashes; updating
+  OpenBSD 8.0 platform checks. Actions use verified commit hashes; updating
   them requires checking the upstream repository/ref. Do not claim a platform
   was tested until that job actually ran successfully.
 - Before changing a script, read its platform README and check `git status`.

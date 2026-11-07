@@ -74,7 +74,7 @@ semantically relevant; that still requires agent review.
 [../tests/test_tooling.pl](../tests/test_tooling.pl): check-mode immutability,
 explicit formatting, strict missing-tool failures, make-execution opt-in,
 installation paths containing spaces, and failure propagation. The platform
-CI workflow exercises Linux checks, native Windows suites, and OpenBSD 7.8
+CI workflow exercises Linux checks, native Windows suites, and OpenBSD 8.0
 regressions without invoking the system-changing scripts.
 
 Supporting files:

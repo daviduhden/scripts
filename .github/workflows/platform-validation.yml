@@ -17,10 +17,11 @@ concurrency:
 
 jobs:
   linux:
+    name: Linux platform checks
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
       - name: Install analysis tools in the disposable runner
@@ -43,20 +44,21 @@ jobs:
           fi
 
   windows:
-    runs-on: windows-2022
+    name: Windows platform checks
+    runs-on: windows-2025
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
       - name: Install the supported analyzer in the disposable runner
         shell: pwsh
         run: Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force -Repository PSGallery
       - name: Validate batch installer and launchers
-        shell: cmd
+        shell: cmd  # zizmor: ignore[misfeature] required to execute the repository batch installer and launchers
         run: tests-format\validate-windows-installer.bat
       - name: Dry-run the installer
-        shell: cmd
+        shell: cmd  # zizmor: ignore[misfeature] required to execute the repository batch installer and launchers
         run: windows\install-windows.bat --dry-run
       - name: Analyze and format-check PowerShell
         shell: pwsh
@@ -86,16 +88,17 @@ jobs:
           exit $LASTEXITCODE
 
   openbsd:
+    name: OpenBSD platform checks
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
       - name: Analyze and test in an isolated OpenBSD VM
         uses: vmactions/openbsd-vm@f1ca8bc8ecc5b6ef7218e5b914836e067e1546d3 # v1.4.9
         with:
-          release: "7.8"
+          release: "8.0"
           copyback: false
           prepare: |
             pkg_add -I bash git rsync--
