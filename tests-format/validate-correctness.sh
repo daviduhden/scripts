@@ -464,7 +464,7 @@ AWK_SCAN
 # continuations.
 # Output is one candidate per line, in file order; the caller sorts and
 # deduplicates. This is a heuristic lexer, not a shell parser.
-BEGIN { skip_hd = 0; str_cont = 0; code_cont = 0; in_sq = 0 }
+BEGIN { skip_hd = 0; str_cont = 0; code_cont = 0; in_sq = 0; in_array = 0 }
 skip_hd == 1 {
     if ($0 ~ "^" hd_delim "[[:space:]]*$") {
         skip_hd = 0
@@ -472,11 +472,23 @@ skip_hd == 1 {
     }
     next
 }
+in_array == 1 {
+    line = $0
+    sub(/^[[:space:]]*/, "", line)
+    if (line ~ /^\)[[:space:]]*(#.*)?$/) in_array = 0
+    next
+}
 {
     orig = $0
     line = $0
     sub(/^[[:space:]]*/, "", line)
     if (line ~ /^#/) next
+
+    # Multi-line array assignments contain values, not commands.
+    if (line ~ /^[A-Za-z_][A-Za-z0-9_]*\+?=\([[:space:]]*$/) {
+        in_array = 1
+        next
+    }
 
     # Body of a multi-line single-quoted string (e.g. an awk
     # program embedded in the script).
