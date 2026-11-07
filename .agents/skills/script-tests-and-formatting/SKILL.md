@@ -37,9 +37,11 @@ Make evaluation is opt-in via `--make-dry-run`: even `-n` can execute commands
 while parsing untrusted Makefiles. `perl -c` loads modules and executes compile-time blocks, so those
 sources must also be trusted.
 
-Windows batch/PowerShell checks run natively. Platform CI runs safe checks and
-regressions on Ubuntu 24.04, Windows Server 2025 (`windows-2025`), and an
-OpenBSD 8.0 VM; it must never execute administrative scripts against a host.
+Windows batch/PowerShell checks run natively. The manual Platform Validation
+workflow (`workflow_dispatch`) runs safe checks and regressions on Ubuntu 24.04,
+Windows Server 2025 (`windows-2025`), and an OpenBSD 8.0 VM; it must never
+execute administrative scripts against a host and must not run on pushes, pull
+requests, or a schedule.
 The Windows job pins `PSScriptAnalyzer` 1.25.0. `actions/checkout` is pinned to
 v7.0.1 and `vmactions/openbsd-vm` to v1.4.9 by full commit SHA. Keep runner
 images, VM releases, analyzer versions, and action SHAs as separate
@@ -191,9 +193,10 @@ Makefiles whose generated `config.mk` is absent. On OpenBSD, `mbake` and
 - `make format` reported drift after rewriting; review the diff and rerun checks.
 - `validate-shell.sh --format` runs `shfmt -w`; its default `--check` mode
   reports drift without rewriting.
-- Platform CI runs `validate-shell.sh --check --strict`; shellcheck info and
-  warning findings are failures. Fix them rather than suppressing them
-  without a documented reason.
+- The manual Platform Validation workflow runs
+  `validate-shell.sh --check --strict`; shellcheck info and warning findings
+  are failures. Fix them rather than suppressing them without a documented
+  reason.
 - Windows batch validators run on the `windows-2025` runner. `findstr /l /c:` can
   mishandle a pattern combining a backslash and wildcard such as
   `windows\*.ps1`; require a plain literal token such as `collect_ps_program`

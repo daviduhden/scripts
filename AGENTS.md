@@ -168,10 +168,11 @@ pwsh -NoProfile -File .\windows\test-format\tests\run-tests.ps1
   - real execution: running the system-changing script itself.
 - Record the exact command and result. Report skipped optional tools as
   skipped, not passed.
-- PR workflows validate agent knowledge and run isolated Linux, Windows, and
-  OpenBSD 8.0 platform checks. Actions use verified commit hashes; updating
-  them requires checking the upstream repository/ref. Do not claim a platform
-  was tested until that job actually ran successfully.
+- The agent-knowledge workflow runs on pull requests. Platform Validation is
+  manual (`workflow_dispatch`) and runs isolated Linux, Windows, and OpenBSD
+  8.0 checks. Actions use verified commit hashes; updating them requires
+  checking the upstream repository/ref. Do not claim a platform was tested
+  until that job actually ran successfully.
 - Before changing a script, read its platform README and check `git status`.
   Do not revert, reformat, or commit unrelated changes.
 - Website sync stages a full repository checkout outside the document root,

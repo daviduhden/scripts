@@ -237,8 +237,9 @@ Use that flag only for trusted Makefiles: parsing a Makefile can execute shell
 commands even with `-n`. Likewise, `perl -c` executes compile-time blocks and
 loads modules; these source validators assume trusted input.
 
-The platform CI workflow runs analysis and isolated regression tests on Linux,
-Windows Server 2025, and an OpenBSD 8.0 VM. Linux runs the full strict validators and
+The manually dispatched Platform Validation workflow runs analysis and isolated
+regression tests on Linux, Windows Server 2025, and an OpenBSD 8.0 VM. Linux
+runs the full strict validators and
 `make test`; Windows runs the installer checks, `psfmt -c`, PSScriptAnalyzer,
 and the mocked suites; OpenBSD runs `ksh -n`, the correctness audit, and
 regressions (its port set does not provide every GNU-only validator). It
