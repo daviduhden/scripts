@@ -168,9 +168,9 @@ pwsh -NoProfile -File .\windows\test-format\tests\run-tests.ps1
   - real execution: running the system-changing script itself.
 - Record the exact command and result. Report skipped optional tools as
   skipped, not passed.
-- The agent-knowledge workflow runs on pull requests. Platform Validation is
-  manual (`workflow_dispatch`) and runs isolated Linux, Windows, and OpenBSD
-  8.0 checks. Actions use verified commit hashes; updating them requires
+- Both the agent-knowledge and Platform Validation workflows are manual
+  (`workflow_dispatch`). Platform Validation runs isolated Linux, Windows, and
+  OpenBSD 8.0 checks. Actions use verified commit hashes; updating them requires
   checking the upstream repository/ref. Do not claim a platform was tested
   until that job actually ran successfully.
 - Before changing a script, read its platform README and check `git status`.
@@ -210,7 +210,7 @@ A code change without the corresponding agent knowledge maintenance is considere
 
 Never claim completion when the synchronization step has been skipped or has failed.
 
-This review is required after every change to code, configuration, dependencies, features, bug fixes, refactors, tests, workflows, documentation, or repository architecture. At task end, inspect the root and nested `AGENTS.md`, `.github/agents/*.agent.md`, `.agents/skills/**/SKILL.md`, `.github/skills/**/SKILL.md`, `.claude/skills/**/SKILL.md`, and any tool-specific instruction files present (including Cursor and Copilot files). The current repository has one root `AGENTS.md`, five skills under `.agents/skills/`, and PR workflows at `.github/workflows/agent-knowledge-validation.yml` and `.github/workflows/platform-validation.yml`; no specialized agent definitions exist.
+This review is required after every change to code, configuration, dependencies, features, bug fixes, refactors, tests, workflows, documentation, or repository architecture. At task end, inspect the root and nested `AGENTS.md`, `.github/agents/*.agent.md`, `.agents/skills/**/SKILL.md`, `.github/skills/**/SKILL.md`, `.claude/skills/**/SKILL.md`, and any tool-specific instruction files present (including Cursor and Copilot files). The current repository has one root `AGENTS.md`, five skills under `.agents/skills/`, and manual workflows at `.github/workflows/agent-knowledge-validation.yml` and `.github/workflows/platform-validation.yml`; no specialized agent definitions exist.
 
 Map changed paths to the instructions whose scope covers them, then read the applicable skill(s) and their linked references. Update an existing skill when its procedures, tools, assumptions, validation, or reusable knowledge change. Create a skill only when a durable responsibility has no suitable existing skill. Update specialized agent instructions when their workflow or responsibility changes. Remove obsolete or conflicting guidance and verify that changed local references still resolve. Do not add cosmetic edits, timestamps, or task-specific notes solely to satisfy this rule.
 
@@ -245,7 +245,7 @@ contract tests. The validator requires Perl 5.14+ (JSON::PP core) and Git, uses 
 modules, and publishes contract version `1.0.0`. All
 adopting repositories share the same CLI, AK001-AK006 identifiers, output
 schema, and exit codes (`0` pass, `1` policy failure, `2` execution/configuration
-error). For a pull request, pass both revisions with
+error). For a branch review, pass both revisions with
 `--scope range --base BASE_REF --head HEAD_REF`; compare from their merge base.
 
 Read [Agent Knowledge Validation Contract](docs/agent-knowledge-validation.md)
@@ -255,5 +255,5 @@ review; their warnings do not prove or disprove semantic correctness. Keep the
 canonical script and black-box unittest suite byte-identical across adopting
 repositories. Repository-specific requirements belong in the documented TOML
 configuration or a stable `AKX...` extension, never in a private fork of the
-shared rules. The GitHub PR workflow runs the same tests and range command;
+shared rules. The manual GitHub workflow runs the same tests and worktree command;
 it does not edit files or require secrets.

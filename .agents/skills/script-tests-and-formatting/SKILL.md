@@ -103,7 +103,7 @@ with a wrapper that hides whether the batch files actually ran.
     informational and verify package paths before recording them.
    - for agent instruction synchronization, use
      `validate-agent-knowledge.pl`; `make test-validate` runs it against the
-     current worktree. Pull request comparisons require
+     current worktree. Branch comparisons require
      `--scope range --base BASE_REF --head HEAD_REF`.
      The agent workflow runs the shared contract tests and range
      check; the platform workflow runs native/isolated checks. The standalone
