@@ -169,6 +169,9 @@ Makefiles whose generated `config.mk` is absent. On OpenBSD, `mbake` and
   unveil resolves separately. Its regression suite disables the sandbox with
   `NORMALIZE_FILES_NO_SANDBOX=1` because the VM veil rejects the temporary
   trees the suite creates.
+- `tests/test_sync_website_filters.pl` exercises the Debian sync implementation
+  only on Linux; the OpenBSD job runs the ksh implementation. Keep the Debian
+  script's GNU staging assumptions out of the OpenBSD VM.
 - The correctness command probe must ignore the internal `QQUOTED` placeholder
   and accept case labels containing `:`. Keep Debian-only tools such as
   `dracut`, `dtc`, and `lsinitrd` in `DEBIAN_CMDS` so the Ubuntu runner does

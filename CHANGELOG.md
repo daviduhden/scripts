@@ -39,6 +39,8 @@
   paths with `rwcx` and their parent directories. Run OpenBSD regressions
   with `TMPDIR` under the workspace and `NORMALIZE_FILES_NO_SANDBOX=1` because
   the VM veil rejects temporary trees.
+- Run the Debian website-sync filter test only on Linux, leaving the OpenBSD VM
+  to exercise the ksh implementation.
 
 ## 1.0.0
 

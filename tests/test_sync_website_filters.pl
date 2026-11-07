@@ -183,6 +183,8 @@ sub exercise_implementation {
 }
 
 subtest 'debian filter and staging paths' => sub {
+    plan skip_all => 'Debian sync script is exercised on Linux'
+      if $^O eq 'openbsd';
     exercise_implementation( @{ $SYNC_IMPLEMENTATIONS[0] } );
 };
 
@@ -196,6 +198,7 @@ subtest 'openbsd filter and staging paths' => sub {
 subtest 'public symlink is rejected' => sub {
     for my $implementation (@SYNC_IMPLEMENTATIONS) {
         my ( $relative_script, $shell_name ) = @$implementation;
+        next if $^O eq 'openbsd' && $relative_script =~ m{^debian/};
         my $shell = find_command($shell_name);
         next unless defined $shell;
 
