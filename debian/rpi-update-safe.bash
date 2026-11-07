@@ -16,6 +16,18 @@ set -euo pipefail
 
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
+
+# Preserve the original path and arguments so require_root can re-exec the
+# script through sudo without losing user-supplied options.
+if [[ -n ${BASH_SOURCE[0]:-} ]]; then
+	SCRIPT_PATH="${BASH_SOURCE[0]}"
+else
+	SCRIPT_PATH="$0"
+fi
+if command -v readlink >/dev/null 2>&1; then
+	SCRIPT_PATH="$(readlink -f "$SCRIPT_PATH")"
+fi
+SCRIPT_ARGS=("$@")
 export LC_ALL=C
 PERL_CMD="${PERL_CMD:-perl}"
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd -P)
@@ -51,8 +63,30 @@ require_cmd() {
 	command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
 }
 
+# Re-exec through sudo when the script was not started as root. SCRIPT_ARGS
+# keeps the original command line across the privilege boundary.
+ROOT_ENV_VARS=(PERL_CMD BOOTARGS_HELPER)
+
 require_root() {
-	[[ $EUID -eq 0 ]] || die 'must be run as root'
+	if [[ ${EUID:-$(id -u)} -eq 0 ]]; then
+		return 0
+	fi
+	if ! command -v sudo >/dev/null 2>&1; then
+		error "Root privileges are required and sudo was not found."
+		exit 1
+	fi
+	local -a env_args=()
+	local name
+	for name in "${ROOT_ENV_VARS[@]}"; do
+		if [[ -v $name ]]; then
+			env_args+=("$name=${!name}")
+		fi
+	done
+	log "Re-executing this script via sudo to gain root privileges..."
+	if ((${#env_args[@]} > 0)); then
+		exec sudo -- env "${env_args[@]}" "$SCRIPT_PATH" "${SCRIPT_ARGS[@]}"
+	fi
+	exec sudo -- "$SCRIPT_PATH" "${SCRIPT_ARGS[@]}"
 }
 
 cleanup() {
@@ -198,8 +232,8 @@ Usage: rpi-update-safe [--repair-only] [rpi-update arguments...]
 
 Run the official Raspberry Pi updater with rebooting disabled, then remove
 the cgroup_disable=memory boot argument from the Raspberry Pi 5 DTB and
-regenerate its initramfs. The script must run as root on a Raspberry Pi 5
-with /boot/firmware mounted.
+regenerate its initramfs. The script requires root access and re-executes
+itself through sudo on a Raspberry Pi 5 with /boot/firmware mounted.
 
 Options:
   --repair-only  Skip rpi-update and repair the current DTB only.

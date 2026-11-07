@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Re-exec whole-script root helpers through `sudo` on Debian and `run0` on
+  SecureBlue, preserving arguments and documented environment settings.
 - Harden temporary logs and validator state files with `mktemp` and `umask`.
 - Verify Windows Codex release assets against GitHub SHA-256 digests and read
   only expected ZIP entries.

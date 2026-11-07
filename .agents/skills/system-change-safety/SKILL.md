@@ -27,11 +27,14 @@ description: >-
    - destructive or irreversible operation;
    - remote code or package installation.
 2. Identify the required privilege and use the existing mechanism:
-   - Debian: `require_root` or `detect_root_cmd`/`run_root`.
+   - Debian: `require_root` re-execs the whole script through `sudo`;
+     `detect_root_cmd`/`run_root` elevate individual commands.
    - OpenBSD: run as root or use `doas`; never add `sudo` to OpenBSD code.
-   - SecureBlue: `run0`, not `sudo`; the `sudo-wrapper` maps `sudo` to `run0`.
+   - SecureBlue: `require_root` re-execs the whole script through `run0`,
+     not `sudo`; `run_root` elevates individual commands.
    - Windows: per-user operations only; do not add HKLM or elevation.
-   Fail closed with a clear message when the required privilege is absent.
+   Preserve the original arguments and documented environment settings across
+   a re-exec, and fail closed when the elevation tool is absent.
 3. Prefer the existing preview path. `clean-logs`, `ai-purge-history`, and
    the Windows installer have a dry-run flag; do not claim one exists
    elsewhere. If you add a destructive step, add an explicit opt-in or

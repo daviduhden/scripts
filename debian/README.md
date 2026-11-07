@@ -2,13 +2,15 @@
 
 Bash administration helpers for Debian-based systems. Support varies by script;
 repository setup scripts validate the distribution, release, and architecture.
-System installation and maintenance steps require root access or the elevation
-method used by the script. Downloads and package installation require network
-access.
+System installation and maintenance steps require root access. Scripts whose
+entire operation needs root re-exec themselves through `sudo`; scripts that
+elevate only individual steps use `sudo` for those commands. Downloads and
+package installation require network access.
 
 From the repository root, install with `make install-debian`. Installed commands
 omit the `.bash` extension and default to `/usr/local/bin`. To run a source file,
-use `bash debian/<script>.bash` with the privileges required by that script.
+use `bash debian/<script>.bash` as your normal user; global-root scripts request
+elevation automatically.
 The release updaters use the auxiliary `release-verify.pl` helper, and
 `rpi-update-safe` uses `bootargs.pl`; both are installed beside the commands
 without their source extension and are not intended to be called directly by
@@ -42,7 +44,7 @@ Examples from the repository root:
 
 ```bash
 bash debian/clean-logs.bash --dry-run
-sudo bash debian/clean-logs.bash --force --older-than 7
+bash debian/clean-logs.bash --force --older-than 7
 bash debian/ai-purge-history.bash --dry-run
 bash debian/update-monero.bash --help
 bash debian/update-argon-one-v3.bash --help

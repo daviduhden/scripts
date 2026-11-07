@@ -30,6 +30,18 @@ set -euo pipefail
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
+# Preserve the original path and arguments so require_root can re-exec the
+# script through sudo without losing user-supplied options.
+if [[ -n ${BASH_SOURCE[0]:-} ]]; then
+	SCRIPT_PATH="${BASH_SOURCE[0]}"
+else
+	SCRIPT_PATH="$0"
+fi
+if command -v readlink >/dev/null 2>&1; then
+	SCRIPT_PATH="$(readlink -f "$SCRIPT_PATH")"
+fi
+SCRIPT_ARGS=("$@")
+
 EEPROM_URL="https://download.argon40.com/argon-eeprom.sh"
 CONTROL_URL="https://download.argon40.com/argon1.sh"
 TMP_FILES=()
@@ -56,15 +68,17 @@ Options:
       --trust-upstream      Explicitly trust unpinned upstream scripts.
   -h, --help          Show this help and exit.
 
+Run as your normal user; the script re-executes through sudo.
+
 Examples:
   # Normal interactive usage
-  sudo $0 --eeprom-sha256 REVIEWED_HASH --control-sha256 REVIEWED_HASH
+  $0 --eeprom-sha256 REVIEWED_HASH --control-sha256 REVIEWED_HASH
 
   # For cron (no automatic reboot)
-  sudo $0 --trust-upstream --no-reboot
+  $0 --trust-upstream --no-reboot
 
   # For cron with automatic reboot when finished
-  sudo $0 --trust-upstream --auto-reboot
+  $0 --trust-upstream --auto-reboot
 EOF
 }
 
@@ -139,11 +153,35 @@ trap cleanup_tmp_files EXIT
 
 # ---- Helpers -------------------------------------------------------
 
+# Re-exec through sudo when the script was not started as root. SCRIPT_ARGS
+# keeps the original command line across the privilege boundary.
+ROOT_ENV_VARS=(
+	ARGON_EEPROM_SHA256
+	ARGON_CONTROL_SHA256
+	ARGON_EEPROM_SCRIPT
+	ARGON_CONTROL_SCRIPT
+)
+
 require_root() {
-	if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
-		error "This script must be run as root (sudo)."
+	if [[ ${EUID:-$(id -u)} -eq 0 ]]; then
+		return 0
+	fi
+	if ! command -v sudo >/dev/null 2>&1; then
+		error "Root privileges are required and sudo was not found."
 		exit 1
 	fi
+	local -a env_args=()
+	local name
+	for name in "${ROOT_ENV_VARS[@]}"; do
+		if [[ -v $name ]]; then
+			env_args+=("$name=${!name}")
+		fi
+	done
+	log "Re-executing this script via sudo to gain root privileges..."
+	if ((${#env_args[@]} > 0)); then
+		exec sudo -- env "${env_args[@]}" "$SCRIPT_PATH" "${SCRIPT_ARGS[@]}"
+	fi
+	exec sudo -- "$SCRIPT_PATH" "${SCRIPT_ARGS[@]}"
 }
 
 require_cmd() {
@@ -282,6 +320,7 @@ main() {
 		error 'Require both reviewed SHA-256 digests or explicit --trust-upstream.'
 		exit 1
 	}
+	require_root
 	log "Argon One V3 maintenance: EEPROM + control script update"
 	check_prereqs
 	run_update

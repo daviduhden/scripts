@@ -59,6 +59,9 @@ GNU options, paths, privilege tools, and service commands. Do not add `sudo`,
 
 6. Keep the target's conventions:
    - Bash: `set -euo pipefail`, quoted expansions, `main "$@"`.
+   - Global root: re-exec through `sudo` (Debian) or `run0` (SecureBlue)
+     while preserving `SCRIPT_ARGS` and documented environment settings;
+     partial-root scripts keep `detect_root_cmd`/`run_root`.
    - ksh: `set -eu`, `typeset`, `print`, guarded `pipefail` if needed.
    - POSIX `sh`: no arrays, `[[ ]]`, `local`, or `pipefail`.
 7. Make update scripts idempotent. Check installed versions, upsert

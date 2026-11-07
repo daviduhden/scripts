@@ -43,11 +43,49 @@ PATH=/usr/local/go/bin:/usr/local/sbin:/usr/local/bin
 PATH="${PATH}:/usr/sbin:/usr/bin:/sbin:/bin"
 export PATH
 
+# Preserve the original path and arguments so require_root can re-exec the
+# script through sudo without losing user-supplied options.
+if [[ -n ${BASH_SOURCE[0]:-} ]]; then
+	SCRIPT_PATH="${BASH_SOURCE[0]}"
+else
+	SCRIPT_PATH="$0"
+fi
+if command -v readlink >/dev/null 2>&1; then
+	SCRIPT_PATH="$(readlink -f "$SCRIPT_PATH")"
+fi
+SCRIPT_ARGS=("$@")
+
 log() { printf '%s [INFO] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
 warn() { printf '%s [WARN] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
 error() {
 	printf '%s [ERROR] %s\n' \
 		"$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2
+}
+
+# Re-exec through sudo when the script was not started as root. SCRIPT_ARGS
+# keeps the original command line across the privilege boundary.
+ROOT_ENV_VARS=(GH_USER GH_HOST REPO_SLUG)
+
+require_root() {
+	if [[ ${EUID:-$(id -u)} -eq 0 ]]; then
+		return 0
+	fi
+	if ! command -v sudo >/dev/null 2>&1; then
+		error "Root privileges are required and sudo was not found."
+		exit 1
+	fi
+	local -a env_args=()
+	local name
+	for name in "${ROOT_ENV_VARS[@]}"; do
+		if [[ -v $name ]]; then
+			env_args+=("$name=${!name}")
+		fi
+	done
+	log "Re-executing this script via sudo to gain root privileges..."
+	if ((${#env_args[@]} > 0)); then
+		exec sudo -- env "${env_args[@]}" "$SCRIPT_PATH" "${SCRIPT_ARGS[@]}"
+	fi
+	exec sudo -- "$SCRIPT_PATH" "${SCRIPT_ARGS[@]}"
 }
 
 # Remove only known repository and tooling paths from a staged tree or the
@@ -693,14 +731,9 @@ main() {
 		exit 1
 	}
 	if [ "$ATOMIC_DEPLOY" -eq 1 ]; then check_atomic_target || exit 1; fi
+	require_root
 	log "----------------------------------------"
 	log "Sync started (user: $GH_USER)"
-
-	if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
-		error "This script must be run as root." \
-			"Try: sudo $0"
-		exit 1
-	fi
 
 	[ -d "$WWW_DIR" ] || {
 		error "$WWW_DIR does not exist."

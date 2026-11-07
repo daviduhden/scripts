@@ -36,6 +36,18 @@ set -euo pipefail
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
+# Preserve the original path and arguments so require_root can re-exec the
+# script through sudo without losing user-supplied options.
+if [[ -n ${BASH_SOURCE[0]:-} ]]; then
+	SCRIPT_PATH="${BASH_SOURCE[0]}"
+else
+	SCRIPT_PATH="$0"
+fi
+if command -v readlink >/dev/null 2>&1; then
+	SCRIPT_PATH="$(readlink -f "$SCRIPT_PATH")"
+fi
+SCRIPT_ARGS=("$@")
+
 REPO_URL="https://github.com/GrapheneOS/hardened_malloc.git"
 BUILD_DIR="${HOME}/.local/src/hardened_malloc"
 INSTALL_DIR="/usr/local/lib"
@@ -53,8 +65,29 @@ error() {
 	exit 1
 }
 
+# Re-exec through sudo when the script was not started as root. SCRIPT_ARGS
+# keeps the original command line across the privilege boundary.
+ROOT_ENV_VARS=()
+
 require_root() {
-	[[ ${EUID:-$(id -u)} -eq 0 ]] || error "Run as root (sudo $0)"
+	if [[ ${EUID:-$(id -u)} -eq 0 ]]; then
+		return 0
+	fi
+	if ! command -v sudo >/dev/null 2>&1; then
+		error "Root privileges are required and sudo was not found."
+	fi
+	local -a env_args=()
+	local name
+	for name in "${ROOT_ENV_VARS[@]}"; do
+		if [[ -v $name ]]; then
+			env_args+=("$name=${!name}")
+		fi
+	done
+	log "Re-executing this script via sudo to gain root privileges..."
+	if ((${#env_args[@]} > 0)); then
+		exec sudo -- env "${env_args[@]}" "$SCRIPT_PATH" "${SCRIPT_ARGS[@]}"
+	fi
+	exec sudo -- "$SCRIPT_PATH" "${SCRIPT_ARGS[@]}"
 }
 
 require_cmd() {
@@ -352,11 +385,11 @@ check_prereqs() {
 main() {
 	local arch installed_version latest_tag
 
+	require_root
 	arch="$(detect_arch)"
 	log "Detected architecture: $arch"
 
 	ensure_debian13
-	require_root
 	install_build_deps
 	check_prereqs
 

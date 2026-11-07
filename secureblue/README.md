@@ -3,8 +3,10 @@
 Bash helpers for SecureBlue's rpm-ostree environment, user applications, and
 services. Install from the repository root with `make install-secureblue`;
 installed names omit `.bash`. Build helpers use Homebrew or other dependencies
-specified in each script. Some final installation steps require elevation;
-user services and desktop configuration run in the target user's session.
+specified in each script. Scripts whose entire operation needs root re-exec
+themselves through `run0`; scripts that only elevate final installation steps
+use `run0` for those commands. User services and desktop configuration run in
+the target user's session.
 
 | Script | Purpose |
 | --- | --- |
@@ -14,7 +16,7 @@ user services and desktop configuration run in the target user's session.
 | [install-openrsync.bash](install-openrsync.bash) | Builds openrsync from its upstream master branch and installs it to `/usr/local`, using Homebrew build dependencies. |
 | [install-signify.bash](install-signify.bash) | Builds and installs portable OpenBSD signify, using Homebrew build dependencies. |
 | [postinstall.bash](postinstall.bash) | Runs an interactive sequence of `ujust` post-install tasks, defers reboot-related steps, and records a log in the user's home directory. Non-interactive input requires `--yes`. |
-| [setup-clamav.bash](setup-clamav.bash) | Configures ClamAV updates, on-access scanning, periodic scans, SELinux contexts, and permissions. |
+| [setup-clamav.bash](setup-clamav.bash) | Configures ClamAV updates, on-access scanning, periodic scans, SELinux contexts, and permissions. Requires root and re-executes through `run0`. |
 | [sudo-wrapper.bash](sudo-wrapper.bash) | Routes `sudo` and `visudo` through `run0`, and `sudoedit` through `run0edit`; installed symlinks select the matching behavior. |
 | [sync-gh-repos.bash](sync-gh-repos.bash) | Clones or refreshes a GitHub user's repositories over SSH, preserving existing working-tree contents while replacing Git metadata. Uses authenticated `gh`; accepts `OWNER`, `BASE_DIR`, and `--non-interactive`. |
 | [sysupgrade.bash](sysupgrade.bash) | Maintains the rpm-ostree image, firmware, Homebrew, Flatpak, storage, and system diagnostics. Scrub runs by default; full btrfs balance/defrag is opt-in with `BTRFS_MAINTENANCE=1`, and a lock prevents concurrent runs. |

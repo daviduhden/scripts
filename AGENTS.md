@@ -46,6 +46,10 @@ and bundled configuration names omit `.yaml`.
   `set -euo pipefail`, reset `PATH`, define `log`/`warn`/`error`, use
   `require_cmd`, and expose `main "$@"`. `secureblue/postinstall.bash`
   intentionally uses `set -uo pipefail` because it is interactive.
+- Scripts whose entire operation requires root re-exec themselves through
+  `sudo` in `debian/` or `run0` in `secureblue/`, preserving the original
+  arguments and documented environment settings. Scripts that elevate only
+  individual commands keep using `detect_root_cmd`/`run_root`.
 - `openbsd/` scripts use `#!/bin/ksh`, `print`, and `typeset`. The project
   validator rejects `local`, `declare`, `readarray`, `mapfile`, `shopt`,
   unguarded `set -o pipefail`, here-strings, process substitution, and

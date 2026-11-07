@@ -1,7 +1,19 @@
 #!/bin/bash
 set -euo pipefail
 
-# SecureBlue ClamAV setup script. Must run as root.
+# Preserve the original path and arguments so require_root can re-exec the
+# script through run0 without losing user-supplied options.
+if [[ -n ${BASH_SOURCE[0]:-} ]]; then
+	SCRIPT_PATH="${BASH_SOURCE[0]}"
+else
+	SCRIPT_PATH="$0"
+fi
+if command -v readlink >/dev/null 2>&1; then
+	SCRIPT_PATH="$(readlink -f "$SCRIPT_PATH")"
+fi
+SCRIPT_ARGS=("$@")
+
+# SecureBlue ClamAV setup script. Requires root; re-executes through run0.
 #
 # Layers the ClamAV packages with rpm-ostree, then configures freshclam, the
 # clamd scan instance, on-access scanning (clamonacc), log rotation, a daily
@@ -37,7 +49,14 @@ error() {
 }
 
 require_root() {
-	[[ ${EUID:-$(id -u)} -eq 0 ]] || error "Root required"
+	if [[ ${EUID:-$(id -u)} -eq 0 ]]; then
+		return 0
+	fi
+	if ! command -v run0 >/dev/null 2>&1; then
+		error "Root privileges are required and run0 was not found."
+	fi
+	log "Re-executing this script via run0 to gain root privileges..."
+	exec run0 -- "$SCRIPT_PATH" "${SCRIPT_ARGS[@]}"
 }
 have_cmd() { command -v "$1" >/dev/null 2>&1; }
 require_cmd() {

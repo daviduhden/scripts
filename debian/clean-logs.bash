@@ -26,6 +26,18 @@ set -euo pipefail
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
+# Preserve the original path and arguments so require_root can re-exec the
+# script through sudo without losing user-supplied options.
+if [[ -n ${BASH_SOURCE[0]:-} ]]; then
+	SCRIPT_PATH="${BASH_SOURCE[0]}"
+else
+	SCRIPT_PATH="$0"
+fi
+if command -v readlink >/dev/null 2>&1; then
+	SCRIPT_PATH="$(readlink -f "$SCRIPT_PATH")"
+fi
+SCRIPT_ARGS=("$@")
+
 log() {
 	printf '%s [INFO] %s\n' \
 		"$(date '+%Y-%m-%d %H:%M:%S')" "$*"
@@ -45,6 +57,32 @@ require_cmd() {
 		error "Required command '$1' not found."
 		exit 1
 	}
+}
+
+# Re-exec through sudo when the script was not started as root. SCRIPT_ARGS
+# keeps the original command line across the privilege boundary.
+ROOT_ENV_VARS=(DRY_RUN OLDER_THAN FORCE OLD_ROOTS)
+
+require_root() {
+	if [[ ${EUID:-$(id -u)} -eq 0 ]]; then
+		return 0
+	fi
+	if ! command -v sudo >/dev/null 2>&1; then
+		error "Root privileges are required and sudo was not found."
+		exit 1
+	fi
+	local -a env_args=()
+	local name
+	for name in "${ROOT_ENV_VARS[@]}"; do
+		if [[ -v $name ]]; then
+			env_args+=("$name=${!name}")
+		fi
+	done
+	log "Re-executing this script via sudo to gain root privileges..."
+	if ((${#env_args[@]} > 0)); then
+		exec sudo -- env "${env_args[@]}" "$SCRIPT_PATH" "${SCRIPT_ARGS[@]}"
+	fi
+	exec sudo -- "$SCRIPT_PATH" "${SCRIPT_ARGS[@]}"
 }
 
 # If DRY_RUN=1 is set in the environment, the script will only show
@@ -147,16 +185,14 @@ main() {
 	parse_args "$@"
 	require_cmd find
 
-	# Dry-run only lists paths, so it is allowed without elevation.
-	if [[ $DRY_RUN -ne 1 && ${EUID:-$(id -u)} -ne 0 ]]; then
-		error "This script must be run as root unless --dry-run is used." \
-			"Try: sudo $0"
-		exit 1
-	fi
 	if [[ $DRY_RUN -ne 1 && $FORCE -ne 1 ]]; then
 		error "Real deletion requires --force;" \
 			"use --dry-run to preview."
 		exit 1
+	fi
+	# Dry-run only lists paths, so it is allowed without elevation.
+	if [[ $DRY_RUN -ne 1 ]]; then
+		require_root
 	fi
 
 	log "----------------------------------------"
