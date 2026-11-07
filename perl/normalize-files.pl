@@ -176,8 +176,8 @@ sub setup_openbsd_sandbox {
             $repo_unveil = $repo_raw
               unless defined $repo_unveil && length $repo_unveil;
         }
-        $unveil->( $target_unveil, 'rwc' );
-        $unveil->( $target_raw,    'rwc' )
+        $unveil->( $target_unveil, 'rwcx' );
+        $unveil->( $target_raw,    'rwcx' )
           if $target_raw ne $target_unveil;
         my $target_parent = dirname($target_unveil);
         $unveil->( $target_parent, 'rx' )
@@ -185,8 +185,8 @@ sub setup_openbsd_sandbox {
         my $raw_parent = dirname($target_raw);
         $unveil->( $raw_parent, 'rx' )
           if $raw_parent ne $target_parent;
-        $unveil->( $repo_unveil, 'rwc' );
-        $unveil->( $repo_raw,    'rwc' )
+        $unveil->( $repo_unveil, 'rwcx' );
+        $unveil->( $repo_raw,    'rwcx' )
           if defined $repo_raw
           && defined $repo_unveil
           && $repo_raw ne $repo_unveil;
@@ -203,8 +203,8 @@ sub setup_openbsd_sandbox {
             my $report_abs = abs_path($report_dir);
             $report_abs = $report_dir
               unless defined $report_abs && length $report_abs;
-            $unveil->( $report_abs, 'rwc' );
-            $unveil->( $report_dir, 'rwc' )
+            $unveil->( $report_abs, 'rwcx' );
+            $unveil->( $report_dir, 'rwcx' )
               if $report_dir ne $report_abs;
         }
 
