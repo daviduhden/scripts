@@ -269,8 +269,8 @@ if [ -n "$HOST_FAMILY" ]; then
 set -eu
 definitely-not-a-real-command-xyz --flag
 EOF
-	cat >"$T/$HOST_FAMILY/multiline-array.bash" <<'EOF'
-#!/bin/bash
+	cat >"$T/$HOST_FAMILY/multiline-array.ksh" <<'EOF'
+#!/bin/ksh
 set -eu
 ROOT_ENV_VARS=(
 	FIRST_SETTING
@@ -306,7 +306,7 @@ assert_error 'debian/wrong-shebang.bash' "$out" \
 if [ -n "$HOST_FAMILY" ]; then
 	assert_error "$HOST_FAMILY/bogus-cmd.bash" "$out" \
 		"nonexistent command detected on host family"
-	assert_no_error "$HOST_FAMILY/multiline-array.bash" "$out" \
+	assert_no_error "$HOST_FAMILY/multiline-array.ksh" "$out" \
 		"multi-line array elements are not treated as commands"
 fi
 assert_rc 1 "$rc" "--target all with ERRORs exits 1"
