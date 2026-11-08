@@ -17,7 +17,9 @@ description: >-
 
 Windows-only behavior cannot be validated on Linux. Use static review here and
 run the Windows checks on a Windows host. Do not claim a Windows test passed
-without one.
+without one. A portable `pwsh` build can still run the PowerShell parser,
+PSScriptAnalyzer, and `psfmt -c` on Linux for syntax and formatting checks; it
+does not prove Windows runtime behavior or Windows PowerShell 5.1 execution.
 
 ## Keep batch and PowerShell separate
 
