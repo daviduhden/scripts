@@ -6,7 +6,7 @@ checkout or an extracted copy; its paths are resolved relative to the installer.
 | Script | Purpose |
 | --- | --- |
 | [install-windows.bat](install-windows.bat) | Installs public Perl programs, the PowerShell scripts in this directory, and `test-format/psfmt.ps1`; creates command launchers and optionally adds their directory to the user PATH. |
-| [update-aiclis.ps1](update-aiclis.ps1) | Installs or updates Codex, OpenCode, and Bun for the current user, maintains versioned copies and PATH entries, and optionally adds PowerShell wrappers with `-Wrappers`. |
+| [update-aiclis.ps1](update-aiclis.ps1) | Installs or updates Codex, OpenCode 2.x, Crush, and Bun for the current user, maintains versioned copies and PATH entries, and optionally adds PowerShell wrappers with `-Wrappers`. |
 | [update-xerj.ps1](update-xerj.ps1) | Installs/updates SHA-256-verified xerj for the current user; `-Codex`, `-Crush`, and `-OpenCode` optionally register its stdio MCP server. |
 | [ai-purge-history.ps1](ai-purge-history.ps1) | Deletes Codex, Copilot, OpenCode, and project-local Swival history/state. It removes the entire `%LOCALAPPDATA%\crush` directory, including any configuration stored there. Use `-DryRun` to preview. |
 | [launcher.cmd](launcher.cmd) | Internal template for installed Perl launchers. Uses the recorded Perl interpreter and forwards arguments and exit status. |
@@ -32,15 +32,19 @@ From PowerShell, check AI CLI versions without installing updates:
 ```powershell
 .\windows\update-aiclis.ps1 -Check
 .\windows\update-aiclis.ps1 -Target Codex -Check
+.\windows\update-aiclis.ps1 -Target Crush -Check
 ```
 
-Other updater parameters are `-Target All|Codex|OpenCode|Bun`,
-`-OpenCodeVersion`, `-CodexVersion`, `-Force`, `-Check`, `-RemoveWinget`, and
-`-Wrappers`. The last option installs optional profile functions that add
-`--yolo`/`--auto`; wrappers are off by default. `-RemoveWinget` removes the
-winget copies of OpenCode and Codex after installation; Bun is installed
-through winget and is left in place. Codex and OpenCode use upstream downloads
-and both require the exact SHA-256 digest published in GitHub release metadata.
+Other updater parameters are `-Target All|Codex|OpenCode|Crush|Bun`,
+`-OpenCodeVersion`, `-CodexVersion`, `-CrushVersion`, `-Force`, `-Check`,
+`-RemoveWinget`, and `-Wrappers`. The last option installs optional profile
+functions that add `--yolo`/`--auto`; wrappers are off by default.
+`-RemoveWinget` removes the winget copies of OpenCode, Codex, and Crush after
+installation; Bun is installed through winget and is left in place. Codex,
+OpenCode, and Crush use upstream downloads and require the exact SHA-256 digest
+published in GitHub release metadata. OpenCode selects the newest stable 2.x
+release because the repository's `latest` alias still points at the 1.x line.
+Crush is installed if missing and updated on later runs.
 
 Run history cleanup in the intended user's session. `SWIVAL_PROJECT_HOME`
 selects the project whose `.swival` state is removed; it defaults to the working
@@ -108,12 +112,13 @@ pwsh -NoProfile -File windows/tests/test-update-xerj.ps1
 
 ## Verified and recoverable release updates
 
-Codex and OpenCode downloads use the official GitHub release metadata and
-require an exact asset with a published SHA-256 digest. Codex reads only the
-expected executable entries from its ZIP; OpenCode reads only `opencode.exe`. The ZIP
-must contain exactly one regular root `opencode.exe`; only that entry is read.
-The check trusts GitHub HTTPS and its release metadata, not an independent
-signature. Older releases without digest metadata are refused.
+Codex, OpenCode, and Crush downloads use the official GitHub release metadata
+and require an exact asset with a published SHA-256 digest. Codex reads only the
+expected executable entries from its ZIP; OpenCode reads only the single regular
+root `opencode.exe`; Crush reads only `crush.exe` inside the expected versioned
+archive folder. Duplicate expected entries and checksum failures are rejected
+before activation. The check trusts GitHub HTTPS and its release metadata, not
+an independent signature. Older releases without digest metadata are refused.
 
 xerj verifies the archive's checksum, rejects duplicate executable entries and
 prepares the binary next to its destination. Existing binaries/configurations

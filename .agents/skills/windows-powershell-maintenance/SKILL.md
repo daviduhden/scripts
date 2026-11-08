@@ -94,8 +94,12 @@ already-installed PSScriptAnalyzer; it does not install it.
 - The installer rejects spaces and cmd metacharacters in discovered
   PowerShell script names; the external validator still checks only the Perl
   manifest. Avoid awkward names in both places.
-- `-RemoveWinget` removes the winget copies of OpenCode and Codex, not Bun;
-  keep the documentation aligned with that behavior.
+- `-RemoveWinget` removes the winget copies of OpenCode, Codex, and Crush, not
+  Bun; keep the documentation aligned with that behavior.
+- `update-aiclis.ps1` resolves OpenCode from the stable `v2.*` release tags
+  because the repository's GitHub `latest` alias still points at 1.x. Do not
+  replace that filter with `releases/latest`. Crush is a GitHub release updater
+  with the same versioned-copy layout as OpenCode.
 - `ai-purge-history.ps1` removes the entire `%LOCALAPPDATA%\crush` directory,
   which can include configuration; do not describe it as configuration-safe.
   Use `-DryRun` to preview.
@@ -105,10 +109,10 @@ already-installed PSScriptAnalyzer; it does not install it.
   Release updaters `update-aiclis.ps1` and `update-xerj.ps1` also download
   upstream artifacts as their documented purpose. Keep downloads confined
   to those flows rather than adding them to launchers or checks.
-- `update-aiclis.ps1` verifies Codex release archives against the GitHub
-  asset digest and reads only the expected executable entries. PowerShell
-  profile wrappers (`codex --yolo`, `opencode --auto`) are opt-in with
-  `-Wrappers`; profile updates use a backup and atomic replacement.
+- `update-aiclis.ps1` verifies Codex, OpenCode, and Crush release archives
+  against the GitHub asset digest and reads only the expected executable
+  entries. PowerShell profile wrappers (`codex --yolo`, `opencode --auto`) are
+  opt-in with `-Wrappers`; profile updates use a backup and atomic replacement.
 - `update-xerj.ps1` is a release-download updater: it verifies the archive's
   SHA-256 against an exact published filename/digest line before reading only
   the expected executable entry. Keep its per-user destination and absolute
@@ -124,7 +128,8 @@ already-installed PSScriptAnalyzer; it does not install it.
   never fall back to overwriting a locked target. Retain and report recovery
   copies after failure. xerj retains successful `.bak.*` copies for operators.
   OpenCode requires an exact GitHub release asset/digest and one regular root
-  executable entry; reject duplicates and checksum failures before activation.
+  executable entry; Crush requires `crush.exe` in the expected versioned archive
+  folder. Reject duplicates and checksum failures before activation.
 - The validator now checks that `psfmt.ps1` exists and declares PowerShell 7,
   and that the launcher mentions `pwsh.exe` and `powershell.exe`. It still does
   not execute any of them.

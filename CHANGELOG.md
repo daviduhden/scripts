@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Track OpenCode 2.x releases in the Windows AI CLI updater and install or
+  update Crush from verified GitHub Windows release archives.
 - Re-exec whole-script root helpers through `sudo` on Debian and `run0` on
   SecureBlue, preserving arguments and documented environment settings.
 - Harden temporary logs and validator state files with `mktemp` and `umask`.

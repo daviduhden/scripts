@@ -1,9 +1,12 @@
 #!/usr/bin/env pwsh
 
-# Codex CLI, OpenCode CLI/TUI and Bun installer and updater for Windows.
-# - Installs and updates Codex and OpenCode for the current user (no admin).
+# Codex CLI, OpenCode CLI/TUI, Crush and Bun installer and updater for Windows.
+# - Installs and updates Codex, OpenCode, Crush and Bun for the current user
+#   (no admin).
 # - Bun: installs or updates the Oven-sh.Bun package through winget.
-# - OpenCode: GitHub release binary verified against the published SHA-256 digest.
+# - OpenCode: newest stable 2.x release from the v2 line, verified against the
+#   published SHA-256 digest.
+# - Crush: GitHub release binary verified against the published SHA-256 digest.
 # - Codex: GitHub release zip with the three binaries plus codex-code-mode-host.
 # - Keeps versioned copies and prepends the local folders to the user PATH.
 # - Repairs PATH. PowerShell wrappers (codex --yolo, opencode --auto) are
@@ -11,13 +14,15 @@
 # - Leaves winget installations untouched unless -RemoveWinget is given.
 #
 # Parameters:
-# -Target All|Codex|OpenCode|Bun Tool selection (default: All).
-# -OpenCodeVersion <version>    Specific OpenCode version (default: latest).
+# -Target All|Codex|OpenCode|Crush|Bun Tool selection (default: All).
+# -OpenCodeVersion <version>    Specific OpenCode 2.x version (default: latest).
 # -CodexVersion <version>       Specific Codex version (default: latest).
+# -CrushVersion <version>       Specific Crush version (default: latest).
 # -Force                        Reinstall even if already up to date.
 # -Check                        Show installed and available versions, change nothing.
-# -RemoveWinget                 Uninstall the winget copies of Codex and OpenCode;
-#                               Bun is installed through winget and is left in place.
+# -RemoveWinget                 Uninstall the winget copies of Codex, OpenCode and
+#                               Crush; Bun is installed through winget and is
+#                               left in place.
 # -Wrappers                     Install profile functions that add --yolo/--auto.
 #                               Off by default.
 #
@@ -26,12 +31,14 @@
 
 [CmdletBinding()]
 param(
-    [ValidateSet('All', 'Codex', 'OpenCode', 'Bun')]
+    [ValidateSet('All', 'Codex', 'OpenCode', 'Crush', 'Bun')]
     [string]$Target = 'All',
 
     [string]$OpenCodeVersion,
 
     [string]$CodexVersion,
+
+    [string]$CrushVersion,
 
     [switch]$Force,
 
@@ -63,8 +70,13 @@ $script:CodexRoot = Join-Path (Join-Path (Join-Path $env:LOCALAPPDATA 'Programs'
 $script:CodexBin = Join-Path $script:CodexRoot 'bin'
 $script:CodexVersions = Join-Path $script:CodexRoot 'versions'
 $script:CodexExe = Join-Path $script:CodexBin 'codex.exe'
-$script:OpenCodeMetaUrl = 'https://api.github.com/repos/anomalyco/opencode/releases/latest'
+$script:CrushRoot = Join-Path (Join-Path $env:LOCALAPPDATA 'Programs') 'Crush'
+$script:CrushBin = Join-Path $script:CrushRoot 'bin'
+$script:CrushVersions = Join-Path $script:CrushRoot 'versions'
+$script:CrushExe = Join-Path $script:CrushBin 'crush.exe'
+$script:OpenCodeReleasesApi = 'https://api.github.com/repos/anomalyco/opencode/releases?per_page=100'
 $script:CodexLatestApi = 'https://api.github.com/repos/openai/codex/releases/latest'
+$script:CrushLatestApi = 'https://api.github.com/repos/charmbracelet/crush/releases/latest'
 $script:PathChanged = $false
 $script:HadError = $false
 $script:ManagedDirs = @()
@@ -445,17 +457,25 @@ function Set-CurrentExe {
 # ---------------------------------------------------------------------------
 <#
 .SYNOPSIS
-    Resolves the latest OpenCode version from the update metadata endpoint.
+    Resolves the latest stable OpenCode 2.x version from GitHub releases.
 .OUTPUTS
     A normalized version string without the 'v' prefix.
+.NOTES
+    The repository's "latest" release alias still points at the 1.x line, so
+    list recent releases and take the highest stable v2.* tag instead.
 #>
 function Get-OpenCodeLatestVersion {
-    $raw = Get-RemoteText -Uri $script:OpenCodeMetaUrl
-    $meta = $raw | ConvertFrom-Json
-    if ([string]::IsNullOrWhiteSpace($meta.tag_name)) {
-        throw 'Could not resolve the latest OpenCode version.'
+    $headers = @{ 'User-Agent' = 'update-aiclis'; 'Accept' = 'application/vnd.github+json' }
+    $raw = Get-RemoteText -Uri $script:OpenCodeReleasesApi -Headers $headers
+    $releases = @($raw | ConvertFrom-Json)
+    $latest = $releases | Where-Object {
+        (-not $_.prerelease) -and ($_.tag_name -cmatch '^v2\.[0-9]+\.[0-9]+$')
+    } | Sort-Object -Property @{ Expression = { [version]($_.tag_name.Substring(1)) } } -Descending |
+    Select-Object -First 1
+    if ($null -eq $latest) {
+        throw 'Could not resolve the latest OpenCode 2.x release.'
     }
-    return (Normalize-Version $meta.tag_name)
+    return (Normalize-Version $latest.tag_name)
 }
 
 <#
@@ -489,12 +509,13 @@ function Remove-OldOpenCodeVersions {
 .SYNOPSIS
     Installs or updates the OpenCode CLI for the current user.
 .PARAMETER Version
-    Version to install. Empty selects the latest release.
+    Version to install. Empty selects the latest stable 2.x release.
 .NOTES
     -Check only reports installed and available versions. A normal run downloads
     and extracts a temporary zip, stores the binary under versions\<version>,
     points bin\opencode.exe at it, verifies the reported version, and prunes old
-    version directories. Downloads and version strings come from the official GitHub release metadata.
+    version directories. Downloads and version strings come from the official
+    GitHub release metadata for the v2 line.
 #>
 function Install-OpenCode {
     param([string]$Version)
@@ -592,6 +613,177 @@ function Install-OpenCode {
 
     Write-Info "OpenCode: $verified installed to $script:OpenCodeBin"
     Remove-OldOpenCodeVersions -CurrentVersion $version
+}
+
+# ---------------------------------------------------------------------------
+# Crush
+# ---------------------------------------------------------------------------
+<#
+.SYNOPSIS
+    Resolves the latest Crush release tag from the GitHub API.
+.NOTES
+    Sends a User-Agent and the GitHub JSON media type, then normalizes the 'v'
+    tag prefix away.
+#>
+function Get-CrushLatestVersion {
+    $headers = @{ 'User-Agent' = 'update-aiclis'; 'Accept' = 'application/vnd.github+json' }
+    $raw = Get-RemoteText -Uri $script:CrushLatestApi -Headers $headers
+    $meta = $raw | ConvertFrom-Json
+    if ([string]::IsNullOrWhiteSpace($meta.tag_name)) {
+        throw 'Could not resolve the latest Crush version.'
+    }
+    return (Normalize-Version $meta.tag_name)
+}
+
+<#
+.SYNOPSIS
+    Returns the Crush Windows release target for this machine.
+.OUTPUTS
+    x86_64 or arm64.
+#>
+function Get-CrushTarget {
+    $platform = Get-PlatformTag
+    switch ($platform) {
+        'x64' { return 'x86_64' }
+        'arm64' { return 'arm64' }
+        default { throw "Unsupported architecture for Crush: $platform" }
+    }
+}
+
+<#
+.SYNOPSIS
+    Prunes old Crush version directories.
+.PARAMETER CurrentVersion
+    Directory name of the active version, which is never removed.
+.PARAMETER Keep
+    Total number of versions to keep, including the current one.
+.NOTES
+    Non-current directories are ordered by LastWriteTime, newest first. Removal
+    failures are ignored because stale versions are not fatal.
+#>
+function Remove-OldCrushVersions {
+    param([string]$CurrentVersion, [int]$Keep = 3)
+
+    if (-not (Test-Path -LiteralPath $script:CrushVersions)) { return }
+
+    $dirs = @(Get-ChildItem -LiteralPath $script:CrushVersions -Directory |
+            Where-Object { $_.Name -ne $CurrentVersion } |
+            Sort-Object -Property LastWriteTime -Descending)
+
+    $dirs | Select-Object -Skip ([Math]::Max($Keep - 1, 0)) | ForEach-Object {
+        Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
+        Write-Info "Crush: removed old version $($_.Name)"
+    }
+}
+
+<#
+.SYNOPSIS
+    Installs or updates the Crush CLI for the current user.
+.PARAMETER Version
+    Version to install. Empty selects the latest release.
+.NOTES
+    -Check only reports installed and available versions. A normal run downloads
+    and extracts a temporary zip, stores the binary under versions\<version>,
+    points bin\crush.exe at it, verifies the reported version, and prunes old
+    version directories. Downloads come from the official GitHub release and
+    require the published SHA-256 digest plus one expected crush.exe entry.
+#>
+function Install-Crush {
+    param([string]$Version)
+
+    if ($Check) {
+        $installed = Get-ExeVersion -ExePath $script:CrushExe
+        $latest = $null
+        try {
+            if ([string]::IsNullOrWhiteSpace($Version)) { $latest = Get-CrushLatestVersion }
+            else { $latest = Normalize-Version $Version }
+        }
+        catch {
+            Write-Warn "Could not check the latest version: $($_.Exception.Message)"
+        }
+        Write-Info "Crush: installed $(if ($installed) { $installed } else { 'none' }), available $(if ($latest) { $latest } else { 'unknown' })"
+        Write-Info "Crush: path $script:CrushExe"
+        return
+    }
+
+    $target = Get-CrushTarget
+    $version = Normalize-Version $Version
+    if ([string]::IsNullOrWhiteSpace($version)) { $version = Get-CrushLatestVersion }
+
+    $installed = Get-ExeVersion -ExePath $script:CrushExe
+    if ((Test-VersionEqual $installed $version) -and -not $Force) {
+        Write-Info "Crush: already up to date ($installed). Nothing to do."
+        return
+    }
+
+    if ($version -cnotmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$') {
+        throw 'Invalid Crush release version.'
+    }
+    $asset = "crush_${version}_Windows_$target.zip"
+    $release = (Get-RemoteText -Uri "https://api.github.com/repos/charmbracelet/crush/releases/tags/v$version") | ConvertFrom-Json
+    $assets = @($release.assets | Where-Object { $_.name -ceq $asset })
+    if ($assets.Count -ne 1 -or $assets[0].digest -cnotmatch '^sha256:[0-9a-f]{64}$') {
+        throw 'Expected one Crush release asset with a published SHA-256 digest.'
+    }
+    $url = [string]$assets[0].browser_download_url
+    if (-not $url.StartsWith('https://github.com/charmbracelet/crush/releases/download/', [StringComparison]::Ordinal)) {
+        throw 'Unexpected Crush release URL.'
+    }
+    $expectedDigest = $assets[0].digest.Substring(7)
+    $versionDir = Join-Path $script:CrushVersions $version
+    $versionExe = Join-Path $versionDir 'crush.exe'
+
+    if (-not (Test-Path -LiteralPath $versionExe) -or $Force) {
+        $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ("crush-install-" + [Guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
+        try {
+            $zip = Join-Path $tempRoot $asset
+            Write-Info "Crush: downloading $version ($target)"
+            Invoke-Download -Uri $url -OutFile $zip
+
+            if ((Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expectedDigest) {
+                throw 'Crush release SHA-256 mismatch.'
+            }
+            Add-Type -AssemblyName System.IO.Compression.FileSystem
+            $archive = [IO.Compression.ZipFile]::OpenRead($zip)
+            try {
+                $entryName = "$($asset.Substring(0, $asset.Length - 4))/crush.exe"
+                $entries = @($archive.Entries | Where-Object { $_.FullName -ceq $entryName })
+                if ($entries.Count -ne 1 -or $entries[0].Length -le 0 -or
+                    $entries[0].Length -gt 536870912 -or
+                    (($entries[0].ExternalAttributes -shr 16) -band 0xF000) -eq 0xA000) {
+                    throw 'Expected exactly one regular crush.exe entry.'
+                }
+                New-Item -ItemType Directory -Force -Path $versionDir | Out-Null
+                $pending = Join-Path $versionDir ('.crush-' + [guid]::NewGuid().ToString('N') + '.tmp')
+                try {
+                    [IO.Compression.ZipFileExtensions]::ExtractToFile($entries[0], $pending)
+                    if (Test-Path -LiteralPath $versionExe) {
+                        [IO.File]::Replace($pending, $versionExe, "$versionExe.bak.$([guid]::NewGuid().ToString('N'))")
+                    }
+                    else { [IO.File]::Move($pending, $versionExe) }
+                }
+                finally {
+                    if (Test-Path -LiteralPath $pending) { Remove-Item -LiteralPath $pending }
+                }
+            }
+            finally { $archive.Dispose() }
+        }
+        finally {
+            Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    New-Item -ItemType Directory -Force -Path $script:CrushBin | Out-Null
+    Set-CurrentExe -SourceExe $versionExe -TargetExe $script:CrushExe
+
+    $verified = Get-ExeVersion -ExePath $script:CrushExe
+    if (-not (Test-VersionEqual $verified $version)) {
+        throw "Crush verification failed: $script:CrushExe reports '$verified' but '$version' was expected."
+    }
+
+    Write-Info "Crush: $verified installed to $script:CrushBin"
+    Remove-OldCrushVersions -CurrentVersion $version
 }
 
 # ---------------------------------------------------------------------------
@@ -978,7 +1170,7 @@ function Install-Bun {
 # ---------------------------------------------------------------------------
 <#
 .SYNOPSIS
-    Uninstalls the winget copies of OpenCode and Codex.
+    Uninstalls the winget copies of OpenCode, Codex and Crush.
 .NOTES
     Best effort: a missing winget or an uninstall failure produces a warning.
     Bun is never removed because winget manages that installation.
@@ -990,7 +1182,7 @@ function Remove-WingetPackages {
         return
     }
 
-    foreach ($id in @('SST.opencode', 'OpenAI.Codex')) {
+    foreach ($id in @('SST.opencode', 'OpenAI.Codex', 'charmbracelet.crush')) {
         Write-Info "winget: uninstalling $id"
         try {
             & winget uninstall --id $id --silent --disable-interactivity --accept-source-agreements | Out-Null
@@ -1017,6 +1209,7 @@ if ($Check) {
 
 $doOpenCode = $Target -in @('All', 'OpenCode')
 $doCodex = $Target -in @('All', 'Codex')
+$doCrush = $Target -in @('All', 'Crush')
 $doBun = $Target -in @('All', 'Bun')
 
 if ($doBun) {
@@ -1034,16 +1227,22 @@ if ($doCodex) {
     catch { Write-Fail "Codex: $($_.Exception.Message)"; $script:HadError = $true }
 }
 
+if ($doCrush) {
+    try { Install-Crush -Version $CrushVersion }
+    catch { Write-Fail "Crush: $($_.Exception.Message)"; $script:HadError = $true }
+}
+
 if ($RemoveWinget -and -not $Check) {
     Remove-WingetPackages
 }
 
 # Repair existing installations even when an update failed (for example, offline).
-# OpenCode and Codex come first so their directories are prepended before Bun's
-# winget Links directory (which may contain shims for the same commands).
+# OpenCode, Codex and Crush come first so their directories are prepended before
+# Bun's winget Links directory (which may contain shims for the same commands).
 foreach ($cli in @(
         @{ Enabled = $doOpenCode; Name = 'opencode'; ExePath = $script:OpenCodeExe; DefaultArgument = '--auto' }
         @{ Enabled = $doCodex; Name = 'codex'; ExePath = $script:CodexExe; DefaultArgument = '--yolo' }
+        @{ Enabled = $doCrush; Name = 'crush'; ExePath = $script:CrushExe; DefaultArgument = '' }
         @{ Enabled = $doBun; Name = 'bun'; ExePath = $null; DefaultArgument = '' }
     )) {
     if (-not $cli.Enabled) { continue }
@@ -1062,6 +1261,10 @@ if ($doOpenCode) {
 if ($doCodex) {
     $v = Get-ExeVersion -ExePath $script:CodexExe
     Write-Info "Codex    : $(if ($v) { $v } else { 'not installed' })  ->  $script:CodexExe"
+}
+if ($doCrush) {
+    $v = Get-ExeVersion -ExePath $script:CrushExe
+    Write-Info "Crush    : $(if ($v) { $v } else { 'not installed' })  ->  $script:CrushExe"
 }
 if ($script:PathChanged) {
     Write-Warn 'The user PATH changed. Open a new PowerShell window to use it.'
