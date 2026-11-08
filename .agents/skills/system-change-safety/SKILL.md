@@ -87,8 +87,8 @@ description: >-
   live `.sync.lock` and site assets.
 - `*ai-purge-history*` deletes session/state data; use its `--dry-run` /
   `-DryRun` preview. Crush data is preserved by default; removing the whole
-  directory requires `--include-crush-data` (the Windows variant still removes
-  its documented Crush data directory).
+  directory requires `--include-crush-data` on POSIX or `-IncludeCrushData` on
+  Windows.
 - `debian/install-hardened-malloc.bash` edits `/etc/ld.so.preload` and a
   sysctl file.
 - `debian/enable-tor-transport.bash` rewrites APT sources and keeps a

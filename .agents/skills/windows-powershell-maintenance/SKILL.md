@@ -100,9 +100,10 @@ already-installed PSScriptAnalyzer; it does not install it.
   because the repository's GitHub `latest` alias still points at 1.x. Do not
   replace that filter with `releases/latest`. Crush is a GitHub release updater
   with the same versioned-copy layout as OpenCode.
-- `ai-purge-history.ps1` removes the entire `%LOCALAPPDATA%\crush` directory,
-  which can include configuration; do not describe it as configuration-safe.
-  Use `-DryRun` to preview.
+- `ai-purge-history.ps1` preserves Crush data by default. `-IncludeCrushData`
+  removes the entire `%LOCALAPPDATA%\crush` directory, which can include
+  configuration; do not describe that opt-in path as configuration-safe. Use
+  `-DryRun` to preview.
 - `psfmt.ps1` requires PSScriptAnalyzer 1.25.0. Missing modules fail without
   network access by default; `-install-dependency` explicitly opts in to the
   pinned PSGallery install. Keep the runner and CI version aligned.

@@ -3,9 +3,10 @@
 # AI assistant history cleanup for Windows.
 # - Removes session history for Codex and GitHub Copilot.
 # - Removes OpenCode prompt history, database files and logs.
-# - Removes Crush data and project-local Swival history/state.
+# - Removes project-local Swival history/state.
 # - Keeps Codex/Copilot/OpenCode configuration and credentials intact.
-# - Removes the entire Crush data directory, including any configuration
+# - Preserves the Crush data directory unless -IncludeCrushData is given.
+#   That switch removes the entire directory, including any configuration
 #   stored there.
 # - Use -DryRun to preview without deleting anything.
 #
@@ -17,6 +18,7 @@
 [CmdletBinding()]
 param(
     [switch]$DryRun,
+    [switch]$IncludeCrushData,
     [switch]$Help
 )
 
@@ -24,14 +26,17 @@ $ErrorActionPreference = 'Stop'
 
 if ($Help) {
     $helpText = @'
-Usage: ai-purge-history.ps1 [-DryRun] [-Help]
+Usage: ai-purge-history.ps1 [-DryRun] [-IncludeCrushData] [-Help]
 
-Removes Codex, Copilot, OpenCode, Crush, and project-local Swival
-history/state for the current user. Codex/Copilot/OpenCode configuration is
-kept; the whole Crush data directory is removed.
+Removes Codex, Copilot, OpenCode, and project-local Swival history/state for
+the current user. Codex/Copilot/OpenCode configuration and credentials are
+kept. Crush data is preserved unless -IncludeCrushData is given; that switch
+removes the whole Crush data directory, including any configuration stored
+there.
 
-  -DryRun  Show the paths that would be removed, delete nothing
-  -Help    Show this help
+  -DryRun             Show the paths that would be removed, delete nothing
+  -IncludeCrushData   Also remove the whole Crush data directory
+  -Help               Show this help
 '@
     Write-Host $helpText
     exit 0
@@ -56,7 +61,6 @@ $paths = @(
     (Join-Path $opencodeDataHome 'opencode.db-wal'),
     (Join-Path $opencodeDataHome 'opencode.db-shm'),
     (Join-Path $opencodeDataHome 'log'),
-    $crushDataHome,
     (Join-Path $swivalProjectHome '.swival\HISTORY.md'),
     (Join-Path $swivalProjectHome '.swival\HISTORY.md.lock'),
     (Join-Path $swivalProjectHome '.swival\continue.md'),
@@ -92,6 +96,14 @@ function Remove-Target {
 
 foreach ($path in $paths) {
     Remove-Target -Path $path
+}
+
+# Crush's data directory may include configuration; require an explicit opt-in.
+if ($IncludeCrushData) {
+    Remove-Target -Path $crushDataHome
+}
+else {
+    Write-Host "[INFO] Preserving Crush data directory (use -IncludeCrushData to remove it): $crushDataHome"
 }
 
 if ($DryRun) {

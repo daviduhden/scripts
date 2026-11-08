@@ -14,7 +14,8 @@
 - Add a smoke test and rollback for `install-hardened-malloc`.
 - Make website synchronization reject source symlinks and fail on permission
   errors; validate ZIP fallback entries.
-- Require `--force` for `clean-logs` and make Crush data removal opt-in.
+- Require `--force` for `clean-logs` and make Crush data removal opt-in on
+  every platform, including Windows `-IncludeCrushData`.
 - Move systemd user units out of `BINDIR`, add `DESTDIR`, and stop overwriting
   an existing real `sudo` binary.
 - Remove embedded Python from shell scripts in favour of native tools and

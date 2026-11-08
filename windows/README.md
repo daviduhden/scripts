@@ -8,7 +8,7 @@ checkout or an extracted copy; its paths are resolved relative to the installer.
 | [install-windows.bat](install-windows.bat) | Installs public Perl programs, the PowerShell scripts in this directory, and `test-format/psfmt.ps1`; creates command launchers and optionally adds their directory to the user PATH. |
 | [update-aiclis.ps1](update-aiclis.ps1) | Installs or updates Codex, OpenCode 2.x, Crush, and Bun for the current user, maintains versioned copies and PATH entries, and optionally adds PowerShell wrappers with `-Wrappers`. |
 | [update-xerj.ps1](update-xerj.ps1) | Installs/updates SHA-256-verified xerj for the current user; `-Codex`, `-Crush`, and `-OpenCode` optionally register its stdio MCP server. |
-| [ai-purge-history.ps1](ai-purge-history.ps1) | Deletes Codex, Copilot, OpenCode, and project-local Swival history/state. It removes the entire `%LOCALAPPDATA%\crush` directory, including any configuration stored there. Use `-DryRun` to preview. |
+| [ai-purge-history.ps1](ai-purge-history.ps1) | Deletes Codex, Copilot, OpenCode, and project-local Swival history/state. Crush data is preserved unless `-IncludeCrushData` is given; that switch removes the entire `%LOCALAPPDATA%\crush` directory, including any configuration stored there. Use `-DryRun` to preview. |
 | [launcher.cmd](launcher.cmd) | Internal template for installed Perl launchers. Uses the recorded Perl interpreter and forwards arguments and exit status. |
 | [powershell-launcher.cmd](powershell-launcher.cmd) | Internal template for PowerShell launchers. Prefers `pwsh`, falls back to Windows PowerShell, and forwards arguments and exit status. |
 | [test-format/psfmt.ps1](test-format/psfmt.ps1) | Formats and checks PowerShell files with PSScriptAnalyzer; requires PowerShell 7. See [its README](test-format/README.md). |
@@ -46,10 +46,12 @@ published in GitHub release metadata. OpenCode selects the newest stable 2.x
 release because the repository's `latest` alias still points at the 1.x line.
 Crush is installed if missing and updated on later runs.
 
-Run history cleanup in the intended user's session. `SWIVAL_PROJECT_HOME`
-selects the project whose `.swival` state is removed; it defaults to the working
-directory. Launcher templates are copied under program-specific names and are
-not intended to be run directly.
+Run history cleanup in the intended user's session. Crush data is preserved by
+default; pass `-IncludeCrushData` to remove the entire Crush data directory,
+which may contain configuration. `SWIVAL_PROJECT_HOME` selects the project whose
+`.swival` state is removed; it defaults to the working directory. Launcher
+templates are copied under program-specific names and are not intended to be
+run directly.
 
 ## xerj
 
