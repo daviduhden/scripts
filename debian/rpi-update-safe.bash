@@ -125,8 +125,10 @@ create_backup() {
 
 normalize_bootargs() {
 	# Compare argument tokens without treating whitespace formatting as a change.
+	# An optional token is omitted so a repaired value can be checked against
+	# the original after the requested removal.
 	printf '%s\n' "$1" |
-		"$PERL_CMD" "$BOOTARGS_HELPER" normalize
+		"$PERL_CMD" "$BOOTARGS_HELPER" normalize "${2:-}"
 }
 
 contains_memory_cgroup_arg() {
@@ -151,7 +153,7 @@ repair_dtb() {
 	dts=${work}/original.dts
 	new=${work}/new.dtb
 
-	dtc -I dtb -O dts -o "$dts" "$DTB" || die "cannot decompile ${DTB}"
+	dtc -q -I dtb -O dts -o "$dts" "$DTB" || die "cannot decompile ${DTB}"
 	before=$(sed -n 's/^[[:space:]]*bootargs[[:space:]]*=[[:space:]]*"\(.*\)";[[:space:]]*$/\1/p' "$dts")
 	[[ -n $before ]] || die "no bootargs property found in ${DTB}"
 
@@ -164,13 +166,14 @@ repair_dtb() {
 	# The token-by-token comparison below rejects any other DTS round-trip change.
 	"$PERL_CMD" "$BOOTARGS_HELPER" remove-token "$dts" ||
 		die 'cannot remove cgroup_disable=memory from the DTB source'
-	dtc -I dts -O dtb -o "$new" "$dts" || die 'cannot compile the repaired DTB'
-	after=$(dtc -I dtb -O dts "$new" | sed -n 's/^[[:space:]]*bootargs[[:space:]]*=[[:space:]]*"\(.*\)";[[:space:]]*$/\1/p')
+	dtc -q -I dts -O dtb -o "$new" "$dts" || die 'cannot compile the repaired DTB'
+	after=$(dtc -q -I dtb -O dts "$new" | sed -n 's/^[[:space:]]*bootargs[[:space:]]*=[[:space:]]*"\(.*\)";[[:space:]]*$/\1/p')
 	[[ -n $after ]] || die 'the repaired DTB has no bootargs property'
 	if contains_memory_cgroup_arg "$after"; then
 		die 'the repaired DTB still contains cgroup_disable=memory'
 	fi
-	before_rest=$(normalize_bootargs "$before")
+	# The expected result is the original bootargs without the removed token.
+	before_rest=$(normalize_bootargs "$before" 'cgroup_disable=memory')
 	after_rest=$(normalize_bootargs "$after")
 	[[ $after_rest == "$before_rest" ]] ||
 		die 'bootargs changed beyond removal of cgroup_disable=memory'

@@ -207,7 +207,7 @@ test-delivery:
 	@prove -Itests tests/test_delivery_transactions.pl tests/test_release_updates.pl
 
 test-tooling:
-	@prove -Itests tests/test_tooling.pl
+	@prove -Itests tests/test_tooling.pl tests/test_bootargs.pl
 
 fix-permissions:
 	@/bin/sh tests-format/fix-permissions.sh .

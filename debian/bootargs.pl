@@ -4,7 +4,7 @@
 # does not embed Perl source in -e or a heredoc.
 #
 # Usage:
-#   bootargs.pl normalize            # read arguments from stdin
+#   bootargs.pl normalize [TOKEN]    # read arguments from stdin
 #   bootargs.pl remove-token FILE    # edit a DTS bootargs property in place
 #
 # See the LICENSE file at the top of the project tree for copyright
@@ -19,14 +19,19 @@ use File::Temp     qw(tempfile);
 my $command = shift @ARGV // '';
 
 sub usage {
-    print STDERR "Usage: bootargs.pl normalize | remove-token FILE\n";
+    print STDERR "Usage: bootargs.pl normalize [TOKEN] | remove-token FILE\n";
     exit 2;
 }
 
 sub normalize {
+    my ($drop) = @_;
     my $value = do { local $/; <STDIN> };
     $value = '' unless defined $value;
-    print join( ' ', grep { length } split /\s+/, $value ), "\n";
+    my @tokens = grep { length } split /\s+/, $value;
+    if ( defined $drop && length $drop ) {
+        @tokens = grep { $_ ne $drop } @tokens;
+    }
+    print join( ' ', @tokens ), "\n";
 }
 
 sub remove_token {
@@ -54,7 +59,7 @@ sub remove_token {
 }
 
 if ( $command eq 'normalize' ) {
-    normalize();
+    normalize( shift @ARGV );
 }
 elsif ( $command eq 'remove-token' ) {
     remove_token( shift @ARGV );
