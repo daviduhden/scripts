@@ -19,7 +19,7 @@ the target user's session.
 | [setup-clamav.bash](setup-clamav.bash) | Configures ClamAV updates, on-access scanning, periodic scans, SELinux contexts, and permissions. Requires root and re-executes through `run0`. |
 | [sudo-wrapper.bash](sudo-wrapper.bash) | Routes `sudo` and `visudo` through `run0`, and `sudoedit` through `run0edit`; installed symlinks select the matching behavior. |
 | [sync-gh-repos.bash](sync-gh-repos.bash) | Clones or refreshes a GitHub user's repositories over SSH, preserving existing working-tree contents while replacing Git metadata. Uses authenticated `gh`; accepts `OWNER`, `BASE_DIR`, and `--non-interactive`. |
-| [sysupgrade.bash](sysupgrade.bash) | Maintains the rpm-ostree image, firmware, Homebrew, Flatpak, storage, and system diagnostics. Scrub runs by default; full btrfs balance/defrag is opt-in with `BTRFS_MAINTENANCE=1`, and a lock prevents concurrent runs. |
+| [sysupgrade.bash](sysupgrade.bash) | Maintains the rpm-ostree image, firmware, Homebrew, Flatpak, storage, and system diagnostics. Homebrew uplift also unlinks system-shadowing formulae and relinks `ffmpeg-full`/`imagemagick-full` before cleanup. Scrub runs by default; full btrfs balance/defrag is opt-in with `BTRFS_MAINTENANCE=1`, and a lock prevents concurrent runs. |
 | [update-arti-oniux.bash](update-arti-oniux.bash) | Builds and installs Arti and oniux with Rust/Cargo, manages OpenSSL dependencies, and patches binary library paths. |
 | [update-krohnkite.bash](update-krohnkite.bash) | Builds the Krohnkite KWin package and installs or updates it with `kpackagetool6`. |
 | [update-lyrebird.bash](update-lyrebird.bash) | Builds the Lyrebird Go-based Tor transport and installs it into `/usr/local/bin`. |

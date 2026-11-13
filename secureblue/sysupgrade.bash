@@ -606,6 +606,20 @@ update_homebrew() {
 		warn "brew upgrade failed."
 		phase_failed=1
 	fi
+	# Keep system packages ahead of their Homebrew counterparts and restore
+	# the expected user-facing tools. Mirror `unlink && link` so linking is
+	# skipped when unlinking fails; failures are reported but not fatal,
+	# matching the cleanup step below.
+	if ! run_phase_cmd \
+		"brew unlink systemd dbus gsettings-desktop-schemas bash rpm" \
+		run_homebrew --admin unlink systemd dbus \
+		gsettings-desktop-schemas bash rpm; then
+		warn "brew unlink failed; skipping brew link."
+	elif ! run_phase_cmd "brew link ffmpeg-full imagemagick-full" \
+		run_homebrew --admin link ffmpeg-full \
+		imagemagick-full; then
+		warn "brew link failed."
+	fi
 	if ! run_phase_cmd "brew cleanup" \
 		run_homebrew --admin cleanup; then
 		warn "brew cleanup failed."

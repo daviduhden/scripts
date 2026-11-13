@@ -105,6 +105,9 @@ description: >-
   backup on error.
 - `openbsd/sysupgrade-current.ksh` runs `sysmerge`, `dbupdate`, package
   upgrades, and Lynis on first boot, then `sysupgrade -sf` reboots by default.
+- `secureblue/sysupgrade.bash` relinks selected Homebrew formulae before
+  `brew cleanup`; keep the `unlink && link` ordering and run both as the
+  administrative linuxbrew account.
 - `openbsd/update-crush.ksh` installs over `/usr/local/bin/crush` after
   checksum verification and rewrites the user's `crushrc`.
 
