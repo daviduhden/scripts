@@ -224,9 +224,11 @@ Makefiles whose generated `config.mk` is absent. On OpenBSD, `mbake` and
   profile does not change the result.
 - `make test-tooling` covers the shell, Perl, and Make validator modes, strict
   missing tools, make execution opt-in, installation paths with spaces, and
-  early failures using temporary paths and offline tool doubles. Installer failure tests must
-  also verify cleanup: the shell-config copy recipe restores its immutable
-  attribute in an exit trap even when a copy fails.
+  early failures using temporary paths and offline tool doubles. It also runs
+  the `bootargs.pl` normalization/removal regression, which checks token
+  boundaries and preserved file modes without invoking `rpi-update-safe`.
+  Installer failure tests must also verify cleanup: the shell-config copy recipe
+  restores its immutable attribute in an exit trap even when a copy fails.
 - `fix-permissions.sh --help` now exits 0; other usage errors exit 2.
 - `fix-permissions.sh` prunes `.git` directories and gitfiles, never follows
   symlinks, and preserves setuid/setgid/sticky bits.
