@@ -14,13 +14,14 @@ and is not user-facing.
 | [clean-logs.ksh](clean-logs.ksh) | Removes `.gz` logs under `/var/log` and `.old` files older than 7 days in a bounded set of system directories. Use `--dry-run` to preview; real deletion requires `--force`. |
 | [sudo-wrapper.ksh](sudo-wrapper.ksh) | Routes `sudo` to `doas` and handles `visudo` and `sudoedit`. The install target creates matching symlinks; configure `doas` permissions separately. |
 | [sync-website.ksh](sync-website.ksh) | Synchronizes the configured website from GitHub through `gh`, Git, or a ZIP fallback, fixes permissions, and restarts its service. |
-| [sysupgrade-current.ksh](sysupgrade-current.ksh) | Upgrades to an OpenBSD snapshot and schedules post-upgrade tasks through `/upgrade.site` and `/etc/rc.firsttime`, including configuration maintenance, `dbupdate` system databases, package upgrades, and system reporting. |
+| [sysupgrade-current.ksh](sysupgrade-current.ksh) | Upgrades to an OpenBSD snapshot and schedules post-upgrade tasks through `/upgrade.site` and `/etc/rc.firsttime`, including configuration maintenance, `dbupdate` system databases, package upgrades, Lynis auditing, and system reporting. `--skip-audit` omits the first-boot Lynis audit; `--help` shows usage. |
 | [update-crush.ksh](update-crush.ksh) | Installs the latest OpenBSD Crush binary after checksum verification, keeps a timestamped backup of the previous binary, and configures DeepSeek for the specified user. Usage: `update-crush.ksh [USER]`; the default user is root. |
 
 Example from the repository root:
 
 ```sh
 ksh openbsd/clean-logs.ksh --dry-run
+ksh openbsd/sysupgrade-current.ksh --skip-audit
 ```
 
 Inspect deployment settings before running `sync-website.ksh`. For history

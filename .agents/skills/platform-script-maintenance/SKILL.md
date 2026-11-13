@@ -148,6 +148,11 @@ tool is missing, report the check as skipped rather than passed.
   (`SYSTEMD_USER_UNIT_DIR`) and never deletes `${BINDIR}/systemd`.
 - A new inline `perl -e`/`-n`/`-c` program appeared in
   a shell script; move it to a focused helper installed by the target.
+- An option that changes an OpenBSD first-boot task was not carried into the
+  generated `/upgrade.site` and `/etc/rc.firsttime`. Quoted here-documents do
+  not interpolate, so write the policy variable outside the block and define
+  it before `main` runs; patch an older managed block only at its known call
+  site. Keep the option documented in the platform README.
 - GNU-only options in `openbsd/`: bare `mktemp`, `sort -V`, `sed -r`,
   `readlink -e`, `find -printf`, `xargs --null`.
 - Linux commands or paths in `openbsd/`: `systemctl`, `apt`, `run0`,

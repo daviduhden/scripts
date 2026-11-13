@@ -12,6 +12,7 @@ set -eu
 # - Post-upgrade tasks (sysmerge/dbupdate/pkg_add/lynis/info dump)
 #   are wired through /upgrade.site -> /etc/rc.firsttime.
 # - Lynis is executed via ksh/ksh93 to match shell expectations.
+# - --skip-audit suppresses the first-boot Lynis audit for this upgrade.
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
@@ -28,6 +29,37 @@ log() { print "$(date '+%Y-%m-%d %H:%M:%S') [INFO] $*"; }
 warn() { print "$(date '+%Y-%m-%d %H:%M:%S') [WARN] $*" >&2; }
 error() { print "$(date '+%Y-%m-%d %H:%M:%S') [ERROR] $*" >&2; }
 
+# Whether the scheduled first-boot Lynis audit should be skipped.
+SKIP_LYNIS=0
+
+usage() {
+	print "Usage: sysupgrade-current.ksh [--skip-audit]"
+	print ""
+	print "  --skip-audit  Do not schedule the Lynis security audit"
+	print "                on the next boot."
+	print "  --help, -h    Show this help"
+}
+
+parse_args() {
+	while [ "$#" -gt 0 ]; do
+		case "$1" in
+		--skip-audit)
+			SKIP_LYNIS=1
+			shift
+			;;
+		--help | -h)
+			usage
+			exit 0
+			;;
+		*)
+			error "Unknown option: $1"
+			usage >&2
+			exit 1
+			;;
+		esac
+	done
+}
+
 # Clear leftovers from an interrupted run. /upgrade.site is regenerated
 # below; stale info dumps in /tmp would otherwise accumulate across runs.
 cleanup_previous_artifacts() {
@@ -40,12 +72,15 @@ cleanup_previous_artifacts() {
 }
 
 # Write the site-specific script that sysupgrade(8) executes at the end of
-# the upgrade. The heredoc is quoted, so variable references and command
-# substitutions inside it are evaluated when /upgrade.site runs, not now.
+# the upgrade. The audit policy is interpolated here; the rest of the quoted
+# heredoc is evaluated when /upgrade.site runs, not now.
 write_upgrade_site() {
-	cat <<'EOF' >/upgrade.site
-#!/bin/ksh
-
+	{
+		print '#!/bin/ksh'
+		print ''
+		# Pass the selected audit policy to the new system.
+		print "SKIP_LYNIS=${SKIP_LYNIS}"
+		cat <<'EOF'
 set -eu
 
 # This script is executed at the end of the upgrade
@@ -318,18 +353,27 @@ main() {
     run_sysmerge
     run_dbupdate
     upgrade_packages
-    run_lynis_audit
+    if [ "${SKIP_LYNIS:-0}" -eq 0 ]; then
+        run_lynis_audit
+    else
+        print "Lynis audit skipped (--skip-audit)."
+    fi
     collect_system_info
 }
-
-main "$@"
 EOF_APPEND
+        # The policy variable must be defined before main runs, so it is
+        # written outside the quoted block above.
+        {
+            print "SKIP_LYNIS=${SKIP_LYNIS:-0}"
+            print 'main "$@"'
+        } >>"$RCF"
         return 0
     fi
 
     # An rc.firsttime written by an older version already has the main
-    # managed block. Add only the dbupdate task, without rewriting
-    # unrelated tasks that the installer or the administrator appended.
+    # managed block. Update the dbupdate task and the audit policy, without
+    # rewriting unrelated tasks that the installer or the administrator
+    # appended.
     if ! grep -q '^run_dbupdate()' "$RCF" 2>/dev/null ||
         ! grep -q '^[[:space:]]*run_dbupdate$' "$RCF" 2>/dev/null; then
         cat <<'EOF_DBUPDATE' >> "$RCF"
@@ -356,6 +400,62 @@ run_dbupdate() {
 run_dbupdate
 EOF_DBUPDATE
     fi
+
+    if [ "$SKIP_LYNIS" -eq 1 ] ||
+        grep -q '^SKIP_LYNIS=' "$RCF" 2>/dev/null; then
+        if ! apply_lynis_skip_policy; then
+            print "WARNING: could not update the Lynis audit policy."
+        fi
+    fi
+}
+
+# Older generated first-boot scripts call run_lynis_audit unconditionally.
+# Update the policy variable and patch only the known call site, leaving
+# administrator additions intact.
+apply_lynis_skip_policy() {
+    typeset tmp has_policy
+    has_policy=0
+    if grep -q '^SKIP_LYNIS=' "$RCF" 2>/dev/null; then
+        has_policy=1
+    fi
+    tmp=$(mktemp "${RCF}.XXXXXX") || {
+        print "Cannot create a temporary ${RCF} for the audit policy."
+        return 1
+    }
+    if ! awk -v skip="$SKIP_LYNIS" -v has="$has_policy" '
+        /^SKIP_LYNIS=/ {
+            if (has == 1) {
+                print "SKIP_LYNIS=" skip
+                has = 2
+            }
+            next
+        }
+        NR == 1 {
+            print
+            if (has == 0)
+                print "SKIP_LYNIS=" skip
+            next
+        }
+        $0 == "    run_lynis_audit" {
+            print "    if [ \"${SKIP_LYNIS:-0}\" -eq 0 ]; then"
+            print "        run_lynis_audit"
+            print "    else"
+            print "        print \"Lynis audit skipped (--skip-audit).\""
+            print "    fi"
+            next
+        }
+        { print }
+    ' "$RCF" >"$tmp"; then
+        rm -f "$tmp"
+        print "Cannot update ${RCF} with the audit policy."
+        return 1
+    fi
+    if ! chmod 700 "$tmp" || ! mv "$tmp" "$RCF"; then
+        rm -f "$tmp"
+        print "Cannot replace ${RCF} with the audit policy."
+        return 1
+    fi
+    return 0
 }
 
 main() {
@@ -365,6 +465,7 @@ main() {
 
 main "$@"
 EOF
+	} >/upgrade.site
 }
 
 # -s upgrades to the snapshot branch and -f forces a snapshot upgrade that
@@ -380,7 +481,11 @@ run_sysupgrade() {
 # and appends the first-boot tasks to /etc/rc.firsttime, which rc(8) runs on
 # the next boot.
 main() {
+	parse_args "$@"
 	log "Preparing /upgrade.site for post-upgrade tasks..."
+	if [ "$SKIP_LYNIS" -eq 1 ]; then
+		log "Lynis security audit will be skipped on first boot."
+	fi
 	cleanup_previous_artifacts
 	write_upgrade_site
 	chmod +x /upgrade.site

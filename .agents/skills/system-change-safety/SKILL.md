@@ -105,6 +105,8 @@ description: >-
   backup on error.
 - `openbsd/sysupgrade-current.ksh` runs `sysmerge`, `dbupdate`, package
   upgrades, and Lynis on first boot, then `sysupgrade -sf` reboots by default.
+  `--skip-audit` must reach the generated `/upgrade.site` and the existing
+  `/etc/rc.firsttime` policy without rewriting unrelated tasks.
 - `secureblue/sysupgrade.bash` relinks selected Homebrew formulae before
   `brew cleanup`; keep the `unlink && link` ordering and run both as the
   administrative linuxbrew account.
