@@ -139,6 +139,12 @@ already-installed PSScriptAnalyzer; it does not install it.
   Use `pwsh -NoProfile -File windows/tests/test-update-xerj.ps1` instead:
   it redirects configuration and install paths into temporary directories,
   mocks downloads and Codex, and checks repeated updates and failure paths.
+  Resolve the default version using a HEAD request to the public release
+  redirect, not the shared GitHub API quota. Validate the final repository/tag
+  URL and support both Windows PowerShell's `ResponseUri` and PowerShell 7's
+  `RequestMessage.RequestUri`. Pinned versions must bypass release discovery.
+  Offline tests cover API unavailability and both response shapes; simulated
+  Windows PowerShell responses do not prove native 5.1 execution.
 - Executable activation uses unique same-directory files and `File.Replace`;
   never fall back to overwriting a locked target. Retain and report recovery
   copies after failure. xerj retains successful `.bak.*` copies for operators.

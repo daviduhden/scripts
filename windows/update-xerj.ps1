@@ -81,6 +81,21 @@ function ConvertTo-BashLiteral {
     return "'" + $Value.Replace("'", "'\''") + "'"
 }
 
+function Get-XerjLatestTag {
+    # Follow the public redirect instead of consuming the shared GitHub API quota.
+    $response = Invoke-WebRequest -Uri 'https://github.com/xerj-org/xerj/releases/latest' -Method Head -UseBasicParsing
+    $baseResponse = $response.BaseResponse
+    # Windows PowerShell uses HttpWebResponse; PowerShell 7 uses HttpResponseMessage.
+    $uri = if ($baseResponse.PSObject.Properties['ResponseUri']) {
+        $baseResponse.ResponseUri
+    }
+    else { $baseResponse.RequestMessage.RequestUri }
+    if ([string]$uri -cnotmatch '^https://github\.com/xerj-org/xerj/releases/tag/(v[0-9][A-Za-z0-9.+-]*)$') {
+        throw 'Could not resolve the latest xerj release. Retry or specify -Version TAG.'
+    }
+    return $Matches[1]
+}
+
 # ---------------------------------------------------------------------------
 # Install and configure
 # ---------------------------------------------------------------------------
@@ -96,7 +111,7 @@ try {
     }
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
     if (-not $Version) {
-        $Version = (Invoke-RestMethod 'https://api.github.com/repos/xerj-org/xerj/releases/latest').tag_name
+        $Version = Get-XerjLatestTag
     }
     $tag = 'v' + $Version.TrimStart('v')
     if ($tag -cnotmatch '^v[0-9][A-Za-z0-9.+-]*$') { throw 'Invalid release tag.' }

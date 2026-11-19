@@ -21,6 +21,13 @@ $updater = Join-Path $PSScriptRoot '../update-xerj.ps1'
 $global:xerjTestBadDigest = $false
 $global:xerjTestDuplicate = $false
 $global:xerjTestCodexCalls = 0
+$global:xerjTestLatestCalls = 0
+$global:xerjTestLegacyResponse = $false
+$global:xerjTestReleaseUri = 'https://github.com/xerj-org/xerj/releases/tag/v1.2.3'
+
+function Invoke-RestMethod {
+    throw 'GitHub API must not be used (simulated API rate limit).'
+}
 
 function Assert-True {
     param([bool]$Condition, [string]$Message)
@@ -34,7 +41,17 @@ function codex {
 }
 
 function Invoke-WebRequest {
-    param([string]$Uri, [string]$OutFile, [switch]$UseBasicParsing)
+    param([string]$Uri, [string]$OutFile, [switch]$UseBasicParsing, [string]$Method)
+    if ($Uri -eq 'https://github.com/xerj-org/xerj/releases/latest') {
+        Assert-True ($Method -eq 'Head') 'Latest release lookup must use HEAD'
+        $global:xerjTestLatestCalls++
+        $baseResponse = if ($global:xerjTestLegacyResponse) {
+            [pscustomobject]@{ ResponseUri = [uri]$global:xerjTestReleaseUri }
+        }
+        else { [pscustomobject]@{ RequestMessage = [pscustomobject]@{ RequestUri = [uri]$global:xerjTestReleaseUri } } }
+        return [pscustomobject]@{ BaseResponse = $baseResponse }
+    }
+    Assert-True ($Uri.StartsWith('https://github.com/xerj-org/xerj/releases/download/v1.2.3/xerj-1.2.3-')) 'Unexpected download URL'
     if ($Uri.EndsWith('.sha256')) {
         $archive = $OutFile.Substring(0, $OutFile.Length - 7)
         $digest = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -78,6 +95,21 @@ try {
     Assert-True ([regex]::Matches($crushText, '# BEGIN xerj managed').Count -eq 1) 'Duplicate managed blocks'
     Assert-True ($global:xerjTestCodexCalls -eq 2) 'Codex was not registered twice'
     Assert-True (@(Get-ChildItem "$openConfig.bak.*").Count -eq 2) 'Expected configuration backups'
+    Assert-True ($global:xerjTestLatestCalls -eq 0) 'Pinned version queried latest release'
+    & $updater
+    Assert-True ($LASTEXITCODE -eq 0) 'Automatic version failed with API rate limit'
+    $global:xerjTestLegacyResponse = $true
+    & $updater
+    Assert-True ($LASTEXITCODE -eq 0) 'Windows PowerShell response format rejected'
+    Assert-True ($global:xerjTestLatestCalls -eq 2) 'Latest release was not resolved on both runs'
+    foreach ($uri in @('https://example.com/xerj-org/xerj/releases/tag/v1.2.3',
+            'https://github.com/xerj-org/xerj/releases/latest',
+            'https://github.com/xerj-org/xerj/releases/tag/v1.2.3?unexpected=1')) {
+        $global:xerjTestReleaseUri = $uri
+        & $updater -ErrorAction SilentlyContinue
+        Assert-True ($LASTEXITCODE -eq 1) 'Unexpected release redirect accepted'
+        Assert-True ((Get-Content -Raw $binary) -eq 'fixture binary; never execute') 'Binary changed after invalid release redirect'
+    }
     $before = Get-Content -Raw $openConfig
     $global:xerjTestBadDigest = $true
     & $updater -Version 'v1.2.3' -OpenCode -ErrorAction SilentlyContinue
@@ -106,13 +138,14 @@ try {
     & $updater -Version 'v1.2.3' -OpenCode -ErrorAction SilentlyContinue
     Assert-True ($LASTEXITCODE -eq 1) 'Ambiguous JSONC was accepted'
     Assert-True ((Get-Content -Raw $openConfig) -eq $before) 'JSON changed despite JSONC refusal'
-    Write-Output 'PASS: install, repeated update, backups, preserved settings, Codex registration, checksum rejection, JSONC refusal'
+    Write-Output 'PASS: latest release without API, redirect validation, install, repeated update, backups, preserved settings, Codex registration, checksum rejection, JSONC refusal'
 }
 finally {
     $env:LOCALAPPDATA = $originalLocal
     $env:XDG_CONFIG_HOME = $originalConfig
     $env:CODEX_HOME = $originalCodex
     Remove-Variable -Name xerjTestBadDigest, xerjTestDuplicate, xerjTestCodexCalls -Scope Global
+    Remove-Variable -Name xerjTestLatestCalls, xerjTestLegacyResponse, xerjTestReleaseUri -Scope Global
     $resolved = [IO.Path]::GetFullPath($testRoot)
     $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\', '/')
     if ((Split-Path $resolved) -eq $tempRoot -and (Split-Path $resolved -Leaf) -match '^xerj-tests-[a-f0-9]{32}$') {

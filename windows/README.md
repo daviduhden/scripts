@@ -75,7 +75,8 @@ profile changes, or execution policy changes are required:
 
 The destination is `%LOCALAPPDATA%\Programs\xerj\xerj.exe`. Without switches,
 only the binary is installed. Each run downloads and verifies the release;
-`-Version TAG` pins it, otherwise the latest GitHub release is used. `-Url URL`
+`-Version TAG` pins it, otherwise the latest GitHub release is resolved through
+the public release redirect, without using the rate-limited GitHub API. `-Url URL`
 sets the ES-compatible node endpoint (default `http://127.0.0.1:9200`). Close a
 running xerj process before replacing its binary on Windows.
 
