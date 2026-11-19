@@ -71,6 +71,8 @@ jobs:
           & pwsh -NoProfile -File windows/test-format/tests/run-tests.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & pwsh -NoProfile -File windows/tests/test-update-xerj.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & pwsh -NoProfile -File windows/tests/test-update-aiclis.ps1
           exit $LASTEXITCODE
       - name: Run portable Perl syntax and regressions
         shell: pwsh

@@ -116,6 +116,18 @@ already-installed PSScriptAnalyzer; it does not install it.
   against the GitHub asset digest and reads only the expected executable
   entries. PowerShell profile wrappers (`codex --yolo`, `opencode --auto`) are
   opt-in with `-Wrappers`; profile updates use a backup and atomic replacement.
+- Codex release ZIPs contain both root and `codex-resources/` helper copies.
+  Match exact archive paths, prefer resource entries, retain the legacy root
+  fallback, and reject duplicates at the selected path. Require the manifest
+  and all mandatory binaries before reusing a cached version. Successful
+  activation must remain successful if deleting a locked old copy fails.
+- `All` and `Codex` also invoke `codex app-server daemon update`, including
+  when the CLI is already current. The daemon selects latest stable separately
+  from `-CodexVersion`; respect `CODEX_HOME`, skip mutation with `-Check`, and
+  propagate nonzero or unsupported results without skipping Crush. Never run
+  this lifecycle command during validation: it may restart a running daemon.
+  Use `pwsh -NoProfile -File windows/tests/test-update-aiclis.ps1` for offline
+  archive, incomplete-cache, activation-lock, daemon, and dispatch regressions.
 - `update-xerj.ps1` is a release-download updater: it verifies the archive's
   SHA-256 against an exact published filename/digest line before reading only
   the expected executable entry. Keep its per-user destination and absolute

@@ -46,6 +46,15 @@ published in GitHub release metadata. OpenCode selects the newest stable 2.x
 release because the repository's `latest` alias still points at the 1.x line.
 Crush is installed if missing and updated on later runs.
 
+Selecting `All` or `Codex` also runs `codex app-server daemon update`, even
+when the CLI is already current. This official command respects `CODEX_HOME`
+and updates the daemon's separate managed package to the latest stable release,
+independently of `-CodexVersion`. A running daemon may restart and interrupt
+active work; a stopped daemon stays stopped. `-Check` skips this mutation.
+Daemon errors (including unsupported installations) produce a nonzero result
+without preventing the remaining CLI updates. See the
+[upstream daemon lifecycle documentation](https://github.com/openai/codex/blob/main/codex-rs/app-server-daemon/README.md).
+
 Run history cleanup in the intended user's session. Crush data is preserved by
 default; pass `-IncludeCrushData` to remove the entire Crush data directory,
 which may contain configuration. `SWIVAL_PROJECT_HOME` selects the project whose
@@ -121,6 +130,21 @@ root `opencode.exe`; Crush reads only `crush.exe` inside the expected versioned
 archive folder. Duplicate expected entries and checksum failures are rejected
 before activation. The check trusts GitHub HTTPS and its release metadata, not
 an independent signature. Older releases without digest metadata are refused.
+
+Codex packages may contain both root and `codex-resources/` copies of their
+helpers. The updater prefers each exact resource path and supports the legacy
+root path when absent; duplicate entries at the selected path are rejected.
+Incomplete cached Codex packages are downloaded again. A leftover old binary
+that cannot be deleted after activation is retained with a warning, rather
+than reporting an otherwise successful OpenCode or Crush update as failed.
+If activation itself is blocked, close the affected CLI and retry.
+
+Offline AI CLI regressions use temporary trees and fixture archives without
+executing downloaded binaries, changing PATH, or updating a real daemon:
+
+```powershell
+pwsh -NoProfile -File windows/tests/test-update-aiclis.ps1
+```
 
 xerj verifies the archive's checksum, rejects duplicate executable entries and
 prepares the binary next to its destination. Existing binaries/configurations

@@ -8,6 +8,7 @@
 #   published SHA-256 digest.
 # - Crush: GitHub release binary verified against the published SHA-256 digest.
 # - Codex: GitHub release zip with the three binaries plus codex-code-mode-host.
+# - Codex daemon: updates its independent package using the CLI lifecycle command.
 # - Keeps versioned copies and prepends the local folders to the user PATH.
 # - Repairs PATH. PowerShell wrappers (codex --yolo, opencode --auto) are
 #   opt-in with -Wrappers.
@@ -444,12 +445,15 @@ function Set-CurrentExe {
     }
     catch {
         if (Test-Path -LiteralPath $oldExe) { Write-Warn "Recovery copy retained: $oldExe" }
-        throw
+        throw "Could not activate '$TargetExe'. Close the affected CLI and retry. $($_.Exception.Message)"
     }
     finally {
         if (Test-Path -LiteralPath $pending) { Remove-Item -LiteralPath $pending }
     }
-    if (Test-Path -LiteralPath $oldExe) { Remove-Item -LiteralPath $oldExe }
+    if (Test-Path -LiteralPath $oldExe) {
+        try { Remove-Item -LiteralPath $oldExe }
+        catch { Write-Warn "Update activated; could not remove old executable. Recovery copy retained: $oldExe ($($_.Exception.Message))" }
+    }
 }
 
 # ---------------------------------------------------------------------------
@@ -949,9 +953,13 @@ function Install-Codex {
     $resourcesDir = Join-Path $versionDir 'codex-resources'
     $versionExe = Join-Path $binDir 'codex.exe'
     $codeModeHostExe = Join-Path $binDir 'codex-code-mode-host.exe'
+    $packageComplete = (Test-Path -LiteralPath (Join-Path $versionDir 'codex-package.json')) -and
+    (Test-Path -LiteralPath $versionExe) -and
+    (Test-Path -LiteralPath (Join-Path $resourcesDir 'codex-command-runner.exe')) -and
+    (Test-Path -LiteralPath (Join-Path $resourcesDir 'codex-windows-sandbox-setup.exe'))
 
     if ((Test-VersionEqual $installed $version) -and (Test-CodexManagedLayout) -and
-        (Test-Path -LiteralPath $versionExe) -and (Test-Path -LiteralPath $codeModeHostExe) -and -not $Force) {
+        $packageComplete -and (Test-Path -LiteralPath $codeModeHostExe) -and -not $Force) {
         Write-Info "Codex: already up to date ($installed). Nothing to do."
         return
     }
@@ -960,7 +968,7 @@ function Install-Codex {
         Write-Info 'Codex: migrating to the managed layout (junction + GitHub package)'
     }
 
-    if (-not (Test-Path -LiteralPath $versionExe) -or $Force) {
+    if (-not $packageComplete -or $Force) {
         $asset = "codex-$target.exe.zip"
         $api = "https://api.github.com/repos/openai/codex/releases/tags/rust-v$version"
         $release = (Get-RemoteText -Uri $api) | ConvertFrom-Json
@@ -986,20 +994,29 @@ function Install-Codex {
 
             New-Item -ItemType Directory -Force -Path $binDir | Out-Null
             New-Item -ItemType Directory -Force -Path $resourcesDir | Out-Null
+            # An interrupted repair must not leave a completed-package marker.
+            $manifest = Join-Path $versionDir 'codex-package.json'
+            if (Test-Path -LiteralPath $manifest) { Remove-Item -LiteralPath $manifest }
             $entries = @(
-                @{ Name = "codex-$target.exe"; Destination = (Join-Path $binDir 'codex.exe') },
-                @{ Name = 'codex-command-runner.exe'; Destination = (Join-Path $resourcesDir 'codex-command-runner.exe') },
-                @{ Name = 'codex-windows-sandbox-setup.exe'; Destination = (Join-Path $resourcesDir 'codex-windows-sandbox-setup.exe') }
+                @{ Names = @("codex-$target.exe"); Destination = (Join-Path $binDir 'codex.exe') },
+                @{ Names = @('codex-resources/codex-command-runner.exe', 'codex-command-runner.exe'); Destination = (Join-Path $resourcesDir 'codex-command-runner.exe') },
+                @{ Names = @('codex-resources/codex-windows-sandbox-setup.exe', 'codex-windows-sandbox-setup.exe'); Destination = (Join-Path $resourcesDir 'codex-windows-sandbox-setup.exe') }
             )
             Add-Type -AssemblyName System.IO.Compression.FileSystem
             $archive = [IO.Compression.ZipFile]::OpenRead($zip)
             try {
                 foreach ($wanted in $entries) {
-                    $entryMatches = @($archive.Entries | Where-Object { $_.Name -ceq $wanted.Name })
+                    # Current packages include both resource and legacy root copies.
+                    # Select an exact path, preferring the package resource layout.
+                    $entryMatches = @()
+                    foreach ($entryName in $wanted.Names) {
+                        $entryMatches = @($archive.Entries | Where-Object { $_.FullName -ceq $entryName })
+                        if ($entryMatches.Count -gt 0) { break }
+                    }
                     if ($entryMatches.Count -ne 1 -or $entryMatches[0].Length -le 0 -or
                         $entryMatches[0].Length -gt 536870912 -or
                         (($entryMatches[0].ExternalAttributes -shr 16) -band 0xF000) -eq 0xA000) {
-                        throw "Expected exactly one regular $($wanted.Name) entry."
+                        throw "Expected exactly one regular $($wanted.Names[0]) entry."
                     }
                     $pending = Join-Path (Split-Path -Parent $wanted.Destination) ('.' + [guid]::NewGuid().ToString('N') + '.tmp')
                     try {
@@ -1109,6 +1126,27 @@ function Install-Codex {
 
     Write-Info "Codex: $verified installed to $script:CodexBin"
     Remove-OldCodexVersions -CurrentVersion $version
+}
+
+# ---------------------------------------------------------------------------
+# Codex daemon (independent managed package)
+# ---------------------------------------------------------------------------
+function Invoke-CodexDaemonUpdate {
+    if ($Check) {
+        Write-Info 'Codex daemon: update skipped in check mode.'
+        return
+    }
+    # The official lifecycle command respects CODEX_HOME, updates the separate
+    # daemon package and restarts only a daemon that was already running.
+    $PSNativeCommandUseErrorActionPreference = $false
+    Write-Info 'Codex daemon: checking for a stable update (a running daemon may restart).'
+    $output = & $script:CodexExe app-server daemon update
+    if ($LASTEXITCODE -ne 0) { throw "Codex daemon update failed (exit code $LASTEXITCODE)." }
+    $result = ($output -join "`n") | ConvertFrom-Json
+    if ($result.status -notin @('updated', 'noUpdate')) {
+        throw "Codex daemon update was not completed: $($result | ConvertTo-Json -Compress)"
+    }
+    Write-Info "Codex daemon: $($result.status) (installed $($result.installedVersion), running $($result.runningVersion))."
 }
 
 # ---------------------------------------------------------------------------
@@ -1225,6 +1263,10 @@ if ($doOpenCode) {
 if ($doCodex) {
     try { Install-Codex -Version $CodexVersion }
     catch { Write-Fail "Codex: $($_.Exception.Message)"; $script:HadError = $true }
+    try {
+        if (Test-Path -LiteralPath $script:CodexExe -PathType Leaf) { Invoke-CodexDaemonUpdate }
+    }
+    catch { Write-Fail "Codex daemon: $($_.Exception.Message)"; $script:HadError = $true }
 }
 
 if ($doCrush) {

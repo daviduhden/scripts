@@ -109,6 +109,10 @@ with a wrapper that hides whether the batch files actually ran.
      check; the platform workflow runs native/isolated checks. The standalone
      Windows xerj updater suite is `pwsh -NoProfile -File windows/tests/test-update-xerj.ps1`;
      it uses temporary paths and mocked downloads/clients, not real installs.
+     The AI CLI updater suite is `pwsh -NoProfile -File windows/tests/test-update-aiclis.ps1`;
+     it uses fixture ZIPs and mocked versions/daemon calls, checks exact-path
+     duplicate rejection and incomplete caches, and exercises main dispatch
+     after failures without touching user PATH or real daemon state.
 6. To add a regression test:
    - use POSIX `sh` or core-module Perl for portable shell/tool tests; use Perl
      (`File::Temp`, `IPC::Open3`) when a filesystem harness needs to exercise
