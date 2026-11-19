@@ -91,7 +91,7 @@ parse_args() {
 }
 
 install_xerj() {
-	local arch tag asset base digest client
+	local arch tag asset base digest client release_url
 	local version="$VERSION"
 	local binary="$HOME/.local/bin/xerj"
 	case "$(uname -m)" in
@@ -100,9 +100,15 @@ install_xerj() {
 	*) error 'Unsupported architecture' ;;
 	esac
 	if [[ -z $version ]]; then
-		version=$(curl --fail --silent --show-error --location --proto '=https' \
-			https://api.github.com/repos/xerj-org/xerj/releases/latest |
-			"$PERL_CMD" "$RELEASE_HELPER" json-tag)
+		# Follow the public redirect without consuming the shared GitHub API quota.
+		release_url=$(curl --fail --silent --show-error --head --location \
+			--proto '=https' --proto-redir '=https' --output /dev/null \
+			--write-out '%{url_effective}' \
+			https://github.com/xerj-org/xerj/releases/latest) ||
+			error 'Could not resolve the latest xerj release; retry or use --version TAG'
+		[[ $release_url =~ ^https://github\.com/xerj-org/xerj/releases/tag/(v[0-9][A-Za-z0-9.+-]*)$ ]] ||
+			error 'Unexpected latest release URL; retry or use --version TAG'
+		version="${BASH_REMATCH[1]}"
 	fi
 	tag="v${version#v}"
 	[[ $tag =~ ^v[0-9][A-Za-z0-9.+-]*$ ]] || error 'Invalid release tag'

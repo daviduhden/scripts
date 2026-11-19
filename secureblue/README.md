@@ -59,7 +59,8 @@ bash secureblue/update-xerj.bash --version v1.0.0-rc.100 --opencode
 
 Without client flags, only the binary is installed. Re-running downloads and
 verifies the requested release again. `--version TAG` pins a release; otherwise
-the latest GitHub release is used. `--url URL` selects the ES-compatible node
+the latest GitHub release is resolved through the public release redirect,
+without using the rate-limited GitHub API. `--url URL` selects the ES-compatible node
 endpoint (default `http://127.0.0.1:9200`). Add `~/.local/bin` to your PATH if
 needed; MCP registrations use the absolute binary path.
 

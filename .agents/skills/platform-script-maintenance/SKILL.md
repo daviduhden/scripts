@@ -133,6 +133,12 @@ tool is missing, report the check as skipped rather than passed.
   must run an authenticated node separately and supply `XERJ_AUTH` when local
   key discovery cannot find its data directory. Do not execute this updater
   during validation.
+  Resolve its default version with curl HEAD, HTTPS-only redirects and
+  `url_effective` from the public release URL, without the GitHub API. Validate
+  the complete repository/tag URL before constructing asset names; pinned
+  versions bypass discovery. `perl tests/test_delivery_transactions.pl`
+  covers discovery, rejected redirects and failures with mocked curl and
+  temporary install paths, including preservation of an existing binary.
 
 - `secureblue/setup-clamav.bash` must not write `ScanOnAccess`: that directive
   only applies to ClamAV <= 0.101. Current releases enable on-access scanning

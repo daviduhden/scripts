@@ -335,14 +335,25 @@ while [ "$#" -gt 0 ]; do
  esac
  shift
 done
+printf '%s\n' "$url" >>"$CURL_LOG"
+case "$url" in
+ https://github.com/xerj-org/xerj/releases/latest)
+  printf '%s' "$RELEASE_URL"
+  exit "$LATEST_EXIT";;
+ https://github.com/xerj-org/xerj/releases/download/v1.0.0/*) ;;
+ *) exit 22;;
+esac
 cp "$FIXTURES/${url##*/}" "$target"
 SH
     chmod oct("755"), "$mocks/curl" or die "cannot chmod curl mock: $!";
 
     my $environment = env_with(
-        HOME           => $root,
-        FIXTURES       => $fixtures,
-        PERL_CMD       => find_command('perl') // 'perl',
+        HOME        => $root,
+        FIXTURES    => $fixtures,
+        CURL_LOG    => "$root/curl.log",
+        RELEASE_URL => 'https://github.com/xerj-org/xerj/releases/tag/v1.0.0',
+        LATEST_EXIT => 0,
+        PERL_CMD    => find_command('perl') // 'perl',
         RELEASE_HELPER => "$REPOSITORY_ROOT/scripts/release-verify.pl",
     );
     $environment->{PATH} = $mocks . ':' . $ENV{PATH};
@@ -370,6 +381,47 @@ SH
         $executable, 'published binary is intact' );
     is_deeply( [ matching_entries( "$root/.local/bin", qr/^xerj\.new/ ) ],
         [], 'no destination temporaries remain' );
+    unlike( slurp("$root/curl.log"), qr{/releases/latest},
+        'pinned versions bypass release discovery' );
+
+    my $latest_commands =
+      "\nVERSION=''\nTMP_DIR=''\nBINARY_STAGE=''\ninstall_xerj\n";
+    my $latest = run_command(
+        cmd => [ 'bash', '-eu', '-c', $functions . $latest_commands ],
+        env => $environment,
+    );
+    is( $latest->{returncode}, 0, 'latest installs without GitHub API' )
+      or diag $latest->{stdout} . $latest->{stderr};
+    like(
+        slurp("$root/curl.log"),
+        qr{https://github.com/xerj-org/xerj/releases/latest},
+        'latest uses public release redirect'
+    );
+
+    for my $url (
+        'https://example.com/xerj-org/xerj/releases/tag/v1.0.0',
+        'https://github.com/xerj-org/xerj/releases/latest',
+        'https://github.com/xerj-org/xerj/releases/tag/v1.0.0?x=1',
+      )
+    {
+        write_file( "$root/curl.log", '' );
+        my $result = run_command(
+            cmd => [ 'bash', '-eu', '-c', $functions . $latest_commands ],
+            env => { %$environment, RELEASE_URL => $url },
+        );
+        isnt( $result->{returncode}, 0, 'unexpected release URL rejected' );
+        unlike( slurp("$root/curl.log"), qr{/download/},
+            'invalid redirect does not download assets' );
+        is( slurp("$root/.local/bin/xerj"),
+            $executable, 'invalid redirect preserves installed binary' );
+    }
+    my $failure = run_command(
+        cmd => [ 'bash', '-eu', '-c', $functions . $latest_commands ],
+        env => { %$environment, LATEST_EXIT => 22 },
+    );
+    isnt( $failure->{returncode}, 0, 'release lookup failure is propagated' );
+    is( slurp("$root/.local/bin/xerj"),
+        $executable, 'lookup failure preserves installed binary' );
 };
 
 done_testing();
