@@ -19,20 +19,25 @@ description: >-
 
 ## Understand the test split
 
-`make check` runs agent-knowledge validation and contract tests, shell, Perl,
+`make check` runs agent-knowledge validation and contract tests, Python, shell, Perl,
 Make, permission, correctness, and manual-page checks. `make test` completes
 validation before isolated regressions (including under parallel make):
 tooling/installers, permissions, correctness, both Perl programs, delivery
 transactions, release verification, and website synchronization filters.
 
-The three language validators default to `--check`; only `--format` rewrites
-sources. `make format` invokes all three explicitly. Formatting drift exits 2
+The four validators default to `--check`; only `--format` rewrites
+sources. `make format` invokes all four explicitly. Formatting drift exits 2
 even if repaired, so inspect the diff and rerun checks. Safe `mktemp` logs
 remain for inspection; transient failure, skip and format lists are cleaned.
 
 Use `--strict` to fail when optional tools or Perl modules are missing.
 Non-strict runs record `[SKIP]` diagnostics and counts rather than claiming
 those checks passed. Make dialect/platform omissions are expected skips.
+Python validation requires Ruff whenever `.py` files exist, in both normal
+and strict modes, and skips Ruff for an empty tree. `make test-python` runs
+this validator; `install-tests-format` installs it. Ruff calls disable caches
+and only format mode runs `ruff clean`. The Linux workflow installs Ruff;
+offline Perl tooling tests use mocked Ruff and temporary Python fixtures.
 Make evaluation is opt-in via `--make-dry-run`: even `-n` can execute commands
 while parsing untrusted Makefiles. `perl -c` loads modules and executes compile-time blocks, so those
 sources must also be trusted.

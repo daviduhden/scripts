@@ -25,6 +25,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y shellcheck shfmt devscripts ksh bmake perltidy libperl-critic-perl mandoc rsync
+          python3 -m pip install 'ruff==0.17.3'
       - name: Check and test without invoking administrative utilities
         run: |
           export TMPDIR="$RUNNER_TEMP/validation"
