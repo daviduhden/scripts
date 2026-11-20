@@ -251,7 +251,7 @@ uninstall_tests_format() {
 
 format_sources() {
 	status=0
-	for validator in shell perl make; do
+	for validator in python shell perl make; do
 		/bin/sh "tests-format/validate-$validator.sh" --format . || status=1
 	done
 	exit "$status"
@@ -282,6 +282,7 @@ Targets:
   test                     Run checks and isolated regression tests
   test-validate            Run only read-only validators
   test-manpages            Run mandoc lint when mandoc is installed
+  test-python              Run cache-free Python validation with Ruff
   test-regression          Run only the regression tests
   test-tooling             Run validator/installer temporary-tree regressions
   test-delivery            Run delivery/release transaction regressions

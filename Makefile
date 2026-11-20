@@ -86,6 +86,7 @@ TESTS_FORMAT_SCRIPTS = \
 	tests-format/validate-make.sh \
 	tests-format/validate-manpages.sh \
 	tests-format/validate-perl.sh \
+	tests-format/validate-python.sh \
 	tests-format/validate-shell.sh
 
 # Public Perl programs are listed in perl/programs.txt.
@@ -186,12 +187,16 @@ check: test-validate test-manpages
 format:
 	@$(MANAGE) format
 
-test-validate: check-agent-knowledge test-agent-knowledge
+test-validate: check-agent-knowledge test-agent-knowledge test-python
 	@echo "Running shell script validation..." && /bin/sh tests-format/validate-shell.sh --check .
 	@echo "Running perl script validation..." && /bin/sh tests-format/validate-perl.sh --check .
 	@echo "Running make validation..." && /bin/sh tests-format/validate-make.sh --check .
 	@echo "Checking file permissions (read-only)..." && /bin/sh tests-format/fix-permissions.sh --check .
 	@echo "Running correctness audit..." && /bin/sh tests-format/validate-correctness.sh --target all .
+
+.PHONY: test-python
+test-python:
+	@echo "Running python script validation..." && /bin/sh tests-format/validate-python.sh --check .
 
 test-manpages:
 	@echo "Running man page validation..." && /bin/sh tests-format/validate-manpages.sh .

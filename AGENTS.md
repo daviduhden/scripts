@@ -56,8 +56,9 @@ and bundled configuration names omit `.yaml`.
   `$'...'` in that tree.
 - `tests-format/` scripts use `#!/bin/sh` and POSIX constructs.
 - `tests-format/validate-perl.sh` checks syntax, Perl::Critic, and formatting;
-  only `--format` rewrites sources. There is no Python validator or runtime
-  dependency in the maintained tree.
+  only `--format` rewrites sources. `validate-python.sh` validates external
+  Python trees with Ruff; `make test-python` also runs it on this tree. Ruff
+  is required only when Python files exist; project tools remain in Perl.
 - Platform CI runs shellcheck in strict mode, so shellcheck info and warning
   findings must be fixed rather than suppressed. Restricted-PATH tests must
   provide every external command the validators call; OpenBSD has no `printf`
@@ -128,7 +129,9 @@ perltidy -npro -ast -se -o /dev/null perl/ssh-menu.pl
 `--check` (default), `--format`, and `--strict` before the root directory.
 Check mode does not rewrite sources or caches; logs use safe temporary files
 and remain under `${TMPDIR:-/tmp}`. Only `--format` applies formatting; drift
-still exits 2. `make format` invokes all three formatters. Strict mode fails
+still exits 2. `make format` invokes all four formatters, including Ruff via
+`validate-python.sh`. Python checks disable caches; Python format mode also
+runs `ruff clean`. Strict mode fails
 on missing optional tools or Perl modules, while platform-inapplicable Make
 checks remain explicit skips.
 The Makefile validator evaluates make only with `--make-dry-run`; use that

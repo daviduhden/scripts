@@ -58,7 +58,7 @@ sub build_fixture {
     my $perl = find_command('perl') // $^X;
     my $mock = slurp("$REPO/tests/fixtures/mock-command.pl");
     $mock =~ s/__PERL__/$perl/;
-    for my $name (qw(shfmt perltidy mbake perlcritic checkmake bmake)) {
+    for my $name (qw(shfmt perltidy mbake ruff perlcritic checkmake bmake)) {
         write_file( "$bin/$name", $mock );
         chmod 0755, "$bin/$name" or die "cannot chmod $name mock: $!";
     }
@@ -103,8 +103,9 @@ subtest 'check never rewrites and format is explicit' => sub {
             'shell', 'sample.sh',
             "#!/bin/sh\n# UNFORMATTED\nprintf '%s\\n' ok\n"
         ],
-        [ 'perl', 'sample.pl', "# UNFORMATTED\nuse strict; use warnings;\n" ],
-        [ 'make', 'Makefile',  "# UNFORMATTED\nall:\n\t\@true\n" ],
+        [ 'perl',   'sample.pl', "# UNFORMATTED\nuse strict; use warnings;\n" ],
+        [ 'make',   'Makefile',  "# UNFORMATTED\nall:\n\t\@true\n" ],
+        [ 'python', 'sample.py', "# UNFORMATTED\nprint('ok')\n" ],
       )
     {
         my ( $kind, $name, $content ) = @$case;
@@ -112,8 +113,9 @@ subtest 'check never rewrites and format is explicit' => sub {
             my $root = "$fixture->{base}/$kind";
             make_path($root);
             my $source = "$root/$name";
-            write_file( $source,                 $content );
-            write_file( "$root/.cache/sentinel", 'keep' );
+            write_file( $source,                      $content );
+            write_file( "$root/.cache/sentinel",      'keep' );
+            write_file( "$root/.ruff_cache/sentinel", 'keep' );
 
             my $before = files_under($root);
             my $check  = run_validator( $fixture, $kind, $root, '--check' );
