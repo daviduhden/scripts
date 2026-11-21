@@ -168,6 +168,29 @@ sub exercise_implementation {
       or return;
     my $source_text = slurp("$REPOSITORY_ROOT/$relative_script");
     my $functions   = common_functions($source_text);
+    my $validate    = extract_function( $source_text, 'validate_zip_entries' );
+    my $root        = new_tempdir('website-zip-list-');
+    my $list        = "$root/entries";
+
+    for my $case (
+        [ "site/\nsite/index.html\n",            0 ],
+        [ "site/index.html\nother/index.html\n", 1 ],
+        [ "site/../index.html\n",                1 ],
+        [ '',                                    1 ],
+      )
+    {
+        my ( $contents, $status ) = @$case;
+        write_file( $list, $contents );
+        my $result = run_command(
+            cmd => [
+                $shell, '-c',
+                "$validate\nvalidate_zip_entries " . shell_quote($list)
+            ],
+            timeout => 20,
+        );
+        is( $result->{returncode}, $status, 'validates ZIP entry listing' )
+          or diag $result->{stderr};
+    }
 
     for my $transfer_mode (qw(rsync copy)) {
         next if $transfer_mode eq 'rsync' && !defined find_command('rsync');

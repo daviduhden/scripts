@@ -622,12 +622,15 @@ sub remove_known_host_entry {
     # marker lines (@cert-authority, @revoked) and hashed entries are left
     # untouched.
     my @kept;
-    my $removed = 0;
+    my $removed    = 0;
+    my @link_state = lstat $known_hosts;
     my $fh;
     if ( !open $fh, '<', $known_hosts ) {
         logw("Could not read $known_hosts: $!");
         return 0;
     }
+    my @source_state = stat $fh;
+    local $! = 0;
     while ( my $line = <$fh> ) {
         my $probe = $line;
         my ($eol) = $probe =~ /(\r?\n)\z/;
@@ -658,7 +661,11 @@ sub remove_known_host_entry {
         if ($matches) { $removed++; next unless defined $rewrite; }
         push @kept, defined $rewrite ? $rewrite : $line;
     }
-    close $fh;
+    my $read_error = $!;
+    if ( !close($fh) || $read_error || !@source_state ) {
+        logw("Could not finish reading $known_hosts");
+        return 0;
+    }
 
     return 0 unless $removed;
 
@@ -701,6 +708,23 @@ sub remove_known_host_entry {
             unlink $tmp;
             return 0;
         }
+    }
+    my @current_link = lstat $known_hosts;
+    my @current      = stat $target;
+    my @fields       = $^O eq 'MSWin32' ? ( 2, 7, 9 ) : ( 0, 1, 2, 7, 9, 10 );
+    if (
+           !@link_state
+        || !@current_link
+        || !@current
+        || grep {
+                 $source_state[$_] != $current[$_]
+              || $link_state[$_] != $current_link[$_]
+        } @fields
+      )
+    {
+        logw("Known hosts changed while being read: $known_hosts");
+        unlink $tmp;
+        return 0;
     }
     if ( !replace_state_file( $target, $tmp ) ) {
         logw("Could not replace $target: $!");

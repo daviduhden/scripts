@@ -28,6 +28,7 @@ use Pod::Usage         ();
 use Digest::SHA        ();
 use Cwd                qw(abs_path);
 use Errno              qw(EFBIG EAGAIN);
+use Fcntl              qw(O_CREAT O_EXCL O_WRONLY);
 
 # UTF-16LE/BE codecs live in Encode::Unicode. Some Perl builds (notably the
 # one shipped with OpenBSD) do not autoload them, so request the module
@@ -658,7 +659,7 @@ sub parse_args {
 sub emit {
     my ($line) = @_;
     $line = '' unless defined $line;
-    push @LOG, $line;
+    push @LOG, $line if $CFG && defined $CFG->{report};
     print $line, "\n" unless $CFG && $CFG->{quiet};
     return;
 }
@@ -674,7 +675,7 @@ sub emit_verbose {
 sub emit_error {
     my ($line) = @_;
     $line = '' unless defined $line;
-    push @LOG, $line;
+    push @LOG, $line if $CFG && defined $CFG->{report};
     print STDERR "normalize-files: $line\n";
     return;
 }
@@ -2019,7 +2020,15 @@ sub git_capture {
     return ( undef, 'cannot run git' ) unless defined $pid;
     local $/ = undef;
     my $out = <$fh>;
-    close $fh;
+    if ( !close $fh ) {
+        my $status     = $?;
+        my $diff_check = grep { $_ eq '--check' } @args;
+        return ( undef, "git failed (status $status)" )
+          unless $diff_check
+          && $status == ( 2 << 8 )
+          && defined $out
+          && length $out;
+    }
     return ( defined $out ? $out : '', undef );
 }
 
@@ -2058,7 +2067,10 @@ sub git_report_after {
     emit( '  ' . $_ ) for grep { length } split /\n/, safe_decode( $st // '' );
     emit('');
     my ( $chk, $err2 ) = git_capture( '-C', $repo_raw, 'diff', '--check' );
-    if ( defined $chk && length $chk ) {
+    if ( defined $err2 ) {
+        emit("GIT: diff --check unavailable: $err2");
+    }
+    elsif ( defined $chk && length $chk ) {
         emit('GIT: diff --check reported problems:');
         emit( '  ' . $_ ) for grep { length } split /\n/, safe_decode($chk);
     }
@@ -2085,12 +2097,18 @@ sub write_report {
     my ( $cfg, $R ) = @_;
     return unless defined $cfg->{report};
     my $fh;
-    if ( !open( $fh, '>:raw', $cfg->{report} ) ) {
+    if ( !sysopen( $fh, $cfg->{report}, O_WRONLY | O_CREAT | O_EXCL, 0600 ) ) {
         warn "normalize-files: cannot write report $cfg->{report}: $!\n";
         $R->{errors}++;
         return;
     }
-    my $text        = join( "\n", @LOG ) . "\n";
+    my $text = join( "\n", @LOG ) . "\n";
+    if ( !binmode($fh) ) {
+        warn "normalize-files: cannot set binary report mode: $!\n";
+        $R->{errors}++;
+        close $fh;
+        return;
+    }
     my $written     = print {$fh} encode( 'UTF-8', $text );
     my $write_error = $!;
     my $closed      = close $fh;
@@ -2332,7 +2350,8 @@ Suppress normal output (errors still go to STDERR).
 
 =item B<--report FILE>
 
-Write the report as UTF-8 text with LF endings.
+Create a new UTF-8 report with LF endings, including in dry-run mode.
+An existing file or symbolic link at the report path is refused.
 
 =item B<--follow-symlinks>
 

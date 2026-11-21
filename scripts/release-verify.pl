@@ -20,9 +20,11 @@ use strict;
 use warnings;
 
 use Archive::Tar;
-use File::Basename qw(dirname);
-use File::Path     qw(make_path);
-use JSON::PP       ();
+use File::Basename         qw(dirname);
+use File::Path             qw(make_path);
+use File::Temp             qw(tempfile);
+use IO::Uncompress::Gunzip qw($GunzipError);
+use JSON::PP               ();
 
 my $command = shift @ARGV // '';
 
@@ -96,67 +98,112 @@ sub json_validate {
     read_json();
 }
 
-sub archive_members {
-    my ($archive) = @_;
-    my $tar = Archive::Tar->new( $archive, 1 )
-      or die "cannot read archive: $!\n";
-    return ( $tar, [ $tar->get_files() ] );
+sub archive_iterator {
+    my ( $archive, $limit ) = @_;
+    my $max_entries = 200_000;
+    my $max_tar     = $limit + $max_entries * 1024 + 1024;
+    my $compressed  = -s $archive;
+    die "invalid compressed archive size\n"
+      unless defined $compressed && $compressed > 0 && $compressed <= $max_tar;
+    my $gzip = IO::Uncompress::Gunzip->new(
+        $archive,
+        MultiStream => 1,
+        Strict      => 1,
+        Transparent => 0,
+    ) or die "cannot decode archive: $GunzipError\n";
+    my ( $temporary, $path ) = tempfile( UNLINK => 1 );
+    binmode $temporary or die "cannot set archive mode: $!\n";
+    my $unpacked = 0;
+
+    while (1) {
+        my $read = $gzip->read( my $buffer, 64 * 1024 );
+        die "cannot decode archive: $GunzipError\n" if $read < 0;
+        last unless $read;
+        $unpacked += $read;
+        die "archive exceeds expansion limit\n" if $unpacked > $max_tar;
+        print {$temporary} $buffer or die "cannot stage archive: $!\n";
+    }
+    close $temporary or die "cannot finish staging archive: $!\n";
+    my $next = Archive::Tar->iter($path)
+      or die "cannot read staged archive\n";
+    my $count = 0;
+    return sub {
+        local $Archive::Tar::error         = '';
+        local $Archive::Tar::MAX_FILE_SIZE = $limit;
+        my $entry = $next->();
+        die "cannot read staged archive: " . Archive::Tar->error . "\n"
+          if Archive::Tar->error;
+        die "archive exceeds entry limit\n"
+          if $entry && ++$count > $max_entries;
+        return $entry;
+    };
 }
 
 sub validate_member {
-    my ( $entry, $root, $seen, $total ) = @_;
-    my $name  = $entry->name;
+    my ( $entry, $root, $seen, $total, $limit ) = @_;
+    my $name  = $entry->full_path;
     my @parts = split m{/}, $name;
     die "invalid archive entry\n"
       if !@parts
-      || $name =~ m{\A/}
-      || grep { $_ eq '..' } @parts
-      || $seen->{$name}++;
+      || $name =~ m{\A/|//}
+      || grep { $_ eq '..' || $_ eq '.' } @parts;
+    my $canonical = join '/', @parts;
+    die "duplicate archive entry\n" if $seen->{$canonical}++;
     die "unexpected archive root\n"
       if defined $root && length $root && $parts[0] ne $root;
     die "archive contains a link or special file\n"
       unless $entry->is_dir || $entry->is_file;
     $$total += $entry->size;
+    die "archive exceeds extraction limit\n" if $$total > $limit;
+    return $canonical;
+}
+
+sub write_entry {
+    my ( $entry, $target ) = @_;
+    open my $out, '>:raw', $target or die "cannot create $target: $!\n";
+    my $content = $entry->get_content_by_ref;
+    print {$out} $$content or die "cannot write $target: $!\n";
+    close $out             or die "cannot close $target: $!\n";
+    chmod $entry->mode & oct("777"), $target
+      or die "cannot set archive entry mode: $!\n";
 }
 
 sub extract_all {
     my ( $archive, $destination, $root, $limit ) = @_;
-    usage() unless defined $limit && $limit =~ /\A[0-9]+\z/;
-    my ( $tar, $members ) = archive_members($archive);
+    usage() unless defined $limit && $limit =~ /\A[0-9]+\z/ && $limit > 0;
+    my $next = archive_iterator( $archive, $limit );
     my %seen;
     my $total = 0;
-    validate_member( $_, $root, \%seen, \$total ) for @$members;
-    die "archive exceeds extraction limit\n" if $total > $limit;
-    for my $entry (@$members) {
-        my $name   = $entry->name;
+    while ( my $entry = $next->() ) {
+        my $name   = validate_member( $entry, $root, \%seen, \$total, $limit );
         my $target = "$destination/$name";
         if ( $entry->is_dir ) {
             make_path($target);
             next;
         }
         make_path( dirname($target) );
-        open my $out, '>:raw', $target
-          or die "cannot create $target: $!\n";
-        print {$out} $entry->get_content
-          or die "cannot write $target: $!\n";
-        close $out or die "cannot close $target: $!\n";
-        chmod $entry->mode & oct("777"), $target;
+        write_entry( $entry, $target );
     }
+    die "archive does not contain any entries\n" unless keys %seen;
     return 1;
 }
 
 sub extract_entry {
     my ( $archive, $destination, $entry_name, $limit ) = @_;
     usage() unless defined $entry_name && length $entry_name;
-    usage() unless defined $limit      && $limit =~ /\A[0-9]+\z/;
-    my ( $tar, $members ) = archive_members($archive);
-    my @matches = grep { $_->name eq $entry_name } @$members;
-    die "expected exactly one regular $entry_name\n"
-      unless @matches == 1 && $matches[0]->is_file;
-    my $size = $matches[0]->size;
-    die "invalid entry size\n" unless $size > 0 && $size <= $limit;
-    $tar->extract_file( $entry_name, $destination )
-      or die "cannot extract $entry_name: $!\n";
+    usage() unless defined $limit && $limit =~ /\A[0-9]+\z/ && $limit > 0;
+    my $next = archive_iterator( $archive, $limit );
+    my $match;
+    while ( my $entry = $next->() ) {
+        next unless $entry->full_path eq $entry_name;
+        die "expected exactly one regular $entry_name\n"
+          if $match || !$entry->is_file;
+        die "invalid entry size\n"
+          unless $entry->size > 0 && $entry->size <= $limit;
+        $match = $entry;
+    }
+    die "expected exactly one regular $entry_name\n" unless $match;
+    write_entry( $match, $destination );
     return 1;
 }
 

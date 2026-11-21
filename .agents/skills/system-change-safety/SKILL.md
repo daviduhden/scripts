@@ -73,6 +73,14 @@ description: >-
     to administrators; retain old releases until operators prune them. Locks
     live beside the docroot and are not automatically stolen by PID.
     `--check-atomic` validates only the filesystem layout, not server policy.
+    Apply the same single-root ZIP entry policy before extraction on Debian
+    and OpenBSD. Keep archive-name validation separate from publication.
+11. For Debian repository keys, check the entire set of primary keys and
+    restrict the deb822 `Signed-By` declaration to the approved fingerprint.
+    For GitHub .deb releases such as Fastfetch, verify the exact published
+    digest and inspect package metadata before invoking APT. Use system
+    install(1) to publish selected build outputs instead of elevating an
+    upstream Makefile.
 
 ## Risk checklist for this tree
 

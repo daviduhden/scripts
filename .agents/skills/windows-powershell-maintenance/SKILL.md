@@ -105,6 +105,11 @@ already-installed PSScriptAnalyzer; it does not install it.
   missing winget or an absent package is harmless.
 - `-RemoveWinget` removes the winget copies of OpenCode, Codex, and Crush, not
   Bun; keep the documentation aligned with that behavior.
+  Restrict removal to selected targets with a successful installation and a
+  usable managed executable. Verify staged executable versions before
+  replacing live OpenCode, Crush or Bun binaries.
+  Validate custom Crush purge paths before deleting any history, including
+  in dry-run previews.
 - `update-aiclis.ps1` resolves OpenCode from the stable `v2.*` release tags
   because the repository's GitHub `latest` alias still points at 1.x. Do not
   replace that filter with `releases/latest`. Crush is a GitHub release updater

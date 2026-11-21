@@ -291,7 +291,7 @@ subtest 'tests-format manages a staged login profile' => sub {
         "DESTDIR=$stage",
         "TESTS_FORMAT_DIR=$directory",
         'TESTS_FORMAT_PROFILE_DIR=/etc/profile.d',
-        'TESTS_FORMAT_LINKS=0',
+        'TESTS_FORMAT_LINKS=1',
     );
 
     my $result = run_command(
@@ -303,6 +303,9 @@ subtest 'tests-format manages a staged login profile' => sub {
       or do { diag $result->{stderr}; return; };
     ok( -x "$stage$directory/validate-shell", 'validator is installed' );
     ok( -f $profile, 'profile is installed under DESTDIR' );
+    my $link = "$stage/usr/local/bin/validate-shell";
+    is( readlink($link), "$directory/validate-shell",
+        'compatibility link targets the final directory' );
 
     $result = run_command(
         cmd => [
@@ -324,6 +327,7 @@ subtest 'tests-format manages a staged login profile' => sub {
     is( $result->{returncode}, 0, 'staged uninstall succeeds' )
       or diag $result->{stderr};
     ok( !-e $profile, 'uninstall removes the managed profile' );
+    ok( !-l $link,    'uninstall removes the managed compatibility link' );
 };
 
 subtest 'help renders from the install helper' => sub {

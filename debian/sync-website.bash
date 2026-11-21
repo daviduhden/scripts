@@ -549,6 +549,18 @@ sync_with_git() {
 # Last resort: download the branch archive from GitHub and unpack it.
 # curl is preferred over wget. GitHub archives contain one top-level
 # directory, which is used as the staging source.
+validate_zip_entries() {
+	awk '
+		NR > 200000 || /^\// || /(^|\/)\.\.?(\/|$)/ || /[[:cntrl:]\\]/ { bad = 1 }
+		{
+			split($0, parts, "/")
+			if (parts[1] == "" || index($0, "/") == 0) bad = 1
+			if (NR == 1) root = parts[1]
+			if (parts[1] != root) bad = 1
+		}
+		END { exit (NR == 0 || bad) }' "$1"
+}
+
 sync_with_github_zip() {
 	local tmpdir zipfile unpack_dir srcdir listfile
 	tmpdir=$(mktemp -d "/tmp/site-sync.XXXXXX") || return 1
@@ -578,8 +590,7 @@ sync_with_github_zip() {
 		rm -rf "$tmpdir"
 		return 1
 	fi
-	if awk 'BEGIN { bad=0 } /^\// || /(^|\/)\.\.(\/|$)/ { bad=1 } END { exit bad }' \
-		"$listfile" || [ "$(wc -l <"$listfile")" -gt 200000 ]; then
+	if ! validate_zip_entries "$listfile"; then
 		error "Refusing an archive with unsafe or excessive entries."
 		rm -rf "$tmpdir"
 		return 1

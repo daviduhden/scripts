@@ -134,9 +134,8 @@ prepare_source() {
 	return 0
 }
 
-# Configure and build in the source tree, then install with bmake as
-# root. The configure and build steps run with LD_PRELOAD unset; only
-# the install step is elevated.
+# Configure and build as the caller. Publish only the known build outputs
+# with system install(1); the upstream Makefile stays unprivileged.
 build_and_install() {
 	cd "$BUILD_DIR"
 
@@ -151,7 +150,10 @@ build_and_install() {
 	fi
 
 	log "Installing to $PREFIX"
-	run_root bmake -s -C "$BUILD_DIR" install
+	run_root install -d "$PREFIX/bin" "$PREFIX/man/man1" "$PREFIX/man/man5"
+	run_root install -m 0755 "$BUILD_DIR/openrsync" "$PREFIX/bin/openrsync"
+	run_root install -m 0644 "$BUILD_DIR/openrsync.1" "$PREFIX/man/man1/"
+	run_root install -m 0644 "$BUILD_DIR/rsync.5" "$BUILD_DIR/rsyncd.5" "$PREFIX/man/man5/"
 }
 
 verify_install() {

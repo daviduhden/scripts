@@ -30,8 +30,8 @@ jobs:
         run: |
           export TMPDIR="$RUNNER_TEMP/validation"
           mkdir -p "$TMPDIR"
-          /bin/sh tests-format/validate-shell.sh --check --strict .
-          /bin/sh tests-format/validate-perl.sh --check --strict .
+          time /bin/sh tests-format/validate-shell.sh --check --strict .
+          time /bin/sh tests-format/validate-perl.sh --check --strict .
           make check
           make test-regression
       - name: Show validator logs, including skipped checks
@@ -58,6 +58,14 @@ jobs:
       - name: Dry-run the installer
         shell: cmd  # zizmor: ignore[misfeature] required to execute the repository batch installer and launchers
         run: windows\install-windows.bat --dry-run
+      - name: Install and verify in a disposable directory
+        shell: pwsh
+        run: |
+          $destination = Join-Path $env:RUNNER_TEMP 'scripts-install-test'
+          & windows/install-windows.bat --no-path --install-dir $destination
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & windows/install-windows.bat --no-path --install-dir $destination
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Analyze and format-check PowerShell
         shell: pwsh
         run: |

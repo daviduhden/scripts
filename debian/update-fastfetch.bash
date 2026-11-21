@@ -17,10 +17,8 @@ set -euo pipefail
 #  - Installs it with apt-get/apt and removes the temporary directory
 #    on exit
 #
-# The archive is installed directly; the script does not verify a
-# checksum or signature. The asset name uses fastfetch's own
-# architecture names (for example aarch64), which are derived from
-# uname -m rather than dpkg.
+# Verify the exact GitHub release digest and Debian package metadata before
+# invoking APT. The digest is authenticated by the GitHub release channel.
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
@@ -43,7 +41,10 @@ SCRIPT_ARGS=("$@")
 
 REPO="fastfetch-cli/fastfetch"
 API_URL="https://api.github.com/repos/${REPO}/releases/latest"
-REPO_URL="https://github.com/${REPO}.git"
+RELEASE_HELPER="${SCRIPT_PATH%/*}/release-verify"
+if [[ ! -f $RELEASE_HELPER ]]; then
+	RELEASE_HELPER="${SCRIPT_PATH%/*}/../scripts/release-verify.pl"
+fi
 
 log() { printf '%s [INFO] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
 warn() { printf '%s [WARN] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
@@ -85,7 +86,7 @@ require_cmd() {
 }
 
 net_curl() {
-	curl -fLsS --retry 5 "$@"
+	curl -fLsS --retry 5 --proto '=https' --proto-redir '=https' "$@"
 }
 
 has_cmd() {
@@ -99,41 +100,13 @@ ensure_apt() {
 	fi
 }
 
-# Get the latest version tag from GitHub releases
-# Resolve the latest tag through the first available source:
-# gh release view, git ls-remote tags, or the GitHub releases API.
-# Returns non-zero only when the API request fails and no earlier
-# source produced a tag.
-get_latest_release() {
-	local tag json
-
-	if has_cmd gh; then
-		tag="$(gh release view --repo "$REPO" \
-			--json tagName -q .tagName \
-			2>/dev/null || true)"
-		if [[ -n $tag ]]; then
-			printf '%s\n' "$tag"
-			return 0
-		fi
+get_release_metadata() {
+	local metadata
+	if has_cmd gh && metadata=$(gh api "repos/$REPO/releases/latest"); then
+		printf '%s\n' "$metadata"
+		return 0
 	fi
-
-	if has_cmd git; then
-		tag="$(git ls-remote --tags --refs "$REPO_URL" 2>/dev/null |
-			awk '{print $2}' |
-			sed 's#refs/tags/##' |
-			sed 's/\^{}//' |
-			sort -Vr |
-			sed -n '1p')"
-		if [[ -n $tag ]]; then
-			printf '%s\n' "$tag"
-			return 0
-		fi
-	fi
-
-	if ! json="$(net_curl "$API_URL" 2>/dev/null)"; then
-		return 1
-	fi
-	awk -F'"' '/"tag_name":/ {print $4; exit}' <<<"$json"
+	net_curl "$API_URL"
 }
 
 # Map the kernel machine type to the architecture string used in the
@@ -156,35 +129,23 @@ detect_pkg_arch() {
 	esac
 }
 
-# Try gh release download first, then fall back to the public release
-# URL with curl. gh writes the asset under its upstream name in
-# out_dir; the curl path writes to the exact out_file path.
-download_deb() {
-	local version="$1" arch="$2" out_dir="$3" out_file="$4" url
-
-	if has_cmd gh; then
-		log "Attempting download via GitHub CLI..."
-		if gh release download "$version" \
-			--repo "$REPO" \
-			--pattern "fastfetch-linux-${arch}.deb" \
-			--dir "$out_dir" --clobber \
-			>/dev/null 2>&1; then
-			return 0
-		fi
-		warn "gh release download failed; falling back to curl."
-	fi
-
-	url="https://github.com/${REPO}/releases/download"
-	url="${url}/${version}/fastfetch-linux-${arch}.deb"
-	net_curl "$url" -o "$out_file"
+verify_package_metadata() {
+	local file="$1" expected_version="$2" architecture version
+	architecture=$(dpkg --print-architecture) || return 1
+	version=$(dpkg-deb -f "$file" Version) || return 1
+	[[ $(dpkg-deb -f "$file" Package) == fastfetch ]] &&
+		[[ $(dpkg-deb -f "$file" Architecture) == "$architecture" ]] &&
+		[[ $version == "$expected_version" || $version == "$expected_version"-* ]]
 }
 
 run_fastfetch_update() {
+	local metadata asset url expected_digest actual_digest
 	log "Checking latest fastfetch release from GitHub..."
-	LATEST_VERSION="$(get_latest_release || true)"
-	if [[ -z ${LATEST_VERSION} ]]; then
-		error "could not fetch latest release version from GitHub."
-	fi
+	metadata=$(get_release_metadata) || error "could not fetch release metadata."
+	LATEST_VERSION=$(perl "$RELEASE_HELPER" json-tag <<<"$metadata") ||
+		error "missing release tag."
+	[[ $LATEST_VERSION =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
+		error "invalid release tag: $LATEST_VERSION"
 	LATEST_VERSION_STRIPPED="${LATEST_VERSION#v}"
 	log "Latest release tag: ${LATEST_VERSION}"
 
@@ -214,27 +175,21 @@ run_fastfetch_update() {
 	DEB_FILE="$WORK_DIR/fastfetch-linux-${PKG_ARCH}.deb"
 	trap 'rm -rf "$WORK_DIR" 2>/dev/null || true' EXIT
 
+	asset="fastfetch-linux-${PKG_ARCH}.deb"
+	url=$(perl "$RELEASE_HELPER" json-asset-url "$asset" <<<"$metadata") ||
+		error "could not identify exact release asset: $asset"
+	[[ $url == "https://github.com/$REPO/releases/download/$LATEST_VERSION/$asset" ]] ||
+		error "unexpected release asset URL."
+	expected_digest=$(perl "$RELEASE_HELPER" json-asset-digest "$url" <<<"$metadata") ||
+		error "missing release asset digest."
 	log "Downloading fastfetch ${LATEST_VERSION} (${PKG_ARCH})..."
-	if ! download_deb "$LATEST_VERSION" \
-		"$PKG_ARCH" "$WORK_DIR" "$DEB_FILE"; then
-		error "download failed for fastfetch" \
-			"${LATEST_VERSION} (${PKG_ARCH})"
-	fi
+	net_curl "$url" -o "$DEB_FILE" || error "download failed."
+	actual_digest=$(sha256sum <"$DEB_FILE") || error "could not hash package."
+	[[ ${actual_digest%% *} == "$expected_digest" ]] ||
+		error "fastfetch package digest mismatch."
+	verify_package_metadata "$DEB_FILE" "$LATEST_VERSION_STRIPPED" ||
+		error "fastfetch package metadata does not match the release and host."
 
-	# gh may have saved the asset under the expected name; if not,
-	# accept the first fastfetch .deb it left in the work directory.
-	if [[ ! -f $DEB_FILE ]]; then
-		alt_file="$(find "$WORK_DIR" -maxdepth 1 \
-			-type f -name 'fastfetch-linux-*.deb' |
-			sed -n '1p')"
-		if [[ -n $alt_file ]]; then
-			DEB_FILE="$alt_file"
-		else
-			error "download did not produce a .deb file"
-		fi
-	fi
-
-	log "Download complete: ${DEB_FILE}"
 	log "Installing the package..."
 	if command -v apt-get >/dev/null 2>&1; then
 		apt-get install -y "$DEB_FILE"
@@ -254,7 +209,11 @@ check_prereqs() {
 	require_cmd curl
 	require_cmd awk
 	require_cmd uname
-	require_cmd find
+	require_cmd perl
+	require_cmd sha256sum
+	require_cmd dpkg
+	require_cmd dpkg-deb
+	[[ -f $RELEASE_HELPER ]] || error "release verifier not found."
 	require_cmd mktemp
 	ensure_apt
 }

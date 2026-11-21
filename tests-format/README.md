@@ -72,11 +72,14 @@ absolute and cannot contain a colon. Staged installs put the snippet under
 `DESTDIR` and embed the final tools directory. Use the same profile directory
 when running `make uninstall-tests-format` to remove the snippet.
 Set `TESTS_FORMAT_LINKS=1` to add compatibility symlinks in `BINDIR`.
+They target the final absolute installation directory, including in staged
+packages. The installer refuses to replace an unrelated path.
 
 Run `make check-agent-knowledge` before completing repository changes. For CI,
 use `perl scripts/validate-agent-knowledge.pl --scope range --base BASE_REF --head HEAD` after
-fetching the target branch. The `.github/workflows/agent-knowledge-validation.yml` PR workflow runs this
-check against the pull request base and head revisions. The check
+fetching the target branch and checking out the clean head revision. The
+manual `.github/workflows/agent-knowledge-validation.yml` workflow runs this
+range check when a base revision is supplied. The check
 requires a substantive, non-cosmetic change in an operational instruction file
 when project files change. It validates required section/frontmatter structure
 and relative Markdown links, but cannot decide whether the guidance is

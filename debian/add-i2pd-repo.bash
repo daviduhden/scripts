@@ -185,7 +185,11 @@ install_repo_key() {
 		error "Cannot download the Purple I2P signing key."
 	fi
 	fpr=$(gpg --show-keys --with-colons "$key_tmp" 2>/dev/null |
-		awk -F: '$1 == "fpr" { print $10; exit }')
+		awk -F: '
+			$1 == "pub" { primary++; pending = 1 }
+			$1 == "sub" { pending = 0 }
+			$1 == "fpr" && pending { fingerprint = $10; pending = 0 }
+			END { if (primary == 1) print fingerprint }')
 	if [ "$fpr" != "951928BB317024EFD053D73C66F6C87B98EBCFE2" ]; then
 		rm -f "$key_tmp"
 		error "Purple I2P signing key fingerprint mismatch: ${fpr:-missing}."
@@ -214,7 +218,7 @@ URIs: https://repo.i2pd.xyz/${DIST}
 Suites: ${REPO_RELEASE}
 Components: main
 Architectures: ${ARCH_FILTER}
-Signed-By: /usr/share/keyrings/purplei2p.gpg
+Signed-By: /usr/share/keyrings/purplei2p.gpg 951928BB317024EFD053D73C66F6C87B98EBCFE2
 EOF
 
 	cat >>/etc/apt/sources.list.d/purplei2p.sources <<EOF
@@ -225,7 +229,7 @@ URIs: https://repo.i2pd.xyz/${DIST}
 Suites: ${REPO_RELEASE}
 Components: main
 Architectures: ${ARCH_FILTER}
-Signed-By: /usr/share/keyrings/purplei2p.gpg
+Signed-By: /usr/share/keyrings/purplei2p.gpg 951928BB317024EFD053D73C66F6C87B98EBCFE2
 EOF
 }
 

@@ -236,7 +236,6 @@ rem User PATH (HKCU\Environment\Path only, idempotent). Do this only after a
 rem successful verification so a broken install is not added to PATH.
 rem --------------------------------------------------------------------
 if "%OPT_PATH%"=="1" call :update_user_path
-)
 
 rem --------------------------------------------------------------------
 rem Summary
@@ -244,7 +243,6 @@ rem --------------------------------------------------------------------
 echo.
 echo [INFO] %PROJECT% %VERSION% installed to "%INSTALL_DIR%"
 echo [INFO] Programs installed: %PROGRAMS% %PS_PROGRAMS%
-if "%OPT_PATH%"=="1" echo [INFO] User PATH now includes: "%INSTALL_DIR%\bin"
 if "%OPT_PATH%"=="0" echo [INFO] PATH not modified. Add "%INSTALL_DIR%\bin" manually if wanted.
 echo.
 echo [NOTE] Open a new terminal so newly started applications pick up the
@@ -406,12 +404,7 @@ rem Read the machine and user PATH through Windows PowerShell. The value is
 rem loaded into REGPATH only and is not written back.
 :load_registry_path
 set "REGPATH="
-set "RTMP=%TEMP%\nf_regpath_%RANDOM%%RANDOM%.txt"
-powershell -NoProfile -Command "[Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')" >"%RTMP%" 2>nul
-if exist "%RTMP%" (
-    set /p REGPATH=<"%RTMP%"
-    del /f /q "%RTMP%" >nul 2>&1
-)
+for /f "usebackq delims=" %%P in (`powershell -NoProfile -Command "[Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')" 2^>nul`) do set "REGPATH=%%P"
 exit /b 0
 
 rem Install Strawberry Perl with winget only after no existing Perl passed the

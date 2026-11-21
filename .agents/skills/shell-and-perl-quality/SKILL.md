@@ -90,6 +90,10 @@ description: >-
 - Windows replacement recovery must use unique backup names, check restoration,
   and retain/report the original recovery copy when restoration fails. Simulated
   failure tests do not establish native Windows filesystem compatibility.
+- `normalize-files --report` creates an exclusive, new report even in dry-run
+  mode. A pre-existing report or source file must remain intact.
+- Release TAR validation applies byte and entry limits to staged data and uses
+  the logical member path, including the USTAR prefix.
 - When comparing file snapshots on Windows, ignore device, inode, and ctime
   fields that are not stable between `lstat` and `stat`; compare mode, size,
   and mtime instead. `read_all` skips its pre/post snapshot gate on Windows

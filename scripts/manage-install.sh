@@ -169,6 +169,12 @@ EOF
 )
 
 install_tests_format() {
+	if [ "${TESTS_FORMAT_LINKS:-0}" = "1" ]; then
+		case "$TESTS_FORMAT_DIR" in
+		/*) ;;
+		*) die 'TESTS_FORMAT_DIR must be absolute for compatibility links' ;;
+		esac
+	fi
 	if [ -n "$TESTS_FORMAT_PROFILE_DIR" ]; then
 		case "$TESTS_FORMAT_DIR" in
 		*:*) die 'TESTS_FORMAT_DIR cannot contain a colon when added to PATH' ;;
@@ -196,8 +202,15 @@ install_tests_format() {
 			die "cannot install $source"
 		if [ "${TESTS_FORMAT_LINKS:-0}" = "1" ]; then
 			install -d "$DESTBIN" || die "cannot create $DESTBIN"
-			ln -sf "$DEST_TESTS_FORMAT/$name" "$DESTBIN/$name" ||
-				die "cannot link $name"
+			if [ -L "$DESTBIN/$name" ] &&
+				[ "$(readlink "$DESTBIN/$name")" = "$TESTS_FORMAT_DIR/$name" ]; then
+				continue
+			fi
+			if [ -e "$DESTBIN/$name" ] || [ -L "$DESTBIN/$name" ]; then
+				die "refusing to replace $DESTBIN/$name"
+			fi
+			ln -s "$TESTS_FORMAT_DIR/$name" "$DESTBIN/$name" ||
+				die "cannot link $name without replacing an existing path"
 		fi
 	done
 	install_tests_format_profile
@@ -271,7 +284,9 @@ uninstall_tests_format() {
 	for source in ${TESTS_FORMAT_SCRIPTS:?}; do
 		name=$(strip_extension "$source")
 		rm -f -- "$DEST_TESTS_FORMAT/$name"
-		if [ "${TESTS_FORMAT_LINKS:-0}" = "1" ]; then
+		if [ "${TESTS_FORMAT_LINKS:-0}" = "1" ] &&
+			[ -L "$DESTBIN/$name" ] &&
+			[ "$(readlink "$DESTBIN/$name")" = "$TESTS_FORMAT_DIR/$name" ]; then
 			rm -f -- "$DESTBIN/$name"
 		fi
 	done

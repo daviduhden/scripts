@@ -244,15 +244,11 @@ clone_or_update_repo() {
 build_and_install_XD() {
 	log "Building XD..."
 	run_build make
-	log "Installing XD using 'make install'..."
-	# Install to /usr/local/bin by setting PREFIX (the upstream Makefile
-	# uses $(PREFIX)/bin); do not mutate the tracked Makefile, which would
-	# block a later `git checkout tags/<new>`.
-	if command -v with-standard-malloc >/dev/null 2>&1; then
-		run_root with-standard-malloc make install PREFIX=/usr/local
-	else
-		run_root env -u LD_PRELOAD make install PREFIX=/usr/local
-	fi
+	log "Installing XD into /usr/local/bin..."
+	[ -f XD ] && [ -x XD ] || error "XD build did not produce an executable."
+	run_root install -d /usr/local/bin
+	run_root install -m 0755 XD /usr/local/bin/XD
+	run_root ln -sfn XD /usr/local/bin/XD-CLI
 	log "XD installed successfully."
 }
 

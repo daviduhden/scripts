@@ -178,7 +178,7 @@ check_prereqs() {
 }
 
 maybe_skip_build() {
-	if [ "$SKIP_BUILD" -eq 1 ]; then
+	if [ "$SKIP_BUILD" -eq 1 ] && [ -x /usr/local/bin/lyrebird ]; then
 		log "No build required. Exiting."
 		return 0
 	fi

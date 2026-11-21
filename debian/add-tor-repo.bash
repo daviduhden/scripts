@@ -178,7 +178,11 @@ install_tor_key() {
 		error "Cannot download the Tor Project signing key."
 	fi
 	fpr=$(gpg --show-keys --with-colons "$key_tmp" 2>/dev/null |
-		awk -F: '$1 == "fpr" { print $10; exit }')
+		awk -F: '
+			$1 == "pub" { primary++; pending = 1 }
+			$1 == "sub" { pending = 0 }
+			$1 == "fpr" && pending { fingerprint = $10; pending = 0 }
+			END { if (primary == 1) print fingerprint }')
 	if [ "$fpr" != "A3C4F0F979CAA22CDBA8F512EE8CBC9E886DDD89" ]; then
 		rm -f -- "$key_tmp"
 		error "Tor signing key fingerprint mismatch: ${fpr:-missing}."
@@ -204,7 +208,7 @@ URIs: ${REPO_URL}
 Suites: ${SUITE_CODENAME}
 Components: main
 Architectures: ${ARCH_FILTER}
-Signed-By: /usr/share/keyrings/deb.torproject.org-keyring.gpg
+Signed-By: /usr/share/keyrings/deb.torproject.org-keyring.gpg A3C4F0F979CAA22CDBA8F512EE8CBC9E886DDD89
 EOF
 
 	cat >>/etc/apt/sources.list.d/tor.sources <<EOF
@@ -215,7 +219,7 @@ URIs: ${REPO_URL}
 Suites: tor-nightly-main-${SUITE_CODENAME}
 Components: main
 Architectures: ${ARCH_FILTER}
-Signed-By: /usr/share/keyrings/deb.torproject.org-keyring.gpg
+Signed-By: /usr/share/keyrings/deb.torproject.org-keyring.gpg A3C4F0F979CAA22CDBA8F512EE8CBC9E886DDD89
 EOF
 }
 

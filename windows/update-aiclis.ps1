@@ -156,6 +156,7 @@ function Get-ExeVersion {
     if (-not (Test-Path -LiteralPath $ExePath)) { return $null }
     try {
         $out = & $ExePath --version 2>$null | Select-Object -First 1
+        if ($LASTEXITCODE -ne 0) { return $null }
         if ([string]::IsNullOrWhiteSpace($out)) { return $null }
         $token = ($out -split '\s+')[-1]
         return (Normalize-Version $token)
@@ -428,14 +429,17 @@ function Get-RemoteText {
     without an in-place overwrite. Recovery copies survive failed activation.
 #>
 function Set-CurrentExe {
-    param([string]$SourceExe, [string]$TargetExe)
-    $pending = "$TargetExe.pending-$([guid]::NewGuid().ToString('N'))"
+    param([string]$SourceExe, [string]$TargetExe, [string]$ExpectedVersion)
+    $pending = "$TargetExe.pending-$([guid]::NewGuid().ToString('N')).exe"
     $oldExe = "$TargetExe.old-$([guid]::NewGuid().ToString('N'))"
     try {
         [IO.File]::Copy($SourceExe, $pending, $false)
         if ((Get-FileHash -LiteralPath $SourceExe -Algorithm SHA256).Hash -ne
             (Get-FileHash -LiteralPath $pending -Algorithm SHA256).Hash) {
             throw 'Executable staging verification failed.'
+        }
+        if ($ExpectedVersion -and -not (Test-VersionEqual (Get-ExeVersion -ExePath $pending) $ExpectedVersion)) {
+            throw "Staged executable does not report the expected version: $ExpectedVersion"
         }
         if (Test-Path -LiteralPath $TargetExe) {
             $item = Get-Item -LiteralPath $TargetExe -Force
@@ -611,7 +615,7 @@ function Install-OpenCode {
     }
 
     New-Item -ItemType Directory -Force -Path $script:OpenCodeBin | Out-Null
-    Set-CurrentExe -SourceExe $versionExe -TargetExe $script:OpenCodeExe
+    Set-CurrentExe -SourceExe $versionExe -TargetExe $script:OpenCodeExe -ExpectedVersion $version
 
     $verified = Get-ExeVersion -ExePath $script:OpenCodeExe
     if (-not (Test-VersionEqual $verified $version)) {
@@ -782,7 +786,7 @@ function Install-Crush {
     }
 
     New-Item -ItemType Directory -Force -Path $script:CrushBin | Out-Null
-    Set-CurrentExe -SourceExe $versionExe -TargetExe $script:CrushExe
+    Set-CurrentExe -SourceExe $versionExe -TargetExe $script:CrushExe -ExpectedVersion $version
 
     $verified = Get-ExeVersion -ExePath $script:CrushExe
     if (-not (Test-VersionEqual $verified $version)) {
@@ -1256,7 +1260,7 @@ function Install-Bun {
     }
 
     New-Item -ItemType Directory -Force -Path $bunBin | Out-Null
-    Set-CurrentExe -SourceExe $versionExe -TargetExe $bunExe
+    Set-CurrentExe -SourceExe $versionExe -TargetExe $bunExe -ExpectedVersion $version
 
     $verified = Get-ExeVersion -ExePath $bunExe
     if (-not (Test-VersionEqual $verified $version)) {
@@ -1278,13 +1282,16 @@ function Install-Bun {
     Bun winget copies are removed separately after verified installation.
 #>
 function Remove-WingetPackages {
+    param([string[]]$Ids)
+
+    if (-not $Ids) { return }
     $winget = Get-Command winget -ErrorAction SilentlyContinue
     if ($null -eq $winget) {
         Write-Warn 'winget is not available; nothing will be uninstalled.'
         return
     }
 
-    foreach ($id in @('SST.opencode', 'OpenAI.Codex', 'charmbracelet.crush')) {
+    foreach ($id in $Ids) {
         Write-Info "winget: uninstalling $id"
         try {
             & winget uninstall --id $id --silent --disable-interactivity --accept-source-agreements | Out-Null
@@ -1313,6 +1320,7 @@ $doOpenCode = $Target -in @('All', 'OpenCode')
 $doCodex = $Target -in @('All', 'Codex')
 $doCrush = $Target -in @('All', 'Crush')
 $doBun = $Target -in @('All', 'Bun')
+$updated = @{}
 
 if ($doBun) {
     try { Install-Bun }
@@ -1320,12 +1328,12 @@ if ($doBun) {
 }
 
 if ($doOpenCode) {
-    try { Install-OpenCode -Version $OpenCodeVersion }
+    try { Install-OpenCode -Version $OpenCodeVersion; $updated['SST.opencode'] = $script:OpenCodeExe }
     catch { Write-Fail "OpenCode: $($_.Exception.Message)"; $script:HadError = $true }
 }
 
 if ($doCodex) {
-    try { Install-Codex -Version $CodexVersion }
+    try { Install-Codex -Version $CodexVersion; $updated['OpenAI.Codex'] = $script:CodexExe }
     catch { Write-Fail "Codex: $($_.Exception.Message)"; $script:HadError = $true }
     try {
         if (Test-Path -LiteralPath $script:CodexExe -PathType Leaf) { Invoke-CodexDaemonUpdate }
@@ -1334,12 +1342,15 @@ if ($doCodex) {
 }
 
 if ($doCrush) {
-    try { Install-Crush -Version $CrushVersion }
+    try { Install-Crush -Version $CrushVersion; $updated['charmbracelet.crush'] = $script:CrushExe }
     catch { Write-Fail "Crush: $($_.Exception.Message)"; $script:HadError = $true }
 }
 
 if ($RemoveWinget -and -not $Check) {
-    Remove-WingetPackages
+    $verifiedIds = @('SST.opencode', 'OpenAI.Codex', 'charmbracelet.crush') | Where-Object {
+        $updated.ContainsKey($_) -and (Get-ExeVersion -ExePath $updated[$_])
+    }
+    Remove-WingetPackages -Ids $verifiedIds
 }
 
 # Repair existing installations even when an update failed (for example, offline).

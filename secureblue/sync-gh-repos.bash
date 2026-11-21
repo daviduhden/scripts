@@ -7,13 +7,8 @@ set -euo pipefail
 # existing checkouts, using gh for authenticated API access and SSH URLs for
 # cloning. Requires an authenticated gh session and SSH access to GitHub.
 #
-# Existing repository directories are not updated in place. Each one is
-# renamed to a timestamped backup, a fresh clone is made, and then the old
-# working tree is copied over the new Git metadata (only .git is excluded).
-# As a result, uncommitted and untracked local files survive, but history and
-# remotes are reset to the fresh clone, and the working tree becomes the old
-# tree plus any fresh .github files. The backup is deleted after a successful
-# copy; an ERR trap restores it if cloning or checkout fails.
+# A fresh clone is staged with the previous working tree, then published.
+# Old Git metadata and working files remain in a private sibling backup.
 #
 # BASE_DIR must already exist and is not created here. It defaults to
 # ${HOME}/git, prompting first when stdin is a terminal unless
@@ -52,17 +47,6 @@ require_cmd() {
 		error "Missing required command: $1"
 		exit 1
 	fi
-}
-
-make_backup_dir() {
-	# Generates a non-existing backup directory path.
-	# Example: /path/repo.backup.2025-12-12_10-00-00.12345
-	local target_dir="$1"
-	local ts
-	local candidate
-	ts="$(date '+%Y-%m-%d_%H-%M-%S')"
-	candidate="${target_dir}.backup.${ts}.$$"
-	printf '%s\n' "$candidate"
 }
 
 # Reduce a fresh clone to its Git metadata and repository automation files.
@@ -168,6 +152,7 @@ resolve_base_dir() {
 check_prereqs() {
 	require_cmd gh
 	require_cmd git
+	require_cmd mktemp
 
 	if [ ! -d "$BASE_DIR" ]; then
 		error "Base directory $BASE_DIR does not exist"
@@ -180,88 +165,53 @@ check_prereqs() {
 	fi
 }
 
-# Sync one repository. The backup/restore dance is deliberately local to this
-# function: the ERR trap is installed only when an existing directory was
-# moved aside and is cleared once the sync completes.
-sync_single_repo() {
-	local name="$1"
-	local ssh_url="$2"
-	local default_branch="$3"
-	local target backup_dir restored
+# Prepare the replacement on the same filesystem before touching the checkout.
+sync_single_repo() (
+	local name="$1" ssh_url="$2" default_branch="$3"
+	local target="$BASE_DIR/$1" stage="" backup_dir="" lock="$BASE_DIR/.$1.sync.lock"
 
-	target="$BASE_DIR/$name"
-	backup_dir=""
-	restored=0
-
-	cleanup_on_error() {
-		local restore_failed=0
-
-		if [ -n "${backup_dir:-}" ] &&
-			[ -d "$backup_dir" ] &&
-			[ "$restored" -eq 0 ]; then
-			warn "Restoring previous directory for $name from $backup_dir"
-			if [ -e "$target" ] && ! rm -rf -- "$target"; then
-				error "Failed to remove partially" \
-					"synced directory: $target"
-				restore_failed=1
-			fi
-			if ! mv -- "$backup_dir" "$target"; then
-				error "Failed to restore backup" \
-					"directory $backup_dir" \
-					"to $target"
-				restore_failed=1
-			fi
-			restored=1
-			if [ "$restore_failed" -ne 0 ]; then
-				error "Automatic restore failed for" \
-					"$name; manual recovery may be" \
-					"required."
-			fi
-		fi
+	mkdir -- "$lock" || {
+		error "Cannot acquire sync lock: $lock"
+		return 1
 	}
-
-	if [ -e "$target" ]; then
-		backup_dir="$(make_backup_dir "$target")"
-		log "Directory exists; renaming $target -> $backup_dir"
-		mv -- "$target" "$backup_dir"
-		trap cleanup_on_error ERR
-	fi
-
-	log "Cloning $name -> $target"
-	git clone "$ssh_url" "$target"
-	if [ -n "${default_branch:-}" ]; then
-		git -C "$target" checkout -- "$default_branch"
-	fi
-
-	if ! repo_has_content "$target"; then
-		warn "Repository $name appears empty; skipping sync."
-		rm -rf -- "$target"
-		if [ -n "${backup_dir:-}" ] && [ -d "$backup_dir" ]; then
-			warn "Restoring previous directory for $name from $backup_dir"
-			if ! mv -- "$backup_dir" "$target"; then
-				error "Failed to restore backup" \
-					"directory $backup_dir" \
-					"to $target"
-				return 1
-			fi
+	trap '
+		if [ -n "$backup_dir" ] && [ -d "$backup_dir/checkout" ] &&
+			[ ! -e "$target" ] && [ ! -L "$target" ]; then
+			mv -T -- "$backup_dir/checkout" "$target" ||
+				error "Restore failed. Previous checkout: $backup_dir/checkout"
 		fi
-		trap - ERR
+		[ -z "$stage" ] || rm -rf -- "$stage"
+		[ -z "$backup_dir" ] || rmdir -- "$backup_dir" 2>/dev/null || true
+		rmdir -- "$lock" || warn "Could not remove sync lock: $lock"
+	' EXIT
+	trap 'exit 1' HUP INT TERM
+	stage=$(mktemp -d "$BASE_DIR/.$name.stage.XXXXXX") || return 1
+
+	log "Cloning $name into staging"
+	if [ -n "$default_branch" ]; then
+		git clone --branch "$default_branch" -- "$ssh_url" "$stage/checkout" ||
+			return 1
+	else
+		git clone -- "$ssh_url" "$stage/checkout" || return 1
+	fi
+	if ! repo_has_content "$stage/checkout"; then
+		warn "Repository $name appears empty; skipping sync."
 		return 0
 	fi
 
-	if [ -n "${backup_dir:-}" ] && [ -d "$backup_dir" ]; then
-		log "Pruning fresh clone (keep only .git and .github): $target"
-		remove_all_except_git_and_github "$target"
-
-		log "Copying files from $backup_dir into $target"
-		copy_from_backup_excluding_git "$backup_dir" "$target"
-
-		log "Removing backup directory: $backup_dir"
-		rm -rf -- "$backup_dir"
+	if [ -e "$target" ] || [ -L "$target" ]; then
+		if [ ! -d "$target" ] || [ -L "$target" ]; then
+			error "Refusing to replace a non-directory or symlink: $target"
+			return 1
+		fi
+		remove_all_except_git_and_github "$stage/checkout" || return 1
+		copy_from_backup_excluding_git "$target" "$stage/checkout" || return 1
+		backup_dir=$(mktemp -d "$BASE_DIR/.$name.backup.XXXXXX") || return 1
+		mv -T -- "$target" "$backup_dir/checkout" || return 1
+		log "Previous checkout retained at $backup_dir/checkout"
 	fi
-
-	trap - ERR
-}
+	mv -T -- "$stage/checkout" "$target"
+)
 
 sync_repositories() {
 	local listing

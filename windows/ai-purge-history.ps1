@@ -49,6 +49,26 @@ $opencodeStateHome = if ($env:OPENCODE_STATE_HOME) { $env:OPENCODE_STATE_HOME } 
 $crushDataHome = if ($env:CRUSH_GLOBAL_DATA) { $env:CRUSH_GLOBAL_DATA } else { Join-Path $env:LOCALAPPDATA 'crush' }
 $swivalProjectHome = if ($env:SWIVAL_PROJECT_HOME) { $env:SWIVAL_PROJECT_HOME } else { (Get-Location).Path }
 
+if ($IncludeCrushData) {
+    if ($crushDataHome -notmatch '^[A-Za-z]:[\\/]' -and $crushDataHome -notmatch '^\\\\[^\\]+\\[^\\]+\\') {
+        throw 'Crush data must be an absolute filesystem directory.'
+    }
+    $crushDataHome = [IO.Path]::GetFullPath($crushDataHome).TrimEnd('\', '/')
+    foreach ($protected in @([IO.Path]::GetPathRoot($crushDataHome + '\'), $HOME, $env:LOCALAPPDATA, $env:APPDATA, $env:USERPROFILE)) {
+        if (-not $protected) { continue }
+        $protected = [IO.Path]::GetFullPath($protected).TrimEnd('\', '/')
+        if ($protected.Equals($crushDataHome, [StringComparison]::OrdinalIgnoreCase) -or
+            $protected.StartsWith($crushDataHome + '\', [StringComparison]::OrdinalIgnoreCase)) {
+            throw "Refusing broad Crush data path: $crushDataHome"
+        }
+    }
+    for ($directory = [IO.DirectoryInfo]::new($crushDataHome); $null -ne $directory; $directory = $directory.Parent) {
+        if ($directory.Exists -and ($directory.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw "Refusing Crush data through a reparse point: $($directory.FullName)"
+        }
+    }
+}
+
 # Missing targets are ignored, so an installation that never created one of
 # these paths is not an error.
 $paths = @(

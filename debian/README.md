@@ -30,7 +30,7 @@ users.
 | [sysupgrade.bash](sysupgrade.bash) | Updates APT packages, runs full-upgrade and cleanup, handles service maintenance, and collects system information. |
 | [update-argon-one-v3.bash](update-argon-one-v3.bash) | Updates Argon One V3 EEPROM and fan/power-button scripts; supports reboot options. |
 | [update-btop.bash](update-btop.bash) | Builds and installs the latest btop++ release and its build dependencies. |
-| [update-fastfetch.bash](update-fastfetch.bash) | Downloads the latest Fastfetch Debian package and installs it through APT. |
+| [update-fastfetch.bash](update-fastfetch.bash) | Verifies the latest Fastfetch package against the GitHub release digest and checks Debian package metadata before installing through APT. |
 | [update-golang.bash](update-golang.bash) | Installs the latest stable Go from official tarballs into `/usr/local/go` and updates the system PATH. |
 | [update-lyrebird.bash](update-lyrebird.bash) | Builds the Lyrebird Tor transport with Go and Make and installs it into `/usr/local/bin`. |
 | [update-monero.bash](update-monero.bash) | Updates Monero CLI binaries, configures `monerod`, and optionally builds and configures monero-lws. Verifies the signed hash list against the pinned binaryFate fingerprint and the upstream systemd unit against a pinned SHA-256. The LWS account is auto-detected (`monero-lws` if present, else the monerod user); override with `LWS_USER`/`LWS_GROUP`. Opens the firewall ports with nftables (`FIREWALL_TCP_PORTS`, default `18080 8443`). |

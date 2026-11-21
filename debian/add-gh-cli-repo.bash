@@ -234,7 +234,11 @@ install_keyring() {
 			"(curl/wget)."
 	fi
 	fpr=$(gpg --show-keys --with-colons "$TMPKEY" 2>/dev/null |
-		awk -F: '$1 == "fpr" { print $10; exit }')
+		awk -F: '
+			$1 == "pub" { primary++; pending = 1 }
+			$1 == "sub" { pending = 0 }
+			$1 == "fpr" && pending { fingerprint = $10; pending = 0 }
+			END { if (primary == 1) print fingerprint }')
 	if [ "$fpr" != "2C6106201985B60E6C7AC87323F3D4EA75716059" ]; then
 		rm -f "$TMPKEY"
 		error "GitHub CLI signing key fingerprint mismatch: ${fpr:-missing}."
@@ -259,7 +263,7 @@ URIs: https://cli.github.com/packages
 Suites: stable
 Components: main
 Architectures: ${ARCH}
-Signed-By: ${KEYRING}
+Signed-By: ${KEYRING} 2C6106201985B60E6C7AC87323F3D4EA75716059
 EOF
 }
 

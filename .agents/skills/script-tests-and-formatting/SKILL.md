@@ -38,6 +38,10 @@ and strict modes, and skips Ruff for an empty tree. `make test-python` runs
 this validator; `install-tests-format` installs it. Ruff calls disable caches
 and only format mode runs `ruff clean`. The Linux workflow installs Ruff;
 offline Perl tooling tests use mocked Ruff and temporary Python fixtures.
+The native Windows workflow exercises installation and reinstall under
+`RUNNER_TEMP` with `--no-path`. The manual agent-knowledge workflow accepts an
+optional base revision and checks that the checkout represents the dispatched
+head before invoking range validation.
 Make evaluation is opt-in via `--make-dry-run`: even `-n` can execute commands
 while parsing untrusted Makefiles. `perl -c` loads modules and executes compile-time blocks, so those
 sources must also be trusted.

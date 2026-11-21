@@ -182,7 +182,7 @@ clone_or_update_repo() {
 	if [ -n "$latest_tag" ]; then
 		local_tag=$(git describe --tags \
 			--exact-match HEAD 2>/dev/null || true)
-		if [ "$local_tag" = "$latest_tag" ]; then
+		if [ "$local_tag" = "$latest_tag" ] && [ -x /usr/bin/XD ]; then
 			log "Local repository is already at" \
 				"latest tag '$latest_tag'." \
 				"Skipping build."
@@ -199,12 +199,21 @@ clone_or_update_repo() {
 
 # Build with LD_PRELOAD unset, then install under /usr. PREFIX=/usr is
 # deliberate: the upstream unit expects /usr/bin/XD.
-build_and_install_XD() {
+build_XD() {
 	log "Building XD..."
 	env -u LD_PRELOAD make
+	[ -f XD ] && [ -x XD ] || error "XD build did not produce an executable."
+}
+
+install_XD() {
+	local staged
 	log "Installing XD..."
-	# Install to /usr/bin so the downloaded xd.service ExecStart matches.
-	make install PREFIX=/usr
+	staged=$(mktemp /usr/bin/.XD.XXXXXX) || error "Cannot stage XD."
+	if ! install -m 0755 XD "$staged" || ! mv -f -- "$staged" /usr/bin/XD; then
+		rm -f -- "$staged"
+		error "Cannot publish XD."
+	fi
+	ln -sfn XD /usr/bin/XD-CLI
 	log "XD installed successfully."
 }
 
@@ -305,28 +314,20 @@ prepare_service_state() {
 	fi
 }
 
-build_if_needed() {
-	if [ "$SKIP_BUILD" -eq 1 ]; then
-		log "No build required. Continuing with system setup."
-	else
-		build_and_install_XD
-	fi
-}
-
 finalize_service_setup() {
 	if [ "$SKIP_SERVICE_AND_USER_SETUP" -eq 0 ]; then
 		install_systemd_service
 	fi
 }
 
-# Build order matters: prepare and stop the service before replacing
-# the binary, then build, then install or refresh the unit. If the
-# build is skipped, service setup still proceeds.
 run_update() {
 	ensure_go
 	clone_or_update_repo
+	if [ "$SKIP_BUILD" -eq 0 ]; then
+		build_XD
+		install_XD
+	fi
 	prepare_service_state
-	build_if_needed
 	finalize_service_setup
 }
 

@@ -2,6 +2,11 @@ name: Agent Knowledge Validation
 
 on:
   workflow_dispatch:
+    inputs:
+      base:
+        description: Optional base Git revision for checking the dispatched commit
+        type: string
+        required: false
 
 permissions:
   contents: read
@@ -25,3 +30,13 @@ jobs:
         run: prove tests/agent_knowledge_validator/test_validator.pl
       - name: Run canonical worktree validation
         run: perl scripts/validate-agent-knowledge.pl --scope worktree
+      - name: Validate the requested commit range
+        if: inputs.base != ''
+        env:
+          VALIDATION_BASE: ${{ inputs.base }}
+        run: |
+          base=$(git rev-parse --verify --end-of-options "${VALIDATION_BASE}^{commit}")
+          head=$(git rev-parse --verify HEAD)
+          test "$head" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain)"
+          perl scripts/validate-agent-knowledge.pl --scope range --base "$base" --head "$head"

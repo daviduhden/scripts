@@ -230,7 +230,11 @@ install_keyring() {
 			"(curl/wget)."
 	fi
 	fpr=$(gpg --show-keys --with-colons "$TMPKEY" 2>/dev/null |
-		awk -F: '$1 == "fpr" { print $10; exit }')
+		awk -F: '
+			$1 == "pub" { primary++; pending = 1 }
+			$1 == "sub" { pending = 0 }
+			$1 == "fpr" && pending { fingerprint = $10; pending = 0 }
+			END { if (primary == 1) print fingerprint }')
 	if [ "$fpr" != "84FAA9983B24AEF24D6C87F1FEBB7D1812576482" ]; then
 		rm -f "$TMPKEY" "$TMPDEARMOR"
 		error "Lynis signing key fingerprint mismatch: ${fpr:-missing}."
@@ -262,7 +266,7 @@ URIs: https://packages.cisofy.com/community/lynis/deb/
 Suites: stable
 Components: main
 Architectures: ${ARCH}
-Signed-By: ${KEYRING}
+Signed-By: ${KEYRING} 84FAA9983B24AEF24D6C87F1FEBB7D1812576482
 EOF
 }
 
