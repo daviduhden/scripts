@@ -328,6 +328,17 @@ subtest 'tests-format manages a staged login profile' => sub {
       or diag $result->{stderr};
     ok( !-e $profile, 'uninstall removes the managed profile' );
     ok( !-l $link,    'uninstall removes the managed compatibility link' );
+
+    write_file( $profile, "# unrelated profile\n" );
+    write_file( $link,    "unrelated command\n" );
+    $result = run_command(
+        cmd     => [ $make, 'uninstall-tests-format', @options ],
+        cwd     => $REPO,
+        timeout => 30,
+    );
+    is( $result->{returncode}, 0, 'uninstall skips unmanaged paths' );
+    is( slurp($profile), "# unrelated profile\n", 'user profile is preserved' );
+    is( slurp($link),    "unrelated command\n",   'user command is preserved' );
 };
 
 subtest 'help renders from the install helper' => sub {

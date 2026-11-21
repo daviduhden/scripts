@@ -51,11 +51,26 @@ install_wrapper_links() {
 	[ -x "$wrapper" ] || return 0
 	for link in sudo visudo sudoedit; do
 		target="$DESTBIN/$link"
-		if [ -e "$target" ] && [ ! -L "$target" ]; then
-			die "$target exists and is not a wrapper symlink; refusing to overwrite"
+		if [ -L "$target" ]; then
+			case "$(readlink "$target")" in
+			sudo-wrapper | "$wrapper") continue ;;
+			esac
 		fi
-		log "Symlinking $target -> $wrapper"
-		ln -sf "$wrapper" "$target" || die "cannot link $target"
+		if [ -e "$target" ] || [ -L "$target" ]; then
+			die "$target exists and is not a managed wrapper link"
+		fi
+		log "Symlinking $target -> sudo-wrapper"
+		ln -s sudo-wrapper "$target" || die "cannot link $target"
+	done
+}
+
+remove_wrapper_links() {
+	for link in sudo visudo sudoedit; do
+		target="$DESTBIN/$link"
+		[ -L "$target" ] || continue
+		case "$(readlink "$target")" in
+		sudo-wrapper | "$DESTBIN/sudo-wrapper") rm -f -- "$target" ;;
+		esac
 	done
 }
 
@@ -144,12 +159,20 @@ install_perl() {
 	log 'Perl helpers installed'
 }
 
+is_managed_tests_format_profile() {
+	[ -f "$1" ] && [ ! -L "$1" ] &&
+		[ "$(sed -n '1p' "$1")" = '# Managed by make install-tests-format.' ]
+}
+
 install_tests_format_profile() (
 	[ -n "$TESTS_FORMAT_PROFILE_DIR" ] || exit 0
 	profile_dir=$DESTDIR/${TESTS_FORMAT_PROFILE_DIR#/}
 	profile=$profile_dir/scripts-tests-format.sh
 	mkdir -p "$profile_dir" || die "cannot create $profile_dir"
-	[ ! -d "$profile" ] || die "$profile is a directory"
+	if [ -e "$profile" ] || [ -L "$profile" ]; then
+		is_managed_tests_format_profile "$profile" ||
+			die "refusing to replace an unmanaged profile: $profile"
+	fi
 	umask 077
 	tmp_profile=$(mktemp "$profile_dir/.scripts-tests-format.XXXXXX") ||
 		die "cannot create a temporary profile in $profile_dir"
@@ -232,9 +255,7 @@ uninstall_openbsd() {
 		name=$(strip_extension "$source")
 		rm -f -- "$DESTBIN/$name"
 	done
-	for link in sudo visudo sudoedit; do
-		[ -L "$DESTBIN/$link" ] && rm -f -- "$DESTBIN/$link"
-	done
+	remove_wrapper_links
 	log "OpenBSD helpers removed from $DESTBIN"
 }
 
@@ -248,9 +269,7 @@ uninstall_secureblue() {
 		[ -f "$source" ] || continue
 		rm -f -- "$DEST_SYSTEMD_USER/${source##*/}"
 	done
-	for link in sudo visudo sudoedit; do
-		[ -L "$DESTBIN/$link" ] && rm -f -- "$DESTBIN/$link"
-	done
+	remove_wrapper_links
 	log 'SecureBlue helpers and units removed'
 }
 
@@ -294,7 +313,10 @@ uninstall_tests_format() {
 		rm -f -- "$DEST_TESTS_FORMAT/$name"
 	done
 	if [ -n "$TESTS_FORMAT_PROFILE_DIR" ]; then
-		rm -f -- "$DESTDIR/${TESTS_FORMAT_PROFILE_DIR#/}/scripts-tests-format.sh"
+		profile="$DESTDIR/${TESTS_FORMAT_PROFILE_DIR#/}/scripts-tests-format.sh"
+		if is_managed_tests_format_profile "$profile"; then
+			rm -f -- "$profile"
+		fi
 	fi
 	log 'Tests/Format helpers removed'
 }

@@ -20,6 +20,7 @@ use TestHarness qw(
   extract_function
   find_command
   find_matching
+  functions_without_main
   is_linux
   matching_entries
   new_tempdir
@@ -33,6 +34,46 @@ use TestHarness qw(
 );
 
 my $REPOSITORY_ROOT = repo_root();
+
+subtest 'repository synchronization retains local Git metadata' => sub {
+    plan skip_all => 'SecureBlue synchronization targets Linux'
+      unless is_linux();
+    plan skip_all => 'Git is unavailable' unless find_command('git');
+    my $root = new_tempdir('github-sync-');
+    my $program =
+      functions_without_main("$REPOSITORY_ROOT/secureblue/sync-gh-repos.bash");
+    my $commands = <<'SH';
+export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null
+export GIT_AUTHOR_NAME=Fixture GIT_COMMITTER_NAME=Fixture
+export GIT_AUTHOR_EMAIL=fixture@example.invalid
+export GIT_COMMITTER_EMAIL=fixture@example.invalid
+git init -q -b main "$TEST_ROOT/upstream"
+printf 'remote\n' >"$TEST_ROOT/upstream/file"
+git -C "$TEST_ROOT/upstream" add file
+git -C "$TEST_ROOT/upstream" commit -qm initial
+mkdir "$TEST_ROOT/work"
+BASE_DIR="$TEST_ROOT/work"
+sync_single_repo repository "$TEST_ROOT/upstream" main
+git -C "$BASE_DIR/repository" branch local-history
+printf 'local\n' >"$BASE_DIR/repository/file"
+if sync_single_repo repository "$TEST_ROOT/missing" main; then exit 1; fi
+git -C "$BASE_DIR/repository" show-ref --verify refs/heads/local-history
+sync_single_repo repository "$TEST_ROOT/upstream" main
+for backup in "$BASE_DIR"/.repository.backup.*; do
+    git -C "$backup/checkout" show-ref --verify refs/heads/local-history
+done
+test ! -e "$BASE_DIR/.repository.sync.lock"
+SH
+    my $result = run_command(
+        cmd     => [ 'bash', '-c', "$program\n$commands" ],
+        env     => env_with( TEST_ROOT => $root ),
+        timeout => 30,
+    );
+    is( $result->{returncode}, 0, 'sync backs up local metadata' )
+      or diag $result->{stdout} . $result->{stderr};
+    is( slurp("$root/work/repository/file"),
+        "local\n", 'published worktree preserves local changes' );
+};
 
 sub run_installer {
     my ( $root, %options ) = @_;

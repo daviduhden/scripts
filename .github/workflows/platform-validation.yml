@@ -147,4 +147,6 @@ jobs:
             /bin/sh tests-format/validate-correctness.sh --target openbsd .
             mkdir -p "$GITHUB_WORKSPACE/.tmp"
             export TMPDIR="$GITHUB_WORKSPACE/.tmp"
+            export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory
+            export GIT_CONFIG_VALUE_0="$GITHUB_WORKSPACE"
             make test-regression

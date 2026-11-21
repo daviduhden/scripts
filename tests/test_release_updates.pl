@@ -52,10 +52,10 @@ sub run_shell {
 }
 
 sub archive {
-    my ( $root, $entries ) = @_;
+    my ( $root, $entries, $use_prefix ) = @_;
     my $path = "$root/fixture.tar.gz";
     unlink $path if -e $path;
-    local $Archive::Tar::DO_NOT_USE_PREFIX = 1;
+    local $Archive::Tar::DO_NOT_USE_PREFIX = !$use_prefix;
     my $tar = Archive::Tar->new();
     for my $entry (@$entries) {
         my ( $name, $data, $kind ) = @$entry;
@@ -114,6 +114,24 @@ subtest 'release helper parses JSON without inline Perl' => sub {
         'https://example.invalid/release',
         'json-asset-url prints the matching URL'
     );
+};
+
+subtest 'release helper handles USTAR paths and enforces byte limits' => sub {
+    my $root = new_tempdir('release-ustar-');
+    my $name = 'release/' . ( 'x' x 98 ) . '/tool';
+    my $tar  = archive( $root, [ [ $name, 'data', 'regular' ] ], 1 );
+    my $file = "$root/tool";
+    my @cmd  = (
+        $^X, "$ROOT/scripts/release-verify.pl",
+        'tar-extract-entry', $tar, $file, $name
+    );
+    my $result = run_command( cmd => [ @cmd, 3 ], timeout => 20 );
+    isnt( $result->{returncode}, 0, 'oversize entry is rejected' );
+    ok( !-e $file, 'entry is not published after limit failure' );
+    $result = run_command( cmd => [ @cmd, 4 ], timeout => 20 );
+    is( $result->{returncode}, 0, 'full USTAR path is recognized' )
+      or diag $result->{stderr};
+    is( slurp($file), 'data', 'selected entry is extracted' );
 };
 
 subtest 'msedit checks digest and exact entry' => sub {

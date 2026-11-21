@@ -233,9 +233,14 @@ Makefiles whose generated `config.mk` is absent. On OpenBSD, `mbake` and
   unveil resolves separately. Its regression suite disables the sandbox with
   `NORMALIZE_FILES_NO_SANDBOX=1` because the VM veil rejects the temporary
   trees the suite creates.
+  Set Git's temporary `safe.directory` to this checkout only, because the
+  VM may run as a different user from the host checkout owner.
 - The formatter-mode regression scopes its synthetic Python source to a
   `File::Temp->newdir` object. Release that fixture before the repository
   source scan so that the OpenBSD job's checkout-local `TMPDIR` works.
+- Delivery regressions use local Git repositories and mock ZIP metadata.
+  Cover failed cloning, retained Git metadata, disallowed ZIP entry types,
+  and USTAR member paths without invoking production deployment scripts.
 - `tests/test_sync_website_filters.pl` exercises the Debian sync implementation
   only on Linux; the OpenBSD job runs the ksh implementation. Keep the Debian
   script's GNU staging assumptions out of the OpenBSD VM.

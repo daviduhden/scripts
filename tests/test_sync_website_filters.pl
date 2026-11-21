@@ -191,6 +191,30 @@ sub exercise_implementation {
         is( $result->{returncode}, $status, 'validates ZIP entry listing' )
           or diag $result->{stderr};
     }
+    my $metadata = extract_function( $source_text, 'validate_zip_metadata' );
+    for my $case (
+        [ '-rw-r--r-- 3.0 unx 12 b- 12 stor',         0 ],
+        [ 'lrwxrwxrwx 3.0 unx 12 b- 12 stor',         1 ],
+        [ '-rw-r--r-- 3.0 unx 2147483649 b- 12 defN', 1 ],
+      )
+    {
+        my ( $entry, $status ) = @$case;
+        my $input = "$root/zip-metadata";
+        write_file( $input,
+                "Archive: fixture\nZip file size: 123 bytes\n"
+              . "$entry 01-Jan-01 00:00 site/index.html\n1 file, 12 bytes\n" );
+        my $command = join "\n",
+          'unzip() { cat "$3"; }', $metadata,
+          'validate_zip_metadata '
+          . shell_quote($input) . ' '
+          . shell_quote("$root/checked-metadata") . ' 1';
+        my $result = run_command(
+            cmd     => [ $shell, '-c', $command ],
+            timeout => 20,
+        );
+        is( $result->{returncode}, $status, 'validates ZIP metadata' )
+          or diag $result->{stderr};
+    }
 
     for my $transfer_mode (qw(rsync copy)) {
         next if $transfer_mode eq 'rsync' && !defined find_command('rsync');

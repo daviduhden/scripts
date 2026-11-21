@@ -513,7 +513,7 @@ subtest '--report writes UTF-8 with LF' => sub {
     my $bytes = slurp_raw($report);
     unlike( $bytes, qr/\r/, 'report uses LF only' );
     my $valid_utf8 = eval {
-        decode( 'UTF-8', $bytes, Encode::FB_CROAK() );
+        decode( 'UTF-8', $bytes, Encode::FB_CROAK() | Encode::LEAVE_SRC() );
         1;
     };
     ok( $valid_utf8, 'report is valid UTF-8' );

@@ -68,6 +68,8 @@ GNU options, paths, privilege tools, and service commands. Do not add `sudo`,
    configuration keys, and do not duplicate PATH or firewall entries.
    Keep shell aliases that request unrestricted assistant modes under distinct
    opt-in names so sourcing the aliases preserves ordinary CLI invocations.
+   Wrapper and tests-format installers must verify link or profile ownership
+   before replacement or removal. Keep staged links valid after relocation.
 8. For privileged or destructive code, follow `system-change-safety` before
    writing the implementation.
 9. Run the validations below. Do not run the script against the host.

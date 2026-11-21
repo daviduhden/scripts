@@ -24,6 +24,8 @@ $Check = $false
 $Force = $false
 $script:Downloads = 0
 $script:FailCleanup = $false
+$script:FailCodexProbe = $false
+$script:RealCodexActivation = (Get-Item Function:Set-CodexVisibleBin).ScriptBlock
 $script:CodexVersions = Join-Path $testRoot 'codex/versions'
 $script:CodexBin = Join-Path $testRoot 'codex/bin'
 $script:CodexExe = Join-Path $script:CodexBin 'codex.exe'
@@ -72,6 +74,7 @@ function Invoke-Download {
 
 function Get-ExeVersion {
     param([string]$ExePath)
+    if ($script:FailCodexProbe -and $ExePath -eq $script:CodexExe) { return '0.0.0' }
     if (Test-Path -LiteralPath $ExePath) { return '1.2.3' }
     return $null
 }
@@ -125,6 +128,32 @@ try {
     $failed = $false
     try { Install-Codex '1.2.3' } catch { $failed = $_.Exception.Message -like '*exactly one regular*' }
     Assert-True $failed 'Duplicate exact resource path accepted'
+
+    if ($IsWindows) {
+        $sourceDir = Join-Path $testRoot 'junction-candidate'
+        $destination = Join-Path $testRoot 'junction-existing'
+        New-Item -ItemType Directory -Path (Join-Path $sourceDir 'bin'), $destination | Out-Null
+        Set-Content -LiteralPath (Join-Path $sourceDir 'bin/codex.exe') -Value 'candidate'
+        Set-Content -LiteralPath (Join-Path $destination 'codex.exe') -Value 'previous'
+        $savedBin = $script:CodexBin
+        $savedExe = $script:CodexExe
+        try {
+            $script:CodexBin = $destination
+            $script:CodexExe = Join-Path $destination 'codex.exe'
+            $script:FailCodexProbe = $true
+            $failed = $false
+            try { & $script:RealCodexActivation -VersionDir $sourceDir -ExpectedVersion '1.2.3' } catch { $failed = $true }
+            Assert-True ($failed -and (Get-Content -Raw $script:CodexExe).Trim() -eq 'previous') 'Codex activation did not restore the preceding directory'
+            $script:FailCodexProbe = $false
+            & $script:RealCodexActivation -VersionDir $sourceDir -ExpectedVersion '1.2.3'
+            Assert-True ((Get-Content -Raw $script:CodexExe).Trim() -eq 'candidate') 'Codex junction activation failed'
+        }
+        finally {
+            $script:FailCodexProbe = $false
+            $script:CodexBin = $savedBin
+            $script:CodexExe = $savedExe
+        }
+    }
 
     $script:FailCleanup = $true
     Set-CurrentExe -SourceExe (Join-Path $script:OpenCodeRoot 'versions/1.2.3/opencode.exe') -TargetExe $script:CrushExe
