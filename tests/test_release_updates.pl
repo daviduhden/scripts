@@ -173,11 +173,16 @@ SH
     my $result =
       run_shell( $root, $script, $commands, %context, PACKAGE_NAME => 'other' );
     isnt( $result->{returncode}, 0, 'unexpected package is rejected' );
+    like(
+        $result->{stderr},
+        qr/package metadata does not match/,
+        'verified bytes reach package metadata validation'
+    );
     ok( !-e "$root/apt.log", 'APT not called for wrong package metadata' );
     $result = run_shell( $root, $script, $commands, %context,
         PACKAGE_NAME => 'fastfetch' );
     is( $result->{returncode}, 0, 'verified package is installed' )
-      or diag $result->{stdout} . $result->{stderr};
+      or do { diag $result->{stdout} . $result->{stderr}; return; };
     is( slurp("$root/apt.log"), "called\n", 'verified package reaches APT' );
 };
 

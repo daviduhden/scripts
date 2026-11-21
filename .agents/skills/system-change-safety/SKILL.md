@@ -79,7 +79,9 @@ description: >-
 11. For Debian repository keys, check the entire set of primary keys and
     restrict the deb822 `Signed-By` declaration to the approved fingerprint.
     For GitHub .deb releases such as Fastfetch, verify the exact published
-    digest and inspect package metadata before invoking APT. Use system
+    digest and inspect package metadata before invoking APT. Validate the
+    GitHub `sha256:` prefix and digest syntax before comparing raw hex.
+    Use system
     install(1) to publish selected build outputs instead of elevating an
     upstream Makefile.
 

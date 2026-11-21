@@ -111,6 +111,10 @@ already-installed PSScriptAnalyzer; it does not install it.
   Restrict removal to selected targets with a successful installation and a
   usable managed executable. Verify staged executable versions before
   replacing live OpenCode, Crush or Bun binaries.
+  The dispatch fixture defines its own version probe. Keep progress on the
+  information stream so it cannot become part of a function's result.
+  Capture the previous Codex directory type before swapping paths, because
+  file metadata queried afterward may describe the new junction.
   Validate custom Crush purge paths before deleting any history, including
   in dry-run previews.
 - `update-aiclis.ps1` resolves OpenCode from the stable `v2.*` release tags

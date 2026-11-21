@@ -52,13 +52,14 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
+$script:Force = $Force
 
 try {
     # Best effort: the HTTPS endpoints need TLS 1.2, and a failure to change the
     # process-wide setting is ignored.
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 }
-catch { }
+catch { Write-Verbose "Could not select TLS 1.2: $($_.Exception.Message)" }
 
 # ---------------------------------------------------------------------------
 # Paths and constants
@@ -86,17 +87,17 @@ $script:ManagedDirs = @()
 # ---------------------------------------------------------------------------
 function Write-Info {
     param([string]$Message)
-    Write-Host "[INFO] $Message"
+    Write-Information "[INFO] $Message" -InformationAction Continue
 }
 
 function Write-Warn {
     param([string]$Message)
-    Write-Host "[WARN] $Message" -ForegroundColor Yellow
+    Write-Information "[WARN] $Message" -InformationAction Continue
 }
 
 function Write-Fail {
     param([string]$Message)
-    Write-Host "[ERROR] $Message" -ForegroundColor Red
+    Write-Information "[ERROR] $Message" -InformationAction Continue
 }
 
 <#
@@ -130,7 +131,7 @@ function Get-PlatformTag {
     The trimmed value without a leading 'rust-' or 'v' prefix; $null for null
     or whitespace input.
 #>
-function Normalize-Version {
+function ConvertTo-NormalizedVersion {
     param([string]$Value)
     if ([string]::IsNullOrWhiteSpace($Value)) { return $null }
     $v = $Value.Trim()
@@ -159,7 +160,7 @@ function Get-ExeVersion {
         if ($LASTEXITCODE -ne 0) { return $null }
         if ([string]::IsNullOrWhiteSpace($out)) { return $null }
         $token = ($out -split '\s+')[-1]
-        return (Normalize-Version $token)
+        return (ConvertTo-NormalizedVersion $token)
     }
     catch {
         return $null
@@ -293,6 +294,7 @@ function Find-BunExe {
     session because profile changes apply only to new sessions.
 #>
 function Set-CliWrapper {
+    [CmdletBinding(SupportsShouldProcess)]
     param([string]$Name, [string]$DefaultArgument)
 
     # PowerShell aliases cannot include arguments; use a function instead.
@@ -301,6 +303,7 @@ function Set-CliWrapper {
     $body = "& $Name.exe $DefaultArgument @args"
     $block = "$start`r`nfunction global:$Name { $body }`r`n$end"
     $profilePath = $PROFILE.CurrentUserAllHosts
+    if (-not $PSCmdlet.ShouldProcess($profilePath, "Configure the $Name PowerShell wrapper")) { return }
     $encoding = [Text.UTF8Encoding]::new($false)
     $content = ''
     if (Test-Path -LiteralPath $profilePath) {
@@ -321,7 +324,7 @@ function Set-CliWrapper {
     }
     $pattern = '(?ms)^' + [regex]::Escape($start) + '\r?\n.*?^' + [regex]::Escape($end) + '(?=\r?$)'
     if ([regex]::IsMatch($content, $pattern)) {
-        $updated = [regex]::Replace($content, $pattern, [System.Text.RegularExpressions.MatchEvaluator] { param($match) $block })
+        $updated = [regex]::Replace($content, $pattern, $block.Replace('$', '$$'))
     }
     else {
         $updated = $content + "`r`n$block`r`n"
@@ -429,7 +432,9 @@ function Get-RemoteText {
     without an in-place overwrite. Recovery copies survive failed activation.
 #>
 function Set-CurrentExe {
+    [CmdletBinding(SupportsShouldProcess)]
     param([string]$SourceExe, [string]$TargetExe, [string]$ExpectedVersion)
+    if (-not $PSCmdlet.ShouldProcess($TargetExe, 'Activate the staged executable')) { return }
     $pending = "$TargetExe.pending-$([guid]::NewGuid().ToString('N')).exe"
     $oldExe = "$TargetExe.old-$([guid]::NewGuid().ToString('N'))"
     try {
@@ -486,7 +491,7 @@ function Get-OpenCodeLatestVersion {
     if ($null -eq $latest) {
         throw 'Could not resolve the latest OpenCode 2.x release.'
     }
-    return (Normalize-Version $latest.tag_name)
+    return (ConvertTo-NormalizedVersion $latest.tag_name)
 }
 
 <#
@@ -500,7 +505,8 @@ function Get-OpenCodeLatestVersion {
     Non-current directories are ordered by LastWriteTime, newest first. Removal
     failures are ignored because stale versions are not fatal.
 #>
-function Remove-OldOpenCodeVersions {
+function Remove-OldOpenCodeVersion {
+    [CmdletBinding(SupportsShouldProcess)]
     param([string]$CurrentVersion, [int]$Keep = 3)
 
     $versionsDir = Join-Path $script:OpenCodeRoot 'versions'
@@ -511,8 +517,9 @@ function Remove-OldOpenCodeVersions {
             Sort-Object -Property LastWriteTime -Descending)
 
     $dirs | Select-Object -Skip ([Math]::Max($Keep - 1, 0)) | ForEach-Object {
-        Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
-        Write-Info "OpenCode: removed old version $($_.Name)"
+        if ($PSCmdlet.ShouldProcess($_.FullName, 'Remove the old OpenCode version')) {
+            Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
+        }
     }
 }
 
@@ -536,7 +543,7 @@ function Install-OpenCode {
         $latest = $null
         try {
             if ([string]::IsNullOrWhiteSpace($Version)) { $latest = Get-OpenCodeLatestVersion }
-            else { $latest = Normalize-Version $Version }
+            else { $latest = ConvertTo-NormalizedVersion $Version }
         }
         catch {
             Write-Warn "Could not check the latest version: $($_.Exception.Message)"
@@ -547,7 +554,7 @@ function Install-OpenCode {
     }
 
     $platform = Get-PlatformTag
-    $version = Normalize-Version $Version
+    $version = ConvertTo-NormalizedVersion $Version
     if ([string]::IsNullOrWhiteSpace($version)) { $version = Get-OpenCodeLatestVersion }
 
     $installed = Get-ExeVersion -ExePath $script:OpenCodeExe
@@ -623,7 +630,7 @@ function Install-OpenCode {
     }
 
     Write-Info "OpenCode: $verified installed to $script:OpenCodeBin"
-    Remove-OldOpenCodeVersions -CurrentVersion $version
+    Remove-OldOpenCodeVersion -CurrentVersion $version
 }
 
 # ---------------------------------------------------------------------------
@@ -643,7 +650,7 @@ function Get-CrushLatestVersion {
     if ([string]::IsNullOrWhiteSpace($meta.tag_name)) {
         throw 'Could not resolve the latest Crush version.'
     }
-    return (Normalize-Version $meta.tag_name)
+    return (ConvertTo-NormalizedVersion $meta.tag_name)
 }
 
 <#
@@ -672,7 +679,8 @@ function Get-CrushTarget {
     Non-current directories are ordered by LastWriteTime, newest first. Removal
     failures are ignored because stale versions are not fatal.
 #>
-function Remove-OldCrushVersions {
+function Remove-OldCrushVersion {
+    [CmdletBinding(SupportsShouldProcess)]
     param([string]$CurrentVersion, [int]$Keep = 3)
 
     if (-not (Test-Path -LiteralPath $script:CrushVersions)) { return }
@@ -682,8 +690,9 @@ function Remove-OldCrushVersions {
             Sort-Object -Property LastWriteTime -Descending)
 
     $dirs | Select-Object -Skip ([Math]::Max($Keep - 1, 0)) | ForEach-Object {
-        Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
-        Write-Info "Crush: removed old version $($_.Name)"
+        if ($PSCmdlet.ShouldProcess($_.FullName, 'Remove the old Crush version')) {
+            Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
+        }
     }
 }
 
@@ -707,7 +716,7 @@ function Install-Crush {
         $latest = $null
         try {
             if ([string]::IsNullOrWhiteSpace($Version)) { $latest = Get-CrushLatestVersion }
-            else { $latest = Normalize-Version $Version }
+            else { $latest = ConvertTo-NormalizedVersion $Version }
         }
         catch {
             Write-Warn "Could not check the latest version: $($_.Exception.Message)"
@@ -718,7 +727,7 @@ function Install-Crush {
     }
 
     $target = Get-CrushTarget
-    $version = Normalize-Version $Version
+    $version = ConvertTo-NormalizedVersion $Version
     if ([string]::IsNullOrWhiteSpace($version)) { $version = Get-CrushLatestVersion }
 
     $installed = Get-ExeVersion -ExePath $script:CrushExe
@@ -794,7 +803,7 @@ function Install-Crush {
     }
 
     Write-Info "Crush: $verified installed to $script:CrushBin"
-    Remove-OldCrushVersions -CurrentVersion $version
+    Remove-OldCrushVersion -CurrentVersion $version
 }
 
 # ---------------------------------------------------------------------------
@@ -814,7 +823,7 @@ function Get-CodexLatestVersion {
     if ([string]::IsNullOrWhiteSpace($meta.tag_name)) {
         throw 'Could not resolve the latest Codex version.'
     }
-    return (Normalize-Version $meta.tag_name)
+    return (ConvertTo-NormalizedVersion $meta.tag_name)
 }
 
 <#
@@ -859,12 +868,15 @@ function Test-CodexManagedLayout {
     Fresh installs can fall back to a direct copy if junctions are unavailable.
 #>
 function Set-CodexVisibleBin {
+    [CmdletBinding(SupportsShouldProcess)]
     param([string]$VersionDir, [string]$ExpectedVersion)
+    if (-not $PSCmdlet.ShouldProcess($script:CodexBin, 'Activate the Codex version')) { return }
 
     $guid = [guid]::NewGuid().ToString('N')
     $pending = "$($script:CodexBin).pending-$guid"
     $backup = "$($script:CodexBin).previous-$guid"
     $previous = Get-Item -LiteralPath $script:CodexBin -Force -ErrorAction SilentlyContinue
+    $previousWasJunction = $previous -and ($previous.Attributes -band [IO.FileAttributes]::ReparsePoint)
     try {
         New-Item -ItemType Junction -Path $pending -Target (Join-Path $VersionDir 'bin') | Out-Null
     }
@@ -909,11 +921,11 @@ function Set-CodexVisibleBin {
         }
     }
 
-    if ($previous -and ($previous.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+    if ($previousWasJunction) {
         & cmd.exe /c rmdir "$backup" | Out-Null
         if ($LASTEXITCODE -ne 0) { Write-Warn "Codex: previous junction retained at $backup" }
     }
-    elseif ($previous) { Write-Warn "Codex: previous directory retained at $backup" }
+    elseif ($previous) { Write-Info "Codex: previous directory retained at $backup" }
 }
 
 <#
@@ -927,7 +939,8 @@ function Set-CodexVisibleBin {
     Non-current directories are ordered by LastWriteTime, newest first. Removal
     failures are ignored because stale versions are not fatal.
 #>
-function Remove-OldCodexVersions {
+function Remove-OldCodexVersion {
+    [CmdletBinding(SupportsShouldProcess)]
     param([string]$CurrentVersion, [int]$Keep = 3)
 
     if (-not (Test-Path -LiteralPath $script:CodexVersions)) { return }
@@ -937,8 +950,9 @@ function Remove-OldCodexVersions {
             Sort-Object -Property LastWriteTime -Descending)
 
     $dirs | Select-Object -Skip ([Math]::Max($Keep - 1, 0)) | ForEach-Object {
-        Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
-        Write-Info "Codex: removed old version $($_.Name)"
+        if ($PSCmdlet.ShouldProcess($_.FullName, 'Remove the old Codex version')) {
+            Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
+        }
     }
 }
 
@@ -962,7 +976,7 @@ function Install-Codex {
         $latest = $null
         try {
             if ([string]::IsNullOrWhiteSpace($Version)) { $latest = Get-CodexLatestVersion }
-            else { $latest = Normalize-Version $Version }
+            else { $latest = ConvertTo-NormalizedVersion $Version }
         }
         catch {
             Write-Warn "Could not check the latest version: $($_.Exception.Message)"
@@ -973,7 +987,7 @@ function Install-Codex {
     }
 
     $target = Get-CodexTarget
-    $version = Normalize-Version $Version
+    $version = ConvertTo-NormalizedVersion $Version
     if ([string]::IsNullOrWhiteSpace($version)) { $version = Get-CodexLatestVersion }
     if ($version -cnotmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$') {
         throw 'Invalid Codex release version.'
@@ -1161,7 +1175,7 @@ function Install-Codex {
     }
 
     Write-Info "Codex: $verified installed to $script:CodexBin"
-    Remove-OldCodexVersions -CurrentVersion $version
+    Remove-OldCodexVersion -CurrentVersion $version
 }
 
 # ---------------------------------------------------------------------------
@@ -1310,7 +1324,8 @@ function Install-Bun {
     Best effort: a missing winget or an uninstall failure produces a warning.
     Bun winget copies are removed separately after verified installation.
 #>
-function Remove-WingetPackages {
+function Remove-WingetPackage {
+    [CmdletBinding(SupportsShouldProcess)]
     param([string[]]$Ids)
 
     if (-not $Ids) { return }
@@ -1321,6 +1336,7 @@ function Remove-WingetPackages {
     }
 
     foreach ($id in $Ids) {
+        if (-not $PSCmdlet.ShouldProcess($id, 'Uninstall the winget copy')) { continue }
         Write-Info "winget: uninstalling $id"
         try {
             & winget uninstall --id $id --silent --disable-interactivity --accept-source-agreements | Out-Null
@@ -1379,7 +1395,7 @@ if ($RemoveWinget -and -not $Check) {
     $verifiedIds = @('SST.opencode', 'OpenAI.Codex', 'charmbracelet.crush') | Where-Object {
         $updated.ContainsKey($_) -and (Get-ExeVersion -ExePath $updated[$_])
     }
-    Remove-WingetPackages -Ids $verifiedIds
+    Remove-WingetPackage -Ids $verifiedIds
 }
 
 # Repair existing installations even when an update failed (for example, offline).

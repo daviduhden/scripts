@@ -42,7 +42,8 @@ The Linux knfmt installer runs the upstream build unprivileged and uses
 system install(1) for the binary and manual page.
 The native Windows workflow exercises installation and reinstall under
 `RUNNER_TEMP` with `--no-path`, verifies rollback on a locked launcher,
-and fails on PSScriptAnalyzer error diagnostics. The manual agent-knowledge workflow accepts an
+and fails on PSScriptAnalyzer warning or error diagnostics. The manual
+agent-knowledge workflow accepts an
 optional base revision and checks that the checkout represents the dispatched
 head before invoking range validation.
 Direct range invocations also need a clean checkout of the requested head

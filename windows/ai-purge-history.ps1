@@ -38,7 +38,7 @@ there.
   -IncludeCrushData   Also remove the whole Crush data directory
   -Help               Show this help
 '@
-    Write-Host $helpText
+    Write-Output $helpText
     exit 0
 }
 
@@ -105,15 +105,16 @@ $paths = @(
     terminate the script.
 #>
 function Remove-Target {
+    [CmdletBinding(SupportsShouldProcess)]
     param([string]$Path)
 
     if (Test-Path -LiteralPath $Path) {
         if ($DryRun) {
-            Write-Host "[DRY-RUN] Would remove: $Path"
+            Write-Information "[DRY-RUN] Would remove: $Path" -InformationAction Continue
         }
-        else {
+        elseif ($PSCmdlet.ShouldProcess($Path, 'Remove history or state')) {
             Remove-Item -LiteralPath $Path -Recurse -Force
-            Write-Host "[INFO] Removed: $Path"
+            Write-Information "[INFO] Removed: $Path" -InformationAction Continue
         }
     }
 }
@@ -127,12 +128,12 @@ if ($IncludeCrushData) {
     Remove-Target -Path $crushDataHome
 }
 else {
-    Write-Host "[INFO] Preserving Crush data directory (use -IncludeCrushData to remove it): $crushDataHome"
+    Write-Information "[INFO] Preserving Crush data directory (use -IncludeCrushData to remove it): $crushDataHome" -InformationAction Continue
 }
 
 if ($DryRun) {
-    Write-Host '[INFO] Dry run complete; no files were removed.'
+    Write-Information '[INFO] Dry run complete; no files were removed.' -InformationAction Continue
 }
 else {
-    Write-Host '[INFO] AI assistant history purged for Windows'
+    Write-Information '[INFO] AI assistant history purged for Windows' -InformationAction Continue
 }

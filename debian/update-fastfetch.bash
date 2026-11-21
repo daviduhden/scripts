@@ -182,6 +182,9 @@ run_fastfetch_update() {
 		error "unexpected release asset URL."
 	expected_digest=$(perl "$RELEASE_HELPER" json-asset-digest "$url" <<<"$metadata") ||
 		error "missing release asset digest."
+	[[ $expected_digest =~ ^sha256:[0-9a-f]{64}$ ]] ||
+		error "invalid release asset digest."
+	expected_digest=${expected_digest#sha256:}
 	log "Downloading fastfetch ${LATEST_VERSION} (${PKG_ARCH})..."
 	net_curl "$url" -o "$DEB_FILE" || error "download failed."
 	actual_digest=$(sha256sum <"$DEB_FILE") || error "could not hash package."

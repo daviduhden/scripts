@@ -89,8 +89,8 @@ jobs:
           Get-ChildItem windows/*.ps1, windows/test-format/*.ps1, windows/install-support/*.ps1 | ForEach-Object {
             $diagnostics = Invoke-ScriptAnalyzer -Path $_.FullName -ErrorAction Stop
             $diagnostics | Write-Output
-            if ($diagnostics | Where-Object Severity -EQ Error) {
-              throw "PSScriptAnalyzer reported errors in $($_.FullName)"
+            if ($diagnostics | Where-Object { $_.Severity -in @('Warning', 'Error') }) {
+              throw "PSScriptAnalyzer reported warnings or errors in $($_.FullName)"
             }
           }
           & pwsh -NoProfile -File windows/test-format/psfmt.ps1 -c .

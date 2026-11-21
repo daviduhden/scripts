@@ -225,7 +225,8 @@ function Install-Crush { $script:Calls += 'Crush' }
 function Invoke-CodexDaemonUpdate { $script:Calls += 'Daemon'; if ($Fail) { throw 'Daemon fixture failure' } }
 function Repair-CliEnvironment { }
 function Find-BunExe { return $null }
-function Remove-WingetPackages { param([string[]]$Ids) $script:Calls += $Ids }
+function Get-ExeVersion { param([string]$ExePath) if (Test-Path -LiteralPath $ExePath) { '1.2.3' } }
+function Remove-WingetPackage { param([string[]]$Ids) $script:Calls += $Ids }
 '@
     [IO.File]::WriteAllText($harness, $prefix + "`n" + $main)
     $dispatch = & $harness -Fixture $resource -Fail
