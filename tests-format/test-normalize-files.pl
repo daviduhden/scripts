@@ -517,6 +517,10 @@ subtest '--report writes UTF-8 with LF' => sub {
         1;
     };
     ok( $valid_utf8, 'report is valid UTF-8' );
+    my ($existing_rc) =
+      run_capture( '--dry-run', '--rename', '--report', $report, $tmp );
+    is( $existing_rc,       2,      'existing report path is rejected' );
+    is( slurp_raw($report), $bytes, 'existing report remains unchanged' );
     done_testing();
 };
 

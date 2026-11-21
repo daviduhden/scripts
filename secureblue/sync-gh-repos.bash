@@ -170,6 +170,10 @@ sync_single_repo() (
 	local name="$1" ssh_url="$2" default_branch="$3"
 	local target="$BASE_DIR/$1" stage="" backup_dir="" lock="$BASE_DIR/.$1.sync.lock"
 
+	if [[ ! $name =~ ^[a-zA-Z0-9._-]+$ || $name == . || $name == .. ]]; then
+		error "Invalid repository directory name: $name"
+		return 1
+	fi
 	mkdir -- "$lock" || {
 		error "Cannot acquire sync lock: $lock"
 		return 1

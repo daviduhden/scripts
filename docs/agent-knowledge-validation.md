@@ -29,7 +29,9 @@ prove tests/agent_knowledge_validator/test_validator.pl
 files, renames, and deletions. `range` compares the merge base of `BASE_REF`
 and `HEAD_REF` with `HEAD_REF`. For a branch review, fetch sufficient history
 and pass the PR base and head commit SHAs; the validator resolves their common
-ancestor itself.
+ancestor itself. Run range mode from a clean checkout of the head revision
+because structure, local references and configuration are read from the
+checkout. The manual workflow checks these preconditions when supplied a base.
 
 Exit codes are consistent across repositories: `0` means no policy errors,
 `1` means a policy violation, and `2` means invalid arguments, configuration,

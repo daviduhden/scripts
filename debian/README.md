@@ -37,7 +37,7 @@ users.
 | [update-msedit.bash](update-msedit.bash) | Installs or updates Microsoft Edit from precompiled GitHub release binaries. |
 | [update-openrsync.bash](update-openrsync.bash) | Builds and installs openrsync, installing build dependencies through APT. |
 | [update-signify.bash](update-signify.bash) | Builds and installs the portable OpenBSD signify utility. |
-| [update-xd-torrent.bash](update-xd-torrent.bash) | Builds and installs XD and configures its service; `--skip-service-and-user-setup` skips that setup. |
+| [update-xd-torrent.bash](update-xd-torrent.bash) | Builds XD as an unprivileged account, installs selected outputs and reads the unit from the same checkout. `--skip-service-and-user-setup` skips service setup. |
 | [rpi-update-safe.bash](rpi-update-safe.bash) | Runs `rpi-update` without rebooting on Raspberry Pi 5, then validates and repairs the selected DTB and initramfs with backups. Requires root and can change firmware, modules, and boot files; it does not provide a complete updater rollback. |
 
 Examples from the repository root:

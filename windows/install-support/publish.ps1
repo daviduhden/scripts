@@ -36,7 +36,7 @@ try {
     Assert-RegularItem -Path $Destination -Directory
     [IO.Directory]::CreateDirectory($Destination) | Out-Null
     $lockPath = Join-Path $Destination '.scripts-install.lock'
-    $lock = [IO.File]::Open($lockPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None,
+    $lock = [IO.FileStream]::new($lockPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None,
         4096, [IO.FileOptions]::DeleteOnClose)
 
     $manifest = 'installed-files.txt'

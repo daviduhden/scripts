@@ -104,6 +104,10 @@ description: >-
   timestamped backup.
 - `debian/update-monero.bash` edits service units, Tor/I2P/Monero configs,
   and adds runtime nftables rules.
+- Debian XD runs checkout and build commands under a non-root account and
+  reads its systemd unit from that checkout. Monero stages and backs up its
+  release binaries before stopping the service, and restores them on an
+  incomplete core update. Optional LWS work follows that commit point.
 - `debian/rpi-update-safe.bash` runs `rpi-update` as root with rebooting disabled,
   then runs `depmod` and can replace the Raspberry Pi 5 DTB and initramfs in
   `/boot/firmware`. Backups cover replaced boot files, not every firmware or

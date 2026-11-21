@@ -2097,7 +2097,12 @@ sub write_report {
     my ( $cfg, $R ) = @_;
     return unless defined $cfg->{report};
     my $fh;
-    if ( !sysopen( $fh, $cfg->{report}, O_WRONLY | O_CREAT | O_EXCL, 0600 ) ) {
+    if (
+        !sysopen(
+            $fh, $cfg->{report}, O_WRONLY | O_CREAT | O_EXCL, oct('600')
+        )
+      )
+    {
         warn "normalize-files: cannot write report $cfg->{report}: $!\n";
         $R->{errors}++;
         return;

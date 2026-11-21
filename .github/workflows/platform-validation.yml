@@ -87,10 +87,18 @@ jobs:
         shell: pwsh
         run: |
           Get-ChildItem windows/*.ps1, windows/test-format/*.ps1, windows/install-support/*.ps1 | ForEach-Object {
-            Invoke-ScriptAnalyzer -Path $_.FullName -ErrorAction Stop
+            $diagnostics = Invoke-ScriptAnalyzer -Path $_.FullName -ErrorAction Stop
+            $diagnostics | Write-Output
+            if ($diagnostics | Where-Object Severity -EQ Error) {
+              throw "PSScriptAnalyzer reported errors in $($_.FullName)"
+            }
           }
           & pwsh -NoProfile -File windows/test-format/psfmt.ps1 -c .
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($LASTEXITCODE -ne 0) {
+            $status = $LASTEXITCODE
+            & pwsh -NoProfile -File windows/test-format/psfmt.ps1 -d .
+            exit $status
+          }
       - name: Run PowerShell regression suites with mocked downloads
         shell: pwsh
         run: |
@@ -99,6 +107,12 @@ jobs:
           & pwsh -NoProfile -File windows/tests/test-update-xerj.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & pwsh -NoProfile -File windows/tests/test-update-aiclis.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:CRUSH_GLOBAL_DATA = $env:USERPROFILE
+          & pwsh -NoProfile -File windows/ai-purge-history.ps1 -IncludeCrushData -DryRun
+          if ($LASTEXITCODE -eq 0) { throw 'Purge allowed the whole user profile' }
+          $env:CRUSH_GLOBAL_DATA = Join-Path $env:RUNNER_TEMP 'crush-custom'
+          & pwsh -NoProfile -File windows/ai-purge-history.ps1 -IncludeCrushData -DryRun
           exit $LASTEXITCODE
       - name: Run portable Perl syntax and regressions
         shell: pwsh

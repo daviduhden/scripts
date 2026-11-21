@@ -987,7 +987,32 @@ run_update() {
 	# stopped it and it is not running at exit.
 	WORK_DIR="$(mktemp -d /tmp/monero-cli-XXXXXX)"
 	GPG_HOME="$(mktemp -d /tmp/monero-gpg-XXXXXX)"
+	MONERO_BIN_STAGE=
+	MONERO_BIN_LOCK=
+	MONERO_BIN_COMMITTED=0
+	MONERO_PUBLISHED=()
 	cleanup() {
+		local name restore_failed=0
+		if [[ -n $MONERO_BIN_STAGE && $MONERO_BIN_COMMITTED -eq 0 ]]; then
+			for name in "${MONERO_PUBLISHED[@]}"; do
+				if [[ -e $MONERO_BIN_STAGE/old/$name || -L $MONERO_BIN_STAGE/old/$name ]]; then
+					mv -fT -- "$MONERO_BIN_STAGE/old/$name" "$INSTALL_DIR/$name" ||
+						restore_failed=1
+				else
+					rm -f -- "$INSTALL_DIR/$name" || restore_failed=1
+				fi
+			done
+		fi
+		if [[ -n $MONERO_BIN_STAGE ]]; then
+			if [[ $restore_failed -eq 0 ]]; then
+				rm -rf -- "$MONERO_BIN_STAGE"
+			else
+				warn "Monero binary recovery files retained at $MONERO_BIN_STAGE"
+			fi
+		fi
+		if [[ -n $MONERO_BIN_LOCK ]]; then
+			rmdir -- "$MONERO_BIN_LOCK" || warn "Could not remove $MONERO_BIN_LOCK"
+		fi
 		rm -rf "$WORK_DIR" "$GPG_HOME" \
 			"${LWS_TMP:-}" 2>/dev/null || true
 		# If this run stopped a running monerod and a later
@@ -1000,6 +1025,9 @@ run_update() {
 		fi
 	}
 	trap cleanup EXIT
+	trap 'exit 129' HUP
+	trap 'exit 130' INT
+	trap 'exit 143' TERM
 
 	log "Downloading Monero CLI ${LATEST_TAG}..."
 	if ! net_curl "${DOWNLOAD_URL}" \
@@ -1097,25 +1125,21 @@ run_update() {
 
 	log "Extracted directory: ${EXTRACTED_DIR}"
 
-	# Stop the service before replacing binaries so the running process
-	# is not using files that are being overwritten. WAS_ACTIVE drives
-	# the later restart and the cleanup trap.
-	log "Stopping monerod service if it is running..."
-	WAS_ACTIVE=0
-	if systemctl is-active --quiet monerod; then
-		WAS_ACTIVE=1
-		systemctl stop monerod
-	fi
-
-	log "Installing binaries into ${INSTALL_DIR}..."
-
+	log "Staging Monero binaries..."
 	install -d "${INSTALL_DIR}"
-
-	installed_bins=0
+	mkdir -- "$INSTALL_DIR/.monero-install.lock" ||
+		error "Cannot acquire Monero installation lock."
+	MONERO_BIN_LOCK="$INSTALL_DIR/.monero-install.lock"
+	MONERO_BIN_STAGE=$(mktemp -d "${INSTALL_DIR}/.monero-install.XXXXXX")
+	mkdir -- "$MONERO_BIN_STAGE/new" "$MONERO_BIN_STAGE/old"
+	local bin name
+	local -a names=()
 	while IFS= read -r -d '' bin; do
-		log " -> installing $(basename "$bin")"
-		install -m 0755 "$bin" "${INSTALL_DIR}/"
-		installed_bins=$((installed_bins + 1))
+		name=${bin##*/}
+		[[ ! -e $MONERO_BIN_STAGE/new/$name ]] ||
+			error "duplicate Monero executable: $name"
+		install -m 0755 "$bin" "$MONERO_BIN_STAGE/new/$name"
+		names+=("$name")
 	done < <(
 		find "$EXTRACTED_DIR" -maxdepth 2 \
 			-type f \
@@ -1125,10 +1149,25 @@ run_update() {
 			sort -z
 	)
 
-	if [[ $installed_bins -eq 0 ]]; then
-		error "no Monero binaries found under" \
-			"extracted directory: ${EXTRACTED_DIR}"
+	[[ -x $MONERO_BIN_STAGE/new/monerod ]] ||
+		error "no monerod executable found in the release"
+	for name in "${names[@]}"; do
+		if [[ -e $INSTALL_DIR/$name || -L $INSTALL_DIR/$name ]]; then
+			[[ -f $INSTALL_DIR/$name || -L $INSTALL_DIR/$name ]] ||
+				error "unexpected Monero destination: $INSTALL_DIR/$name"
+			cp -a -- "$INSTALL_DIR/$name" "$MONERO_BIN_STAGE/old/$name"
+		fi
+	done
+
+	WAS_ACTIVE=0
+	if [[ $SKIP_SERVICE_AND_USER_SETUP -eq 0 ]] && systemctl is-active --quiet monerod; then
+		WAS_ACTIVE=1
+		systemctl stop monerod
 	fi
+	for name in "${names[@]}"; do
+		MONERO_PUBLISHED+=("$name")
+		mv -fT -- "$MONERO_BIN_STAGE/new/$name" "$INSTALL_DIR/$name"
+	done
 
 	if [[ ${SKIP_SERVICE_AND_USER_SETUP} -eq 0 ]]; then
 		log "Ensuring monero system user and" \
@@ -1289,6 +1328,7 @@ EOF
 		fi
 	fi
 
+	MONERO_BIN_COMMITTED=1
 	if command -v monerod >/dev/null 2>&1; then
 		log "Installed Monero CLI version:" \
 			"$(monerod --version 2>/dev/null | sed -n '1p' || true)"

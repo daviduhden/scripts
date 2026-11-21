@@ -54,13 +54,17 @@ if ($IncludeCrushData) {
         throw 'Crush data must be an absolute filesystem directory.'
     }
     $crushDataHome = [IO.Path]::GetFullPath($crushDataHome).TrimEnd('\', '/')
-    foreach ($protected in @([IO.Path]::GetPathRoot($crushDataHome + '\'), $HOME, $env:LOCALAPPDATA, $env:APPDATA, $env:USERPROFILE)) {
+    foreach ($protected in @([IO.Path]::GetPathRoot($crushDataHome + '\'), $HOME, $env:LOCALAPPDATA, $env:APPDATA,
+            $env:USERPROFILE, $env:WINDIR, $env:ProgramFiles, $env:ProgramData)) {
         if (-not $protected) { continue }
         $protected = [IO.Path]::GetFullPath($protected).TrimEnd('\', '/')
         if ($protected.Equals($crushDataHome, [StringComparison]::OrdinalIgnoreCase) -or
             $protected.StartsWith($crushDataHome + '\', [StringComparison]::OrdinalIgnoreCase)) {
             throw "Refusing broad Crush data path: $crushDataHome"
         }
+    }
+    if ((Test-Path -LiteralPath $crushDataHome) -and -not (Test-Path -LiteralPath $crushDataHome -PathType Container)) {
+        throw "Crush data is not a directory: $crushDataHome"
     }
     for ($directory = [IO.DirectoryInfo]::new($crushDataHome); $null -ne $directory; $directory = $directory.Parent) {
         if ($directory.Exists -and ($directory.Attributes -band [IO.FileAttributes]::ReparsePoint)) {

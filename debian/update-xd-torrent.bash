@@ -19,16 +19,16 @@ set -euo pipefail
 # Side effects:
 #  - Clones or updates the source under $HOME/.local/src/XD and checks
 #    out the latest tag
-#  - Builds with make and installs through make install PREFIX=/usr,
-#    placing the binary in /usr/bin to match the upstream unit
+#  - Builds as the invoking non-root user, or an isolated unprivileged
+#    account for direct root runs. Installs the result into /usr/bin.
 #  - Creates the xd system user/group and /var/lib/XD
-#  - Stops a running xd before building and restores it on exit if the
-#    run stopped it
+#  - Prepares XD before stopping a running service and attempts to restore
+#    a previously active service on exit
 #  - Replaces /etc/systemd/system/xd.service, reloads systemd, enables
 #    xd, and restarts it when it was active before
 #
-# The unit file is downloaded from the upstream master branch and is
-# not verified. With --skip-service-and-user-setup the build and
+# The unit file comes from the same Git checkout as the build.
+# With --skip-service-and-user-setup the build and
 # install still run, but user, unit, and systemd steps are omitted.
 # When the checkout is already at the latest tag, the build is skipped
 # and service setup still runs.
@@ -55,12 +55,11 @@ SCRIPT_ARGS=("$@")
 
 REPO="majestrate/XD"
 REPO_URL="https://github.com/${REPO}.git"
-BUILD_DIR="${HOME}/.local/src"
+BUILD_DIR=
+BUILD_HOME=
+BUILD_USER=
+BUILD_TMP=
 BIN_NAME="XD"
-SYSTEMD_UNIT_URL="https://raw.githubusercontent.com"
-SYSTEMD_UNIT_URL="${SYSTEMD_UNIT_URL}/majestrate/XD"
-SYSTEMD_UNIT_URL="${SYSTEMD_UNIT_URL}/refs/heads/master"
-SYSTEMD_UNIT_URL="${SYSTEMD_UNIT_URL}/contrib/systemd/xd.service"
 SYSTEMD_UNIT_FILE="/etc/systemd/system/xd.service"
 XD_USER="xd"
 XD_GROUP="xd"
@@ -149,8 +148,24 @@ require_cmd() {
 		error "Required command '$1' not found."
 }
 
-net_curl() {
-	curl -fLsS --retry 5 "$@"
+prepare_build_user() {
+	local account uid
+	BUILD_USER=${SUDO_USER:-nobody}
+	[[ $BUILD_USER != root ]] || BUILD_USER=nobody
+	account=$(getent passwd "$BUILD_USER") || error "Cannot resolve build account."
+	IFS=: read -r _ _ uid _ _ BUILD_HOME _ <<<"$account"
+	[[ $uid =~ ^[0-9]+$ && $uid -ne 0 ]] ||
+		error "XD requires an unprivileged build account."
+	if [[ $BUILD_USER == nobody ]]; then
+		BUILD_TMP=$(mktemp -d /tmp/xd-build.XXXXXX)
+		chown "$BUILD_USER" "$BUILD_TMP"
+		BUILD_HOME=$BUILD_TMP
+	fi
+	BUILD_DIR="$BUILD_HOME/.local/src"
+}
+
+run_build() {
+	runuser -u "$BUILD_USER" -- env -u LD_PRELOAD HOME="$BUILD_HOME" PATH="$PATH" "$@"
 }
 
 ensure_go() {
@@ -162,25 +177,25 @@ ensure_go() {
 # The newest tag is the one attached to the most recent tagged commit.
 # Sets SKIP_BUILD when HEAD is exactly that tag.
 clone_or_update_repo() {
-	mkdir -p "$BUILD_DIR"
+	run_build mkdir -p "$BUILD_DIR"
 	cd "$BUILD_DIR"
 	if [ ! -d "$BIN_NAME" ]; then
 		log "Cloning $BIN_NAME repository..."
-		git clone "$REPO_URL" "$BIN_NAME"
+		run_build git clone "$REPO_URL" "$BIN_NAME"
 	fi
 
 	cd "$BUILD_DIR/$BIN_NAME"
 
 	# Fetch tags and remote refs
-	git fetch --tags --prune origin || git fetch --tags --prune
+	run_build git fetch --tags --prune origin || run_build git fetch --tags --prune
 
 	# Determine latest tag (by tag creation date)
-	latest_tag=$(git describe --tags \
-		"$(git rev-list --tags --max-count=1)" \
+	latest_tag=$(run_build git describe --tags \
+		"$(run_build git rev-list --tags --max-count=1)" \
 		2>/dev/null || true)
 
 	if [ -n "$latest_tag" ]; then
-		local_tag=$(git describe --tags \
+		local_tag=$(run_build git describe --tags \
 			--exact-match HEAD 2>/dev/null || true)
 		if [ "$local_tag" = "$latest_tag" ] && [ -x /usr/bin/XD ]; then
 			log "Local repository is already at" \
@@ -190,10 +205,10 @@ clone_or_update_repo() {
 			return
 		fi
 		log "Checking out latest tag $latest_tag..."
-		git checkout "tags/$latest_tag" -q
+		run_build git checkout "tags/$latest_tag" -q
 	else
 		log "No tags found; updating to latest commit on default branch..."
-		git pull --ff-only
+		run_build git pull --ff-only
 	fi
 }
 
@@ -201,7 +216,7 @@ clone_or_update_repo() {
 # deliberate: the upstream unit expects /usr/bin/XD.
 build_XD() {
 	log "Building XD..."
-	env -u LD_PRELOAD make
+	run_build make
 	if [ ! -f XD ] || [ ! -x XD ]; then
 		error "XD build did not produce an executable."
 	fi
@@ -211,7 +226,8 @@ install_XD() {
 	local staged
 	log "Installing XD..."
 	staged=$(mktemp /usr/bin/.XD.XXXXXX) || error "Cannot stage XD."
-	if ! install -m 0755 XD "$staged" || ! mv -f -- "$staged" /usr/bin/XD; then
+	if ! run_build cat -- XD >"$staged" ||
+		! chmod 0755 "$staged" || ! mv -fT -- "$staged" /usr/bin/XD; then
 		rm -f -- "$staged"
 		error "Cannot publish XD."
 	fi
@@ -254,6 +270,9 @@ stop_xd_if_running() {
 # before the restart, bring the service back up instead of
 # leaving it down.
 restore_xd_if_needed() {
+	if [[ -n $BUILD_TMP ]]; then
+		rm -rf -- "$BUILD_TMP"
+	fi
 	if [ "$WAS_ACTIVE" -eq 1 ] &&
 		! systemctl is-active --quiet xd; then
 		systemctl start xd >/dev/null 2>&1 || true
@@ -270,9 +289,9 @@ install_systemd_service() {
 
 	local unit_tmp
 	unit_tmp="$(mktemp /tmp/xd-service-XXXXXX)"
-	if ! net_curl "$SYSTEMD_UNIT_URL" -o "$unit_tmp"; then
+	if ! run_build git show HEAD:contrib/systemd/xd.service >"$unit_tmp"; then
 		rm -f "$unit_tmp"
-		error "Failed to download systemd unit from ${SYSTEMD_UNIT_URL}"
+		error "Failed to read the systemd unit from the XD checkout."
 	fi
 
 	install -m 0644 "$unit_tmp" "$SYSTEMD_UNIT_FILE"
@@ -296,10 +315,10 @@ install_systemd_service() {
 check_prereqs() {
 	require_root
 	require_cmd git
-	require_cmd curl
 	require_cmd install
 	require_cmd getent
 	require_cmd make
+	require_cmd runuser
 	if [ "$SKIP_SERVICE_AND_USER_SETUP" -eq 0 ]; then
 		require_cmd systemctl
 		require_cmd useradd
@@ -324,6 +343,7 @@ finalize_service_setup() {
 
 run_update() {
 	ensure_go
+	prepare_build_user
 	clone_or_update_repo
 	if [ "$SKIP_BUILD" -eq 0 ]; then
 		build_XD
