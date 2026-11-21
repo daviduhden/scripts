@@ -25,7 +25,10 @@ Installer options are `--dry-run`, `--no-path`, `--install-dir PATH`, and
 `--help`. The default destination is
 `%LOCALAPPDATA%\Programs\<repository-name>`. The installer reuses suitable
 Perl or installs Strawberry Perl with winget. It does not install PowerShell 7;
-install it separately to run `psfmt`. The execution policy is left unchanged.
+install it separately to run `psfmt`. The installer verifies staged files
+before publishing them and restores existing managed files if publication
+fails. The publishing helper runs under the current Windows PowerShell
+execution policy.
 
 From PowerShell, check AI CLI versions without installing updates:
 

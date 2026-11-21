@@ -6,7 +6,7 @@ optional tools that must be installed separately.
 
 | File | Purpose |
 | --- | --- |
-| [aliases.bash](aliases.bash) | Defines navigation, file-operation, editor, networking, and system-information aliases, plus archive extraction and `sysupgrade-all`. AI CLI aliases enable their automatic/full-permission modes. |
+| [aliases.bash](aliases.bash) | Defines navigation, file-operation, editor, networking, and system-information aliases, plus archive extraction and `sysupgrade-all`. Use `codex-yolo`, `copilot-yolo`, or `opencode-auto` to request the corresponding CLI's automatic/full-permission mode explicitly. |
 | [vi-mode.bash](vi-mode.bash) | Enables vi editing in interactive Bash sessions and sets `EDITOR=vim` and `VISUAL=kak` only when they are unset. |
 
 To load both files from a checkout:

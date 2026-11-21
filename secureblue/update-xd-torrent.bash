@@ -245,7 +245,9 @@ build_and_install_XD() {
 	log "Building XD..."
 	run_build make
 	log "Installing XD into /usr/local/bin..."
-	[ -f XD ] && [ -x XD ] || error "XD build did not produce an executable."
+	if [ ! -f XD ] || [ ! -x XD ]; then
+		error "XD build did not produce an executable."
+	fi
 	run_root install -d /usr/local/bin
 	run_root install -m 0755 XD /usr/local/bin/XD
 	run_root ln -sfn XD /usr/local/bin/XD-CLI

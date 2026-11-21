@@ -45,9 +45,9 @@ alias chmod='chmod --preserve-root'
 # prompts. The OpenCode alias also sets JavaScriptCoreUseJIT=1 for that
 # invocation and uses `command` to run the real executable instead of any
 # function of the same name.
-alias codex='codex --yolo'
-alias copilot='copilot --yolo'
-alias opencode='JavaScriptCoreUseJIT=1 command opencode --auto'
+alias codex-yolo='command codex --yolo'
+alias copilot-yolo='command copilot --yolo'
+alias opencode-auto='JavaScriptCoreUseJIT=1 command opencode --auto'
 
 # --------------------------------------------------
 # Editors

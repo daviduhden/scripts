@@ -66,6 +66,8 @@ GNU options, paths, privilege tools, and service commands. Do not add `sudo`,
    - POSIX `sh`: no arrays, `[[ ]]`, `local`, or `pipefail`.
 7. Make update scripts idempotent. Check installed versions, upsert
    configuration keys, and do not duplicate PATH or firewall entries.
+   Keep shell aliases that request unrestricted assistant modes under distinct
+   opt-in names so sourcing the aliases preserves ordinary CLI invocations.
 8. For privileged or destructive code, follow `system-change-safety` before
    writing the implementation.
 9. Run the validations below. Do not run the script against the host.

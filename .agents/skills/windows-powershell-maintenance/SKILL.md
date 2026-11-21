@@ -51,6 +51,9 @@ does not prove Windows runtime behavior or Windows PowerShell 5.1 execution.
    automatically and creates `<name>.cmd`. For a new public Perl program,
    add it to `perl/programs.txt`; both the POSIX and Windows installers read
    that manifest.
+   The installer verifies a private staging tree before calling
+   `windows/install-support/publish.ps1`. Keep the publishing helper outside
+   top-level program discovery and test rollback on a locked managed file.
 4. For `psfmt.ps1`, preserve the four mutually exclusive modes and their exit
    codes: `0` success, `1` error, `2` formatting needed in `-c` mode. Keep
    encoding/BOM/newline preservation and the atomic replace path.

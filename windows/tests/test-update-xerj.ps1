@@ -134,6 +134,13 @@ try {
     }
     else { Write-Output 'SKIP: Windows file-sharing failure test requires Windows' }
     Assert-True (@(Get-ChildItem -LiteralPath (Split-Path $binary) -Filter '.xerj-*.tmp').Count -eq 0) 'Abandoned binary staging files'
+    foreach ($ambiguous in @('{ "theme": "one", "theme": "two" }', '{ /* comment */ "theme": "test" }')) {
+        [IO.File]::WriteAllText($openConfig, $ambiguous)
+        & $updater -Version 'v1.2.3' -OpenCode -ErrorAction SilentlyContinue
+        Assert-True ($LASTEXITCODE -eq 1) 'Ambiguous OpenCode JSON was accepted'
+        Assert-True ((Get-Content -Raw $openConfig) -eq $ambiguous) 'Ambiguous OpenCode JSON was rewritten'
+    }
+    [IO.File]::WriteAllText($openConfig, $before)
     Set-Content ([IO.Path]::ChangeExtension($openConfig, '.jsonc')) '// retain this file'
     & $updater -Version 'v1.2.3' -OpenCode -ErrorAction SilentlyContinue
     Assert-True ($LASTEXITCODE -eq 1) 'Ambiguous JSONC was accepted'

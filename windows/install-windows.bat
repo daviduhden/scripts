@@ -178,19 +178,23 @@ echo.
 rem --------------------------------------------------------------------
 rem Create the install tree and copy our files
 rem --------------------------------------------------------------------
-mkdir "%INSTALL_DIR%" >nul 2>&1
+set "FINAL_INSTALL_DIR=%INSTALL_DIR%"
+set "STAGE_ID="
+for /f "delims=" %%G in ('powershell -NoProfile -Command "[guid]::NewGuid().ToString()"') do set "STAGE_ID=%%G"
+if not defined STAGE_ID exit /b 2
+set "INSTALL_STAGE=%TEMP%\scripts-install-%STAGE_ID%"
+mkdir "%INSTALL_STAGE%"
+if errorlevel 1 exit /b 2
+set "INSTALL_DIR=%INSTALL_STAGE%"
 mkdir "%INSTALL_DIR%\perl" >nul 2>&1
 mkdir "%INSTALL_DIR%\windows" >nul 2>&1
 mkdir "%INSTALL_DIR%\bin" >nul 2>&1
 if not exist "%INSTALL_DIR%\bin" (
     echo [ERROR] cannot create %INSTALL_DIR%\bin
-    exit /b 2
+    goto install_failed
 )
 
-rem Keep the previous manifest so obsolete files we installed can be removed.
-set "OLD_MANIFEST=%TEMP%\nf_old_%RANDOM%%RANDOM%.txt"
 set "NEW_MANIFEST=%INSTALL_DIR%\installed-files.txt.new"
-if exist "%INSTALL_DIR%\installed-files.txt" copy /y "%INSTALL_DIR%\installed-files.txt" "%OLD_MANIFEST%" >nul 2>&1
 
 > "%NEW_MANIFEST%" echo perl-path.txt
 >> "%NEW_MANIFEST%" echo installed-files.txt
@@ -208,16 +212,13 @@ for %%N in (%PS_PROGRAMS%) do call :install_one "%%N" "windows" "powershell-laun
 if defined INSTALL_FAIL (
     echo [ERROR] one or more files could not be installed.
     if exist "%NEW_MANIFEST%" del /f /q "%NEW_MANIFEST%" >nul 2>&1
-    exit /b 2
+    goto install_failed
 )
 move /y "%NEW_MANIFEST%" "%INSTALL_DIR%\installed-files.txt" >nul
 if errorlevel 1 (
     echo [ERROR] cannot publish installed-files.txt
-    exit /b 2
+    goto install_failed
 )
-
-if exist "%OLD_MANIFEST%" call :cleanup_obsolete "%OLD_MANIFEST%"
-if exist "%OLD_MANIFEST%" del /f /q "%OLD_MANIFEST%" >nul 2>&1
 
 rem --------------------------------------------------------------------
 rem Post-install verification
@@ -228,8 +229,12 @@ call :verify_all
 if defined VERIFY_FAIL (
     echo.
     echo [ERROR] post-install verification failed.
-    exit /b 2
+    goto install_failed
 )
+set "INSTALL_DIR=%FINAL_INSTALL_DIR%"
+powershell -NoProfile -File "%REPO%windows\install-support\publish.ps1" -Stage "%INSTALL_STAGE%" -Destination "%INSTALL_DIR%"
+if errorlevel 1 goto install_failed
+rmdir /s /q "%INSTALL_STAGE%" >nul 2>&1
 
 rem --------------------------------------------------------------------
 rem User PATH (HKCU\Environment\Path only, idempotent). Do this only after a
@@ -250,6 +255,10 @@ echo        updated PATH. The launchers also work through their full path.
 echo [NOTE] Perl comes from Strawberry Perl and is not removed by this
 echo        installer; other applications may depend on it.
 exit /b 0
+
+:install_failed
+rmdir /s /q "%INSTALL_STAGE%" >nul 2>&1
+exit /b 2
 
 rem ====================================================================
 rem Subroutines
@@ -459,47 +468,6 @@ if errorlevel 1 (
 >> "%NEW_MANIFEST%" echo bin\%LNAME%.cmd
 exit /b 0
 
-rem Walk the previous installed-files.txt and delete entries that this version no
-rem longer installs.
-:cleanup_obsolete
-set "OLD=%~1"
-for /f "usebackq tokens=1 delims=" %%E in ("%OLD%") do call :maybe_remove "%%E"
-exit /b 0
-
-rem Keep manifest files and any current program or launcher. Only direct children
-rem of bin\, perl\, and windows\ are candidates, and a bin\ file is removed only
-rem when it carries a known launcher marker.
-:maybe_remove
-set "ENTRY=%~1"
-if "%ENTRY%"=="" exit /b 0
-if /i "%ENTRY%"=="perl-path.txt" exit /b 0
-if /i "%ENTRY%"=="installed-files.txt" exit /b 0
-if /i "%ENTRY%"=="VERSION" exit /b 0
-if /i not "%ENTRY:~0,4%"=="bin\" if /i not "%ENTRY:~0,5%"=="perl\" if /i not "%ENTRY:~0,8%"=="windows\" exit /b 0
-rem Only direct children of our script and launcher directories are managed.
-for /f "tokens=1,* delims=\" %%A in ("%ENTRY%") do set "LEAF=%%B"
-if not "%LEAF:\=%"=="%LEAF%" exit /b 0
-if not "%LEAF:/=%"=="%LEAF%" exit /b 0
-if "%LEAF%"==".." exit /b 0
-set "KEEP=0"
-for %%N in (%PROGRAMS%) do (
-    if /i "%ENTRY%"=="perl\%%N" set "KEEP=1"
-    if /i "%ENTRY%"=="bin\%%~nN.cmd" set "KEEP=1"
-)
-for %%N in (%PS_PROGRAMS%) do (
-    if /i "%ENTRY%"=="windows\%%N" set "KEEP=1"
-    if /i "%ENTRY%"=="bin\%%~nN.cmd" set "KEEP=1"
-)
-if "%KEEP%"=="1" exit /b 0
-set "TARGET=%INSTALL_DIR%\%ENTRY%"
-if not exist "%TARGET%" exit /b 0
-if /i "%ENTRY:~0,4%"=="bin\" (
-    findstr /c:"perl-path.txt" /c:"rem scripts-powershell-launcher" "%TARGET%" >nul 2>&1
-    if errorlevel 1 exit /b 0
-)
-del /f /q "%TARGET%" >nul 2>&1
-if not exist "%TARGET%" echo [INFO] Removed obsolete: %ENTRY%
-exit /b 0
 
 rem Add INSTALL_DIR\bin to HKCU\Environment\Path only, appending when absent and
 rem changing nothing when present. The inline PowerShell preserves the value

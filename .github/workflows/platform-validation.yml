@@ -64,12 +64,29 @@ jobs:
           $destination = Join-Path $env:RUNNER_TEMP 'scripts-install-test'
           & windows/install-windows.bat --no-path --install-dir $destination
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $unmanaged = Join-Path $destination 'keep.txt'
+          Set-Content -LiteralPath $unmanaged -Value 'unmanaged'
+          $versionPath = Join-Path $destination 'VERSION'
+          Set-Content -LiteralPath $versionPath -Value 'rollback sentinel'
+          $launcher = Join-Path $destination 'bin/ai-purge-history.cmd'
+          $lock = [IO.File]::Open($launcher, 'Open', 'Read', 'None')
+          try {
+            & windows/install-windows.bat --no-path --install-dir $destination
+            if ($LASTEXITCODE -eq 0) { throw 'Install unexpectedly replaced a locked launcher' }
+            if ((Get-Content -LiteralPath $versionPath -Raw).Trim() -ne 'rollback sentinel') {
+              throw 'Install did not restore the previous version metadata'
+            }
+          }
+          finally { $lock.Dispose() }
           & windows/install-windows.bat --no-path --install-dir $destination
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ((Get-Content -LiteralPath $unmanaged -Raw).Trim() -ne 'unmanaged') {
+            throw 'Reinstall did not preserve an unmanaged file'
+          }
       - name: Analyze and format-check PowerShell
         shell: pwsh
         run: |
-          Get-ChildItem windows/*.ps1, windows/test-format/*.ps1 | ForEach-Object {
+          Get-ChildItem windows/*.ps1, windows/test-format/*.ps1, windows/install-support/*.ps1 | ForEach-Object {
             Invoke-ScriptAnalyzer -Path $_.FullName -ErrorAction Stop
           }
           & pwsh -NoProfile -File windows/test-format/psfmt.ps1 -c .

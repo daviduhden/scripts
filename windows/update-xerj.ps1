@@ -100,6 +100,29 @@ function Get-XerjLatestTag {
 # Install and configure
 # ---------------------------------------------------------------------------
 $stage = $null
+function ConvertFrom-OpenCodeConfig {
+    param([string]$Text)
+
+    $objects = [Collections.Generic.Stack[hashtable]]::new()
+    $tokens = [regex]::Matches($Text, '(?<string>"(?:[^"\\\x00-\x1f]|\\.)*")(?<property>\s*:)?|(?<open>\{)|(?<close>\})|(?<comment>//|/\*)')
+    foreach ($token in $tokens) {
+        if ($token.Groups['comment'].Success) {
+            throw 'OpenCode configuration contains comments. Merge the xerj registration manually.'
+        }
+        if ($token.Groups['open'].Success) { $objects.Push(@{}); continue }
+        if ($token.Groups['close'].Success) { $null = $objects.Pop(); continue }
+        if (-not $token.Groups['property'].Success) { continue }
+        $decoded = ('{' + $token.Groups['string'].Value + ':null}') | ConvertFrom-Json
+        $key = ($decoded.PSObject.Properties | Select-Object -First 1).Name
+        $names = $objects.Peek()
+        if ($names.ContainsKey($key)) {
+            throw "OpenCode configuration contains a duplicate property: $key"
+        }
+        $names[$key] = $true
+    }
+    return ($Text | ConvertFrom-Json)
+}
+
 try {
     if ($env:OS -ne 'Windows_NT') { throw 'This script requires Windows.' }
     if ($Codex) { $null = Get-Command codex -ErrorAction Stop }
@@ -184,7 +207,7 @@ try {
             throw 'Merge xerj into existing opencode.jsonc manually; refusing ambiguous configuration.'
         }
         $data = if (Test-Path -LiteralPath $config) {
-            [IO.File]::ReadAllText($config) | ConvertFrom-Json
+            ConvertFrom-OpenCodeConfig -Text ([IO.File]::ReadAllText($config))
         }
         else { [pscustomobject]@{} }
         if (-not ($data -is [pscustomobject])) { throw 'OpenCode config must be a JSON object.' }

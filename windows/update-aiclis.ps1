@@ -855,40 +855,65 @@ function Test-CodexManagedLayout {
 .PARAMETER VersionDir
     Version directory containing bin, codex-resources, and codex-package.json.
 .NOTES
-    Recreates bin as a junction. An existing junction is removed with rmdir so
-    its target is untouched; a real directory is deleted recursively. When a
-    junction cannot be created, copies the executables, resources, and package
-    manifest instead and warns. The fallback does not copy codex-path.
+    Stages a replacement junction before moving the previous bin aside.
+    Fresh installs can fall back to a direct copy if junctions are unavailable.
 #>
 function Set-CodexVisibleBin {
-    param([string]$VersionDir)
+    param([string]$VersionDir, [string]$ExpectedVersion)
 
-    if (Test-Path -LiteralPath $script:CodexBin) {
-        $item = Get-Item -LiteralPath $script:CodexBin -Force
-        if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
-            # rmdir removes the junction without touching the target directory.
-            & cmd.exe /c rmdir "$script:CodexBin" | Out-Null
-        }
-        else {
-            Remove-Item -LiteralPath $script:CodexBin -Recurse -Force
-        }
-    }
-
+    $guid = [guid]::NewGuid().ToString('N')
+    $pending = "$($script:CodexBin).pending-$guid"
+    $backup = "$($script:CodexBin).previous-$guid"
+    $previous = Get-Item -LiteralPath $script:CodexBin -Force -ErrorAction SilentlyContinue
     try {
-        New-Item -ItemType Junction -Path $script:CodexBin -Target (Join-Path $VersionDir 'bin') -Force | Out-Null
+        New-Item -ItemType Junction -Path $pending -Target (Join-Path $VersionDir 'bin') | Out-Null
     }
     catch {
-        # No junction: copy the binaries and resources directly to the managed root.
+        if ($previous) { throw 'Codex: could not stage a junction. The current installation was retained.' }
         Write-Warn 'Codex: could not create the junction; using a direct copy instead.'
-        New-Item -ItemType Directory -Force -Path $script:CodexBin | Out-Null
+        New-Item -ItemType Directory -Path $pending | Out-Null
         Get-ChildItem -LiteralPath (Join-Path $VersionDir 'bin') -Filter '*.exe' -File | ForEach-Object {
-            Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $script:CodexBin $_.Name) -Force
+            Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $pending $_.Name)
         }
-        $resourcesTarget = Join-Path $script:CodexRoot 'codex-resources'
-        if (Test-Path -LiteralPath $resourcesTarget) { Remove-Item -LiteralPath $resourcesTarget -Recurse -Force }
-        Copy-Item -LiteralPath (Join-Path $VersionDir 'codex-resources') -Destination $resourcesTarget -Recurse -Force
-        Copy-Item -LiteralPath (Join-Path $VersionDir 'codex-package.json') -Destination (Join-Path $script:CodexRoot 'codex-package.json') -Force
+        Copy-Item -LiteralPath (Join-Path $VersionDir 'codex-resources') -Destination $script:CodexRoot -Recurse -Force
+        Copy-Item -LiteralPath (Join-Path $VersionDir 'codex-package.json') -Destination $script:CodexRoot -Force
     }
+
+    $activated = $false
+    try {
+        if ($previous) { [IO.Directory]::Move($script:CodexBin, $backup) }
+        [IO.Directory]::Move($pending, $script:CodexBin)
+        $activated = $true
+        if (-not (Test-VersionEqual (Get-ExeVersion -ExePath $script:CodexExe) $ExpectedVersion)) {
+            throw 'Codex failed verification after activation.'
+        }
+    }
+    catch {
+        if ($activated) {
+            try { [IO.Directory]::Move($script:CodexBin, $pending) }
+            catch { Write-Warn "Codex could not move the failed activation aside: $($script:CodexBin)" }
+        }
+        if ((Test-Path -LiteralPath $backup) -and -not (Test-Path -LiteralPath $script:CodexBin)) {
+            try { [IO.Directory]::Move($backup, $script:CodexBin) }
+            catch { Write-Warn "Codex recovery directory: $backup" }
+        }
+        throw
+    }
+    finally {
+        if (Test-Path -LiteralPath $pending) {
+            $item = Get-Item -LiteralPath $pending -Force
+            if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+                & cmd.exe /c rmdir "$pending" | Out-Null
+            }
+            else { Remove-Item -LiteralPath $pending -Recurse -Force -ErrorAction SilentlyContinue }
+        }
+    }
+
+    if ($previous -and ($previous.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        & cmd.exe /c rmdir "$backup" | Out-Null
+        if ($LASTEXITCODE -ne 0) { Write-Warn "Codex: previous junction retained at $backup" }
+    }
+    elseif ($previous) { Write-Warn "Codex: previous directory retained at $backup" }
 }
 
 <#
@@ -1124,7 +1149,11 @@ function Install-Codex {
         }
     }
 
-    Set-CodexVisibleBin -VersionDir $versionDir
+    $candidate = Join-Path $versionDir 'bin/codex.exe'
+    if (-not (Test-VersionEqual (Get-ExeVersion -ExePath $candidate) $version)) {
+        throw "Staged Codex does not report the expected version: $version"
+    }
+    Set-CodexVisibleBin -VersionDir $versionDir -ExpectedVersion $version
 
     $verified = Get-ExeVersion -ExePath $script:CodexExe
     if (-not (Test-VersionEqual $verified $version)) {

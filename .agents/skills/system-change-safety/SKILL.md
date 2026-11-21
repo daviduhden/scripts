@@ -74,7 +74,8 @@ description: >-
     live beside the docroot and are not automatically stolen by PID.
     `--check-atomic` validates only the filesystem layout, not server policy.
     Apply the same single-root ZIP entry policy before extraction on Debian
-    and OpenBSD. Keep archive-name validation separate from publication.
+    and OpenBSD. Check types and declared expansion size from ZIP metadata
+    before extraction, then check the resulting tree before publication.
 11. For Debian repository keys, check the entire set of primary keys and
     restrict the deb822 `Signed-By` declaration to the approved fingerprint.
     For GitHub .deb releases such as Fastfetch, verify the exact published

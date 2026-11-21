@@ -20,6 +20,7 @@ documentation states the remaining trust boundary.
 
 ## Supported versions
 
-`VERSION` identifies the installed runtime metadata. Only the current `main`
-branch and the latest tagged release are supported. There is no long-term
-support branch.
+`VERSION` identifies the installed runtime metadata. The current `main`
+branch is supported. If a release is published, its latest release tag is
+also supported. Backup tags are internal repository references. There is no
+long-term support branch.

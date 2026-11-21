@@ -489,11 +489,26 @@ validate_zip_entries() {
 		NR > 200000 || /^\// || /(^|\/)\.\.?(\/|$)/ || /[[:cntrl:]\\]/ { bad = 1 }
 		{
 			split($0, parts, "/")
-			if (parts[1] == "" || index($0, "/") == 0) bad = 1
+			if (parts[1] == "" || index($0, "/") == 0 || /\/\//) bad = 1
+			name = $0
+			sub(/\/$/, "", name)
+			if (seen[name]++) bad = 1
 			if (NR == 1) root = parts[1]
 			if (parts[1] != root) bad = 1
 		}
 		END { exit (NR == 0 || bad) }' "$1"
+}
+
+validate_zip_metadata() {
+	LC_ALL=C unzip -Z -l "$1" >"$2" || return 1
+	awk -v entries="$3" '
+		NR <= 2 || /^[0-9]+ files?,/ { next }
+		{
+			count++
+			if ($1 !~ /^[-d]/ || $4 !~ /^[0-9]+$/ || $5 ~ /^[A-Z]/) bad = 1
+			total += $4
+		}
+		END { exit (bad || count != entries || total > 2147483648) }' "$2"
 }
 
 sync_with_github_zip() {
@@ -539,7 +554,12 @@ sync_with_github_zip() {
 		rm -rf "$tmpdir"
 		return 1
 	fi
-	if ! unzip -q "$zipfile" -d "$unpack_dir"; then
+	if ! validate_zip_metadata "$zipfile" "$tmpdir/metadata.txt" "$(wc -l <"$listfile")"; then
+		error "Refusing an archive with unsupported entries or excessive size."
+		rm -rf "$tmpdir"
+		return 1
+	fi
+	if ! (ulimit -f 2097152 && unzip -q "$zipfile" -d "$unpack_dir" </dev/null); then
 		rm -rf "$tmpdir"
 		return 1
 	fi

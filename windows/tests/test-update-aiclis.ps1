@@ -77,9 +77,10 @@ function Get-ExeVersion {
 }
 
 function Set-CodexVisibleBin {
-    param([string]$VersionDir)
+    param([string]$VersionDir, [string]$ExpectedVersion)
     # Activation is isolated from junction handling; no fixture is executable.
     $script:CodexExe = Join-Path $VersionDir 'bin/codex.exe'
+    Assert-True ($ExpectedVersion -eq '1.2.3') 'Activation was not given the expected version'
 }
 
 function Test-CodexManagedLayout { return $true }
@@ -181,10 +182,7 @@ exit 0
 '@)
     $harness = Join-Path $testRoot 'dispatch.ps1'
     $prefix = @'
-param([string]$Fixture, [switch]$Fail)
-$Target = 'All'
-$Check = $false
-$RemoveWinget = $false
+param([string]$Fixture, [switch]$Fail, [string]$Target = 'All', [switch]$RemoveWinget, [switch]$Check)
 $Wrappers = $false
 $OpenCodeVersion = $CodexVersion = $CrushVersion = ''
 $script:Calls = @()
@@ -198,6 +196,7 @@ function Install-Crush { $script:Calls += 'Crush' }
 function Invoke-CodexDaemonUpdate { $script:Calls += 'Daemon'; if ($Fail) { throw 'Daemon fixture failure' } }
 function Repair-CliEnvironment { }
 function Find-BunExe { return $null }
+function Remove-WingetPackages { param([string[]]$Ids) $script:Calls += $Ids }
 '@
     [IO.File]::WriteAllText($harness, $prefix + "`n" + $main)
     $dispatch = & $harness -Fixture $resource -Fail
@@ -206,6 +205,12 @@ function Find-BunExe { return $null }
     $dispatch = & $harness -Fixture $resource
     Assert-True ($LASTEXITCODE -eq 0) 'Successful dispatch returned failure'
     Assert-True ($dispatch -eq 'Bun,OpenCode,Codex,Daemon,Crush') 'Daemon was skipped after current CLI'
+    $dispatch = & $harness -Fixture $resource -Fail -RemoveWinget
+    Assert-True ($dispatch -eq 'Bun,OpenCode,Codex,Daemon,Crush,OpenAI.Codex,charmbracelet.crush') 'Winget removal included a failed install'
+    $dispatch = & $harness -Fixture $resource -Target Crush -RemoveWinget
+    Assert-True ($dispatch -eq 'Crush,charmbracelet.crush') 'Winget removal included unselected targets'
+    $dispatch = & $harness -Fixture $resource -Target Crush -RemoveWinget -Check
+    Assert-True ($dispatch -eq 'Crush') 'Check mode removed a winget package'
     $cleanupDefinition = (Get-Item Function:Uninstall-BunWinget).ScriptBlock
     function Uninstall-BunWinget { $script:BunCleanupCalls++ }
     $script:BunCleanupCalls = 0

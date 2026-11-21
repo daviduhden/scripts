@@ -202,7 +202,9 @@ clone_or_update_repo() {
 build_XD() {
 	log "Building XD..."
 	env -u LD_PRELOAD make
-	[ -f XD ] && [ -x XD ] || error "XD build did not produce an executable."
+	if [ ! -f XD ] || [ ! -x XD ]; then
+		error "XD build did not produce an executable."
+	fi
 }
 
 install_XD() {
