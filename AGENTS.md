@@ -36,6 +36,13 @@ targets install the same command names, so they cannot share one `BINDIR`.
 an extension; installed command names omit `.bash`, `.ksh`, `.sh`, and `.pl`,
 and bundled configuration names omit `.yaml`.
 
+`install-tests-format` manages a POSIX login snippet in
+`${DESTDIR}${TESTS_FORMAT_PROFILE_DIR}` (default profile directory
+`/etc/profile.d`). The snippet appends the final `TESTS_FORMAT_DIR` to
+`PATH` only if absent. Keep staging paths out of its contents and remove it
+through `uninstall-tests-format`. An empty `TESTS_FORMAT_PROFILE_DIR` disables
+this integration for either target.
+
 ## Conventions
 
 - Preserve the copyright/license header that points to `LICENSE`. Do not edit

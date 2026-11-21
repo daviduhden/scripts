@@ -278,6 +278,51 @@ subtest 'install accepts destination with spaces' => sub {
         'installed name omits the source extension' );
 };
 
+subtest 'tests-format manages a staged login profile' => sub {
+    my $stage = new_tempdir('tests-format-install-');
+    my $make  = find_command('make');
+    ok( defined $make, 'make is installed' ) or return;
+    my $directory = '/opt/developer tools/[scripts]';
+    my $profile   = "$stage/etc/profile.d/scripts-tests-format.sh";
+    my @options   = (
+        "DESTDIR=$stage",
+        "TESTS_FORMAT_DIR=$directory",
+        'TESTS_FORMAT_PROFILE_DIR=/etc/profile.d',
+        'TESTS_FORMAT_LINKS=0',
+    );
+
+    my $result = run_command(
+        cmd     => [ $make, 'install-tests-format', @options ],
+        cwd     => $REPO,
+        timeout => 30,
+    );
+    is( $result->{returncode}, 0, 'staged installation succeeds' )
+      or do { diag $result->{stderr}; return; };
+    ok( -x "$stage$directory/validate-shell", 'validator is installed' );
+    ok( -f $profile, 'profile is installed under DESTDIR' );
+
+    $result = run_command(
+        cmd => [
+            '/bin/sh', '-eu', '-c',
+            'PATH=/bin:/usr/bin; . "$1"; . "$1"; printf "%s\\n" "$PATH"',
+            'sh', $profile,
+        ],
+        timeout => 30,
+    );
+    is( $result->{returncode}, 0, 'profile can be sourced twice' );
+    is( $result->{stdout}, "/bin:/usr/bin:$directory\n",
+        'profile appends the final directory once' );
+
+    $result = run_command(
+        cmd     => [ $make, 'uninstall-tests-format', @options ],
+        cwd     => $REPO,
+        timeout => 30,
+    );
+    is( $result->{returncode}, 0, 'staged uninstall succeeds' )
+      or diag $result->{stderr};
+    ok( !-e $profile, 'uninstall removes the managed profile' );
+};
+
 subtest 'help renders from the install helper' => sub {
     my $fixture = build_fixture();
     my $root    = "$fixture->{base}/help";

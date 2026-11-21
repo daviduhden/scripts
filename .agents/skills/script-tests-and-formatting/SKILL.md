@@ -84,6 +84,10 @@ with a wrapper that hides whether the batch files actually ran.
    - developer tools install under `${PREFIX}/libexec/scripts`
      (`TESTS_FORMAT_DIR`), not `BINDIR`; `TESTS_FORMAT_LINKS=1` adds
      compatibility symlinks;
+   - `install-tests-format` publishes `scripts-tests-format.sh` in
+     `TESTS_FORMAT_PROFILE_DIR` for login shells that load it. Test the staged
+     location, the final directory in PATH, repeated sourcing, and removal
+     with the staged install regression in `tests/test_tooling.pl`;
    - `make all` installs only the Perl runtime helper; use the explicit
      `install-tests-format` target for validators;
    - every install target has a matching `uninstall-*` target and honors

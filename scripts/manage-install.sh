@@ -144,7 +144,38 @@ install_perl() {
 	log 'Perl helpers installed'
 }
 
+install_tests_format_profile() (
+	[ -n "$TESTS_FORMAT_PROFILE_DIR" ] || exit 0
+	profile_dir=$DESTDIR/${TESTS_FORMAT_PROFILE_DIR#/}
+	profile=$profile_dir/scripts-tests-format.sh
+	mkdir -p "$profile_dir" || die "cannot create $profile_dir"
+	[ ! -d "$profile" ] || die "$profile is a directory"
+	umask 077
+	tmp_profile=$(mktemp "$profile_dir/.scripts-tests-format.XXXXXX") ||
+		die "cannot create a temporary profile in $profile_dir"
+	trap 'rm -f -- "$tmp_profile"' 0
+	trap 'exit 1' HUP INT TERM
+	quoted_dir=$(printf '%s\n' "$TESTS_FORMAT_DIR" | sed "s/'/'\\\\''/g")
+	cat >"$tmp_profile" <<EOF
+# Managed by make install-tests-format.
+case ":\${PATH-}:" in
+	*:'$quoted_dir':*) ;;
+	*) export PATH="\${PATH:+\$PATH:}"'$quoted_dir' ;;
+esac
+EOF
+	chmod 0644 "$tmp_profile"
+	mv -f "$tmp_profile" "$profile" || die "cannot install $profile"
+	log "Installed PATH configuration in $profile"
+)
+
 install_tests_format() {
+	if [ -n "$TESTS_FORMAT_PROFILE_DIR" ]; then
+		case "$TESTS_FORMAT_DIR" in
+		*:*) die 'TESTS_FORMAT_DIR cannot contain a colon when added to PATH' ;;
+		/*) ;;
+		*) die 'TESTS_FORMAT_DIR must be absolute when added to PATH' ;;
+		esac
+	fi
 	log 'Installing Tests/Format scripts'
 	install -d "$DEST_TESTS_FORMAT" ||
 		die "cannot create $DEST_TESTS_FORMAT"
@@ -169,6 +200,7 @@ install_tests_format() {
 				die "cannot link $name"
 		fi
 	done
+	install_tests_format_profile
 	log "Tests/Format helpers installed in $DEST_TESTS_FORMAT"
 }
 
@@ -246,6 +278,9 @@ uninstall_tests_format() {
 	for name in clang-format-all clang-tidy-all fourmolu-all; do
 		rm -f -- "$DEST_TESTS_FORMAT/$name"
 	done
+	if [ -n "$TESTS_FORMAT_PROFILE_DIR" ]; then
+		rm -f -- "$DESTDIR/${TESTS_FORMAT_PROFILE_DIR#/}/scripts-tests-format.sh"
+	fi
 	log 'Tests/Format helpers removed'
 }
 
@@ -294,6 +329,7 @@ Targets:
   help                     Show this help
 
 Variables: PREFIX=${PREFIX} DESTDIR=${DESTDIR} BINDIR=${BINDIR} SYSTEMD_USER_UNIT_DIR=${SYSTEMD_USER_UNIT_DIR} TESTS_FORMAT_DIR=${TESTS_FORMAT_DIR} TESTS_FORMAT_LINKS=${TESTS_FORMAT_LINKS}
+           TESTS_FORMAT_PROFILE_DIR=${TESTS_FORMAT_PROFILE_DIR} (empty disables PATH integration)
 EOF
 }
 

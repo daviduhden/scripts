@@ -60,6 +60,17 @@ filters without invoking deployment side effects.
 `make install-tests-format` installs the tools selected by the Makefile under
 `${DESTDIR}${TESTS_FORMAT_DIR}` (default `${PREFIX}/libexec/scripts`), removing
 `.sh` from command names and `.yaml` from bundled configuration names.
+It installs `scripts-tests-format.sh` in `/etc/profile.d` by default. On
+systems that load this directory, new login shells append `TESTS_FORMAT_DIR`
+to `PATH` once. For the current shell, run
+`. /etc/profile.d/scripts-tests-format.sh` with the default configuration.
+On systems without automatic loading, source the snippet from your login
+profile. `TESTS_FORMAT_PROFILE_DIR` selects a different directory, or set it
+to an empty value to skip the profile, for example for an unprivileged
+installation. With PATH integration enabled, `TESTS_FORMAT_DIR` must be
+absolute and cannot contain a colon. Staged installs put the snippet under
+`DESTDIR` and embed the final tools directory. Use the same profile directory
+when running `make uninstall-tests-format` to remove the snippet.
 Set `TESTS_FORMAT_LINKS=1` to add compatibility symlinks in `BINDIR`.
 
 Run `make check-agent-knowledge` before completing repository changes. For CI,
