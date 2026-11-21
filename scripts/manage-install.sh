@@ -206,15 +206,15 @@ install_tests_format() {
 		esac
 	fi
 	log 'Installing Tests/Format scripts'
-	install -d "$DEST_TESTS_FORMAT" ||
-		die "cannot create $DEST_TESTS_FORMAT"
+	install -d "$DEST_TESTS_FORMAT/config" ||
+		die "cannot create $DEST_TESTS_FORMAT/config"
 	for cfg in \
 		"tests-format/clang-format.yaml:clang-format-all" \
 		"tests-format/clang-tidy.yaml:clang-tidy-all" \
 		"tests-format/fourmolu-all.yaml:fourmolu-all"; do
 		source=${cfg%%:*}
 		destination=${cfg##*:}
-		install -m 0644 "$source" "$DEST_TESTS_FORMAT/$destination" ||
+		install -m 0644 "$source" "$DEST_TESTS_FORMAT/config/$destination" ||
 			die "cannot install $source"
 	done
 	# shellcheck disable=SC2086
@@ -310,8 +310,9 @@ uninstall_tests_format() {
 		fi
 	done
 	for name in clang-format-all clang-tidy-all fourmolu-all; do
-		rm -f -- "$DEST_TESTS_FORMAT/$name"
+		rm -f -- "$DEST_TESTS_FORMAT/config/$name"
 	done
+	rmdir "$DEST_TESTS_FORMAT/config" 2>/dev/null || true
 	if [ -n "$TESTS_FORMAT_PROFILE_DIR" ]; then
 		profile="$DESTDIR/${TESTS_FORMAT_PROFILE_DIR#/}/scripts-tests-format.sh"
 		if is_managed_tests_format_profile "$profile"; then

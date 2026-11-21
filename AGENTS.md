@@ -34,7 +34,9 @@ targets install the same command names, so they cannot share one `BINDIR`.
 `${PREFIX}/lib/systemd/user`; developer tools install under
 `${PREFIX}/libexec/scripts` (`TESTS_FORMAT_DIR`). Source scripts always carry
 an extension; installed command names omit `.bash`, `.ksh`, `.sh`, and `.pl`,
-and bundled configuration names omit `.yaml`.
+and bundled configuration names omit `.yaml`. Developer formatter
+configurations live under `${TESTS_FORMAT_DIR}/config` to avoid command-name
+collisions. Resolve compatibility symlinks before locating those files.
 
 `install-tests-format` manages a POSIX login snippet in
 `${DESTDIR}${TESTS_FORMAT_PROFILE_DIR}` (default profile directory

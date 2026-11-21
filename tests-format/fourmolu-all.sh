@@ -54,9 +54,13 @@ run_fourmolu_all() {
 		exit 2
 	}
 	ROOT_DIR=$(CDPATH='' cd "$ROOT_DIR" && pwd -P)
-	SCRIPT_DIR=$(CDPATH='' cd "$(dirname "$0")" && pwd -P)
-	STYLE_FILE="$SCRIPT_DIR/fourmolu-all"
-	if [ "${0##*/}" = fourmolu-all.sh ]; then
+	SCRIPT_PATH=$0
+	if [ -L "$SCRIPT_PATH" ]; then
+		SCRIPT_PATH=$(readlink -f "$SCRIPT_PATH") || exit 1
+	fi
+	SCRIPT_DIR=$(CDPATH='' cd "$(dirname "$SCRIPT_PATH")" && pwd -P)
+	STYLE_FILE="$SCRIPT_DIR/config/fourmolu-all"
+	if [ "${SCRIPT_PATH##*/}" = fourmolu-all.sh ]; then
 		STYLE_FILE="$SCRIPT_DIR/fourmolu-all.yaml"
 	fi
 

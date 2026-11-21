@@ -173,11 +173,10 @@ This does not evaluate build logic or resolve per-target compilation commands;
 use `C_FORMAT_STANDARD=c23 clang-format-all path` to override detection.
 The nearest directory with an explicit standard wins.
 
-Every `clang-format` invocation uses the bundled Openbar configuration
+`clang-format-all` uses a readable `.clang-format` in the requested root
+when present. Otherwise it uses the bundled Openbar configuration
 (`tests-format/clang-format.yaml`, installed as
-`${TESTS_FORMAT_DIR}/clang-format-all`),
-ignoring project-local style files. This is the single source of the shared
-style, maintained in this repository. The configuration targets
+`${TESTS_FORMAT_DIR}/config/clang-format-all`). The bundled configuration targets
 LLVM 23 and approximates OpenBSD style(9): tabs of eight columns, four-column
 continuations, an 80-column limit, KNF braces and system/network/local include
 groups. It is not byte-for-byte equivalent to `knfmt` (for example, declaration
@@ -188,7 +187,7 @@ the LLVM 23 configuration is not a portable knfmt configuration schema.
 C23/C++23 defaults (`CLANG_TIDY_BUILD_DIR` supplies a compilation database).
 Every invocation uses the bundled security-focused configuration
 (`tests-format/clang-tidy.yaml`, installed as
-`${TESTS_FORMAT_DIR}/clang-tidy-all`),
+`${TESTS_FORMAT_DIR}/config/clang-tidy-all`),
 ignoring project-local `.clang-tidy` files. It is based on the `knfmt`
 project's `.clang-tidy` and extended for maximum safety: all CERT rule sets,
 the C++ Core Guidelines, concurrency and `clang-analyzer` families are enabled,
@@ -197,9 +196,9 @@ as errors. The script examines every source file and exits non-zero when any
 finding is reported.
 
 `fourmolu-all [ROOT_DIR]` (default `.`) formats Haskell sources (`.hs`,
-`.hsig` and `.hs-boot`) in place with `fourmolu`. Like `clang-format-all`, it
+`.hsig` and `.hs-boot`) in place with `fourmolu`. It
 always forces a bundled style (`tests-format/fourmolu-all.yaml`, installed as
-`${TESTS_FORMAT_DIR}/fourmolu-all`) and ignores project-local
+`${TESTS_FORMAT_DIR}/config/fourmolu-all`) and ignores project-local
 `fourmolu.yaml`/`.fourmolu.yaml` files, so the shared style cannot drift per
 repository. The bundled style pins the Fourmolu 0.21 defaults explicitly;
 edit that one file to evolve the shared style. If `fourmolu` is not present in

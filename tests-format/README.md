@@ -8,7 +8,7 @@ Command Prompt without a POSIX shell or Make.
 
 | Script | Purpose and interface |
 | --- | --- |
-| [clang-format-all.sh](clang-format-all.sh) | Formats C/C++ recursively under `[ROOT_DIR]`, preferring clang-format for modern C standards and knfmt otherwise. `C_FORMAT_STANDARD` overrides detection. Forces the bundled clang-format style when using clang-format. |
+| [clang-format-all.sh](clang-format-all.sh) | Formats C/C++ recursively under `[ROOT_DIR]`, preferring clang-format for modern C standards and knfmt otherwise. `C_FORMAT_STANDARD` overrides detection. Uses the root's readable `.clang-format` or falls back to the bundled style. |
 | [clang-tidy-all.sh](clang-tidy-all.sh) | Runs clang-tidy on C/C++ under `[ROOT_DIR]` with C23/C++23 defaults and the bundled security-focused configuration. `CLANG_TIDY_BUILD_DIR` supplies a compilation database directory. |
 | [fourmolu-all.sh](fourmolu-all.sh) | Formats Haskell `.hs`, `.hsig`, and `.hs-boot` files under `[ROOT_DIR]` using the bundled Fourmolu configuration. |
 | [fix-permissions.sh](fix-permissions.sh) | Classifies file contents and normalizes modes. `--check` is read-only and skips Git-ignored artifacts; `--dry-run` previews and `--verbose` explains decisions. |
@@ -94,9 +94,9 @@ and OpenBSD 8.0 regressions without invoking the system-changing scripts.
 
 Supporting files:
 
-- `clang-format.yaml`: shared LLVM style, installed as `clang-format-all`.
-- `clang-tidy.yaml`: security-focused clang-tidy configuration based on knfmt, installed as `clang-tidy-all`.
-- `fourmolu-all.yaml`: shared Haskell formatting settings, installed as `fourmolu-all`.
+- `clang-format.yaml`: shared LLVM style, installed as `config/clang-format-all`.
+- `clang-tidy.yaml`: security-focused clang-tidy configuration based on knfmt, installed as `config/clang-tidy-all`.
+- `fourmolu-all.yaml`: shared Haskell formatting settings, installed as `config/fourmolu-all`.
 - [openbsd-tools.txt](openbsd-tools.txt): reference mapping of the optional analysis tools to their OpenBSD ports/packages (information only; not read by the validators).
 
 PowerShell formatting and its tests are documented separately in

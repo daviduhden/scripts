@@ -128,15 +128,19 @@ run_clang_format_all() {
 	# Resolve symlinks and relative components once so find output and the
 	# .git pruning below use a stable absolute prefix.
 	ROOT_DIR=$(CDPATH='' cd "$ROOT_DIR" && pwd -P)
-	SCRIPT_DIR=$(CDPATH='' cd "$(dirname "$0")" && pwd -P)
+	SCRIPT_PATH=$0
+	if [ -L "$SCRIPT_PATH" ]; then
+		SCRIPT_PATH=$(readlink -f "$SCRIPT_PATH") || exit 1
+	fi
+	SCRIPT_DIR=$(CDPATH='' cd "$(dirname "$SCRIPT_PATH")" && pwd -P)
 	# Prefer a project-local style. The in-tree script uses the repository
 	# copy (clang-format.yaml); the installed command uses the installed file
 	# without its source extension (clang-format-all).
 	if [ -r "$ROOT_DIR/.clang-format" ]; then
 		STYLE_FILE="$ROOT_DIR/.clang-format"
 	else
-		STYLE_FILE="$SCRIPT_DIR/clang-format-all"
-		if [ "${0##*/}" = clang-format-all.sh ]; then
+		STYLE_FILE="$SCRIPT_DIR/config/clang-format-all"
+		if [ "${SCRIPT_PATH##*/}" = clang-format-all.sh ]; then
 			STYLE_FILE="$SCRIPT_DIR/clang-format.yaml"
 		fi
 	fi

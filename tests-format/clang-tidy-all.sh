@@ -19,7 +19,7 @@ exec >"$TMPLOG" 2>&1
 #   clang-tidy.
 # - C files run with -std=c23; C++ files run with -std=c++23.
 # - Every invocation uses the bundled security-focused configuration
-#   (tests-format/clang-tidy.yaml, installed as ${TESTS_FORMAT_DIR}/clang-tidy-all),
+#   (tests-format/clang-tidy.yaml, installed under ${TESTS_FORMAT_DIR}/config),
 #   ignoring project-local .clang-tidy files. The configuration is based on
 #   knfmt's .clang-tidy and extended for maximum safety.
 # - Usage: ./clang-tidy-all.sh [ROOT_DIR]
@@ -54,12 +54,16 @@ run_clang_tidy_all() {
 		exit 2
 	}
 	ROOT_DIR=$(CDPATH='' cd "$ROOT_DIR" && pwd -P)
-	SCRIPT_DIR=$(CDPATH='' cd "$(dirname "$0")" && pwd -P)
+	SCRIPT_PATH=$0
+	if [ -L "$SCRIPT_PATH" ]; then
+		SCRIPT_PATH=$(readlink -f "$SCRIPT_PATH") || exit 1
+	fi
+	SCRIPT_DIR=$(CDPATH='' cd "$(dirname "$SCRIPT_PATH")" && pwd -P)
 	# The installed command uses clang-tidy-all; the in-tree script uses the
 	# repository's clang-tidy.yaml file. Project-local .clang-tidy files are
 	# intentionally ignored so every run uses the same policy.
-	CONFIG_FILE="$SCRIPT_DIR/clang-tidy-all"
-	if [ "${0##*/}" = clang-tidy-all.sh ]; then
+	CONFIG_FILE="$SCRIPT_DIR/config/clang-tidy-all"
+	if [ "${SCRIPT_PATH##*/}" = clang-tidy-all.sh ]; then
 		CONFIG_FILE="$SCRIPT_DIR/clang-tidy.yaml"
 	fi
 

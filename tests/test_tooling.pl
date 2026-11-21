@@ -8,6 +8,7 @@
 use strict;
 use warnings;
 
+use Cwd        qw(abs_path);
 use File::Path qw(make_path);
 use File::Temp ();
 use FindBin    qw($Bin);
@@ -307,6 +308,56 @@ subtest 'tests-format manages a staged login profile' => sub {
     is( readlink($link), "$directory/validate-shell",
         'compatibility link targets the final directory' );
 
+    my $source_dir = "$stage/sources";
+    write_file( "$source_dir/example.c",  "int example;\n" );
+    write_file( "$source_dir/Example.hs", "module Example where\n" );
+    for my $tool (qw(clang-format clang-tidy fourmolu)) {
+        my $name = "$tool-all";
+        my $yaml = $tool eq 'fourmolu' ? "$name.yaml" : "$tool.yaml";
+        my $mock = write_file( "$stage/$tool", <<'SH' );
+#!/bin/sh
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -style=file:*|--config-file=*) config=${1#*=}; config=${config#file:}; break ;;
+        --config) config=$2; break ;;
+    esac
+    shift
+done
+[ "${config:-}" = "$EXPECTED_CONFIG" ] && cmp "$config" "$SOURCE_CONFIG" &&
+    : >"$MOCK_CALLED"
+SH
+        chmod oct('755'), $mock or die "cannot make $mock executable: $!";
+        my $command = "$stage$directory/$name";
+        my $alias   = "$stage/$name";
+        symlink( $command, $alias ) or die "cannot create $alias: $!";
+        my $source_config    = "$REPO/tests-format/$yaml";
+        my $installed_config = abs_path("$stage$directory/config/$name");
+        my @invocations      = (
+            [ source    => "$REPO/tests-format/$name.sh", $source_config ],
+            [ installed => $command,                      $installed_config ],
+            [ symlink   => $alias,                        $installed_config ],
+        );
+
+        for my $invocation (@invocations) {
+            my ( $mode, $entry, $expected ) = @$invocation;
+            my $marker = "$stage/$tool-$mode.called";
+            my $format = run_command(
+                cmd => [ $entry, $source_dir ],
+                env => env_with(
+                    PATH              => "$stage:$ENV{PATH}",
+                    C_FORMAT_STANDARD => 'c23',
+                    EXPECTED_CONFIG   => $expected,
+                    SOURCE_CONFIG     => $source_config,
+                    MOCK_CALLED       => $marker,
+                ),
+                timeout => 30,
+            );
+            is( $format->{returncode}, 0, "$name runs in $mode mode" )
+              or diag $format->{stdout} . $format->{stderr};
+            ok( -f $marker, "$name uses the bundled YAML in $mode mode" );
+        }
+    }
+
     $result = run_command(
         cmd => [
             '/bin/sh', '-eu', '-c',
@@ -328,6 +379,8 @@ subtest 'tests-format manages a staged login profile' => sub {
       or diag $result->{stderr};
     ok( !-e $profile, 'uninstall removes the managed profile' );
     ok( !-l $link,    'uninstall removes the managed compatibility link' );
+    ok( !-d "$stage$directory/config",
+        'uninstall removes the config directory' );
 
     write_file( $profile, "# unrelated profile\n" );
     write_file( $link,    "unrelated command\n" );

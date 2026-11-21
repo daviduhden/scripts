@@ -94,6 +94,11 @@ with a wrapper that hides whether the batch files actually ran.
    - developer tools install under `${PREFIX}/libexec/scripts`
      (`TESTS_FORMAT_DIR`), not `BINDIR`; `TESTS_FORMAT_LINKS=1` adds
      compatibility symlinks;
+   - keep bundled formatter configurations under `TESTS_FORMAT_DIR/config`
+     and commands in `TESTS_FORMAT_DIR`. The tooling regression checks the
+     YAML passed by all three formatters from the source tree, the staged
+     installation, and compatibility symlinks. Windows psfmt uses defaults
+     or a user-supplied `.psd1` and ships no settings file;
    - `install-tests-format` publishes `scripts-tests-format.sh` in
      `TESTS_FORMAT_PROFILE_DIR` for login shells that load it. Test the staged
      location, the final directory in PATH, repeated sourcing, and removal
