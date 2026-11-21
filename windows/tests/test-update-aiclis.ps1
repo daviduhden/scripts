@@ -61,7 +61,7 @@ function New-ArchiveFixture {
 
 function Get-RemoteText {
     param([string]$Uri, [hashtable]$Headers)
-    return (@{ assets = $script:FixtureAssets } | ConvertTo-Json -Depth 5)
+    return (@{ tag_name = 'bun-v1.2.3'; assets = $script:FixtureAssets } | ConvertTo-Json -Depth 5)
 }
 
 function Invoke-Download {
@@ -206,6 +206,64 @@ function Find-BunExe { return $null }
     $dispatch = & $harness -Fixture $resource
     Assert-True ($LASTEXITCODE -eq 0) 'Successful dispatch returned failure'
     Assert-True ($dispatch -eq 'Bun,OpenCode,Codex,Daemon,Crush') 'Daemon was skipped after current CLI'
+    $cleanupDefinition = (Get-Item Function:Uninstall-BunWinget).ScriptBlock
+    function Uninstall-BunWinget { $script:BunCleanupCalls++ }
+    $script:BunCleanupCalls = 0
+    $savedBunInstall = $env:BUN_INSTALL
+    try {
+        $env:BUN_INSTALL = Join-Path $testRoot 'bun'
+        $Force = $true
+        $bunAsset = "bun-windows-$(Get-PlatformTag).zip"
+        $bunEntry = "bun-windows-$(Get-PlatformTag)/bun.exe"
+        New-ArchiveFixture $bunAsset @($bunEntry) 'oven-sh/bun'
+        Install-Bun
+        Assert-True ((Find-BunExe) -eq (Join-Path $env:BUN_INSTALL 'bin/bun.exe')) 'Managed Bun not preferred'
+        $beforeDownloads = $script:Downloads
+        $Force = $false
+        Install-Bun
+        Assert-True ($script:Downloads -eq $beforeDownloads) 'Current Bun downloaded again'
+        $Check = $true
+        $Force = $true
+        Install-Bun
+        Assert-True ($script:Downloads -eq $beforeDownloads) 'Bun check downloaded an archive'
+        Assert-True ($script:BunCleanupCalls -eq 2) 'Bun cleanup skipped or invoked in check mode'
+        $Check = $false
+        New-ArchiveFixture $bunAsset @($bunEntry, $bunEntry) 'oven-sh/bun'
+        $failed = $false
+        try { Install-Bun } catch { $failed = $_.Exception.Message -like '*exactly one regular*' }
+        Assert-True $failed 'Duplicate Bun binary accepted'
+        New-ArchiveFixture $bunAsset @($bunEntry) 'oven-sh/bun'
+        Add-Content -LiteralPath (Join-Path $testRoot $bunAsset) -Value 'corruption'
+        $failed = $false
+        try { Install-Bun } catch { $failed = $_.Exception.Message -like '*SHA-256 mismatch*' }
+        Assert-True $failed 'Corrupt Bun archive accepted'
+    }
+    finally { $env:BUN_INSTALL = $savedBunInstall }
+    Set-Item Function:Uninstall-BunWinget $cleanupDefinition
+    $script:WingetCalls = @()
+    $script:WingetListExit = 0
+    $script:WingetUninstallExit = 0
+    function Invoke-FakeWinget {
+        $script:WingetCalls += $args[0]
+        $global:LASTEXITCODE = if ($args[0] -eq 'list') { $script:WingetListExit } else { $script:WingetUninstallExit }
+    }
+    function Get-Command { return [pscustomobject]@{ Source = 'Invoke-FakeWinget' } }
+    $Check = $false
+    Uninstall-BunWinget
+    Assert-True (($script:WingetCalls -join ',') -eq 'list,uninstall') 'Winget Bun was not removed'
+    $script:WingetCalls = @()
+    $script:WingetListExit = -1978335212
+    Uninstall-BunWinget
+    Assert-True (($script:WingetCalls -join ',') -eq 'list') 'Absent winget Bun was uninstalled'
+    $Check = $true
+    Uninstall-BunWinget
+    Assert-True ($script:WingetCalls.Count -eq 1) 'Check mode invoked winget'
+    $Check = $false
+    $script:WingetListExit = 0
+    $script:WingetUninstallExit = 9
+    $failed = $false
+    try { Uninstall-BunWinget } catch { $failed = $true }
+    Assert-True $failed 'Winget uninstall failure was hidden'
     Write-Host 'PASS: offline AI CLI package, activation, daemon and dispatch regressions'
 }
 finally {

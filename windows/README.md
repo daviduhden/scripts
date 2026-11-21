@@ -40,8 +40,10 @@ Other updater parameters are `-Target All|Codex|OpenCode|Crush|Bun`,
 `-RemoveWinget`, and `-Wrappers`. The last option installs optional profile
 functions that add `--yolo`/`--auto`; wrappers are off by default.
 `-RemoveWinget` removes the winget copies of OpenCode, Codex, and Crush after
-installation; Bun is installed through winget and is left in place. Codex,
-OpenCode, and Crush use upstream downloads and require the exact SHA-256 digest
+installation; Bun winget copies are removed automatically after verifying the official binary. Bun uses the
+[official direct downloads](https://bun.com/docs/installation) in BUN_INSTALL
+or %USERPROFILE%\.bun and adds bin to the user and current process PATH.
+Codex, Bun, OpenCode, and Crush use upstream downloads and require the exact SHA-256 digest
 published in GitHub release metadata. OpenCode selects the newest stable 2.x
 release because the repository's `latest` alias still points at the 1.x line.
 Crush is installed if missing and updated on later runs.

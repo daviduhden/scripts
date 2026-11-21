@@ -3,7 +3,7 @@
 # Codex CLI, OpenCode CLI/TUI, Crush and Bun installer and updater for Windows.
 # - Installs and updates Codex, OpenCode, Crush and Bun for the current user
 #   (no admin).
-# - Bun: installs or updates the Oven-sh.Bun package through winget.
+# - Bun: verified official release download into BUN_INSTALL or ~/.bun.
 # - OpenCode: newest stable 2.x release from the v2 line, verified against the
 #   published SHA-256 digest.
 # - Crush: GitHub release binary verified against the published SHA-256 digest.
@@ -22,8 +22,7 @@
 # -Force                        Reinstall even if already up to date.
 # -Check                        Show installed and available versions, change nothing.
 # -RemoveWinget                 Uninstall the winget copies of Codex, OpenCode and
-#                               Crush; Bun is installed through winget and is
-#                               left in place.
+#                               Crush; Bun winget copies are removed automatically.
 # -Wrappers                     Install profile functions that add --yolo/--auto.
 #                               Off by default.
 #
@@ -246,6 +245,10 @@ function Add-PathEntry {
     The full path to bun.exe, or $null when none is found.
 #>
 function Find-BunExe {
+    $root = Join-Path $env:USERPROFILE '.bun'
+    if ($env:BUN_INSTALL) { $root = $env:BUN_INSTALL }
+    $managed = Join-Path $root 'bin\bun.exe'
+    if (Test-Path -LiteralPath $managed -PathType Leaf) { return $managed }
     $command = Get-Command bun.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($null -ne $command) { return $command.Source }
 
@@ -1150,59 +1153,120 @@ function Invoke-CodexDaemonUpdate {
 }
 
 # ---------------------------------------------------------------------------
-# Bun (winget)
+# Bun (official upstream downloads)
 # ---------------------------------------------------------------------------
 <#
 .SYNOPSIS
-    Installs, updates, or checks Bun through winget.
+    Installs or checks Bun using official direct downloads with SHA-256 verification.
 .NOTES
-    Requires winget. -Check only lists the installed and available packages.
-    Normal runs use --silent and accept source and package agreements; -Force
-    adds --force. The "not installed" and "already up to date" winget exit codes
-    are treated as expected outcomes.
+    Uses BUN_INSTALL or ~/.bun; -Check does not install or change PATH.
 #>
-function Install-Bun {
+<#
+.SYNOPSIS
+    Removes the winget Bun package after verifying the official installation.
+#>
+function Uninstall-BunWinget {
+    if ($Check) { return }
     $winget = Get-Command winget -ErrorAction SilentlyContinue
-    if ($null -eq $winget) {
-        throw 'winget is required to install, update or check Bun. Install App Installer and try again.'
-    }
-
-    # Handle native exit codes explicitly, including when the caller enables this preference.
+    if ($null -eq $winget) { return }
     $PSNativeCommandUseErrorActionPreference = $false
-    $packageArgs = @('--id', 'Oven-sh.Bun', '--exact', '--source', 'winget', '--disable-interactivity')
+    & $winget.Source list --id Oven-sh.Bun --exact --source winget --disable-interactivity --accept-source-agreements | Out-Null
+    if ($LASTEXITCODE -eq -1978335212) { return }
+    if ($LASTEXITCODE -ne 0) { throw "winget Bun detection failed (exit code $LASTEXITCODE)." }
+    & $winget.Source uninstall --id Oven-sh.Bun --exact --source winget --silent --disable-interactivity --accept-source-agreements | Out-Null
+    if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne -1978335212) {
+        throw "winget Bun uninstall failed (exit code $LASTEXITCODE). The official installation was retained."
+    }
+    Write-Info 'Bun: old winget package removed.'
+}
+function Install-Bun {
+    $bunRoot = Join-Path $env:USERPROFILE '.bun'
+    if ($env:BUN_INSTALL) { $bunRoot = $env:BUN_INSTALL }
+    $bunBin = Join-Path $bunRoot 'bin'
+    $bunExe = Join-Path $bunBin 'bun.exe'
+    $release = (Get-RemoteText -Uri 'https://api.github.com/repos/oven-sh/bun/releases/latest') | ConvertFrom-Json
+    $version = [string]$release.tag_name -replace '^bun-v', ''
+    $installed = Get-ExeVersion -ExePath $bunExe
     if ($Check) {
-        Write-Info 'Bun: installed version (winget)'
-        & $winget.Source list @packageArgs
-        if ($LASTEXITCODE -eq -1978335212) {
-            # APPINSTALLER_CLI_ERROR_NO_APPLICATIONS_FOUND
-            Write-Info 'Bun: not installed through winget.'
-        }
-        elseif ($LASTEXITCODE -ne 0) {
-            throw "winget list failed (exit code $LASTEXITCODE)."
-        }
-        Write-Info 'Bun: available version (winget)'
-        & $winget.Source show @packageArgs
-        if ($LASTEXITCODE -ne 0) { throw "winget show failed (exit code $LASTEXITCODE)." }
+        Write-Info "Bun: installed $(if ($installed) { $installed } else { 'none' }), available $version"
         return
     }
+    if ((Test-VersionEqual $installed $version) -and -not $Force) {
+        Write-Info "Bun: already up to date ($installed). Nothing to do."
+        Uninstall-BunWinget
+        return
+    }
+    $platform = Get-PlatformTag
+    if ($version -cnotmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$') {
+        throw 'Invalid Bun release version.'
+    }
+    $asset = "bun-windows-$platform.zip"
 
-    # winget install automatically upgrades an existing installation.
-    $installArgs = $packageArgs + @('--silent', '--accept-source-agreements', '--accept-package-agreements')
-    if ($Force) { $installArgs += '--force' }
-    Write-Info 'Bun: installing or updating through winget'
-    & $winget.Source install @installArgs
-    if ($LASTEXITCODE -eq -1978335189) {
-        # APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE
-        Write-Info 'Bun: already up to date. Nothing to do.'
+    $assets = @($release.assets | Where-Object { $_.name -ceq $asset })
+    if ($assets.Count -ne 1 -or $assets[0].digest -cnotmatch '^sha256:[0-9a-f]{64}$') {
+        throw 'Expected one Bun release asset with a published SHA-256 digest.'
     }
-    elseif ($LASTEXITCODE -ne 0) {
-        throw "winget install failed (exit code $LASTEXITCODE)."
+    $url = [string]$assets[0].browser_download_url
+    if (-not $url.StartsWith('https://github.com/oven-sh/bun/releases/download/', [StringComparison]::Ordinal)) {
+        throw 'Unexpected Bun release URL.'
     }
-    else {
-        Write-Info 'Bun: installed or updated successfully.'
+    $expectedDigest = $assets[0].digest.Substring(7)
+    $versionsDir = Join-Path $bunRoot 'versions'
+    $versionDir = Join-Path $versionsDir $version
+    $versionExe = Join-Path $versionDir 'bun.exe'
+
+    if (-not (Test-Path -LiteralPath $versionExe) -or $Force) {
+        $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ("bun-install-" + [Guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
+        try {
+            $zip = Join-Path $tempRoot $asset
+            Write-Info "Bun: downloading $version ($platform)"
+            Invoke-Download -Uri $url -OutFile $zip
+
+            if ((Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expectedDigest) {
+                throw 'Bun release SHA-256 mismatch.'
+            }
+            Add-Type -AssemblyName System.IO.Compression.FileSystem
+            $archive = [IO.Compression.ZipFile]::OpenRead($zip)
+            try {
+                $entries = @($archive.Entries | Where-Object { $_.FullName -ceq "bun-windows-$platform/bun.exe" })
+                if ($entries.Count -ne 1 -or $entries[0].Length -le 0 -or
+                    $entries[0].Length -gt 1073741824 -or
+                    (($entries[0].ExternalAttributes -shr 16) -band 0xF000) -eq 0xA000) {
+                    throw 'Expected exactly one regular bun.exe entry.'
+                }
+                New-Item -ItemType Directory -Force -Path $versionDir | Out-Null
+                $pending = Join-Path $versionDir ('.bun-' + [guid]::NewGuid().ToString('N') + '.tmp')
+                try {
+                    [IO.Compression.ZipFileExtensions]::ExtractToFile($entries[0], $pending)
+                    if (Test-Path -LiteralPath $versionExe) {
+                        [IO.File]::Replace($pending, $versionExe, "$versionExe.bak.$([guid]::NewGuid().ToString('N'))")
+                    }
+                    else { [IO.File]::Move($pending, $versionExe) }
+                }
+                finally {
+                    if (Test-Path -LiteralPath $pending) { Remove-Item -LiteralPath $pending }
+                }
+            }
+            finally { $archive.Dispose() }
+        }
+        finally {
+            Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
+        }
     }
+
+    New-Item -ItemType Directory -Force -Path $bunBin | Out-Null
+    Set-CurrentExe -SourceExe $versionExe -TargetExe $bunExe
+
+    $verified = Get-ExeVersion -ExePath $bunExe
+    if (-not (Test-VersionEqual $verified $version)) {
+        throw "Bun verification failed: $bunExe reports '$verified' but '$version' was expected."
+    }
+
+    Write-Info "Bun: $verified installed to $bunBin"
+    Uninstall-BunWinget
+
 }
-
 # ---------------------------------------------------------------------------
 # winget (optional CLI cleanup)
 # ---------------------------------------------------------------------------
@@ -1211,7 +1275,7 @@ function Install-Bun {
     Uninstalls the winget copies of OpenCode, Codex and Crush.
 .NOTES
     Best effort: a missing winget or an uninstall failure produces a warning.
-    Bun is never removed because winget manages that installation.
+    Bun winget copies are removed separately after verified installation.
 #>
 function Remove-WingetPackages {
     $winget = Get-Command winget -ErrorAction SilentlyContinue

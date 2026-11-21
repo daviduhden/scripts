@@ -96,6 +96,13 @@ already-installed PSScriptAnalyzer; it does not install it.
 - The installer rejects spaces and cmd metacharacters in discovered
   PowerShell script names; the external validator still checks only the Perl
   manifest. Avoid awkward names in both places.
+- Bun uses official oven-sh/bun release ZIPs with published SHA-256 digests,
+  exact bun-windows-<arch>/bun.exe extraction, and atomic activation under
+  BUN_INSTALL or %USERPROFILE%\.bun. Prefer this binary over winget shims
+  when repairing PATH; check mode must not install or write PATH. Remove the
+  Oven-sh.Bun winget package automatically after verifying the official binary,
+  including when already current. Surface detection and uninstall failures;
+  missing winget or an absent package is harmless.
 - `-RemoveWinget` removes the winget copies of OpenCode, Codex, and Crush, not
   Bun; keep the documentation aligned with that behavior.
 - `update-aiclis.ps1` resolves OpenCode from the stable `v2.*` release tags
