@@ -9,6 +9,7 @@ use strict;
 use warnings;
 
 use File::Path qw(make_path);
+use File::Temp ();
 use FindBin    qw($Bin);
 use lib $Bin;
 use Test::More;
@@ -33,7 +34,8 @@ use TestHarness qw(
 my $REPO = repo_root();
 
 sub build_fixture {
-    my $base = new_tempdir('tooling-tests-');
+    my ($base) = @_;
+    $base //= new_tempdir('tooling-tests-');
     my $bin  = "$base/bin";
     my $logs = "$base/logs";
     make_path( $bin, $logs );
@@ -97,7 +99,8 @@ sub run_validator {
 }
 
 subtest 'check never rewrites and format is explicit' => sub {
-    my $fixture = build_fixture();
+    my $sandbox = File::Temp->newdir( 'tooling-tests-XXXXXX', TMPDIR => 1 );
+    my $fixture = build_fixture("$sandbox");
     for my $case (
         [
             'shell', 'sample.sh',

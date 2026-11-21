@@ -226,6 +226,9 @@ Makefiles whose generated `config.mk` is absent. On OpenBSD, `mbake` and
   unveil resolves separately. Its regression suite disables the sandbox with
   `NORMALIZE_FILES_NO_SANDBOX=1` because the VM veil rejects the temporary
   trees the suite creates.
+- The formatter-mode regression scopes its synthetic Python source to a
+  `File::Temp->newdir` object. Release that fixture before the repository
+  source scan so that the OpenBSD job's checkout-local `TMPDIR` works.
 - `tests/test_sync_website_filters.pl` exercises the Debian sync implementation
   only on Linux; the OpenBSD job runs the ksh implementation. Keep the Debian
   script's GNU staging assumptions out of the OpenBSD VM.
