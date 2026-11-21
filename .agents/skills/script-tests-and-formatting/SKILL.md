@@ -38,6 +38,8 @@ and strict modes, and skips Ruff for an empty tree. `make test-python` runs
 this validator; `install-tests-format` installs it. Ruff calls disable caches
 and only format mode runs `ruff clean`. The Linux workflow installs Ruff;
 offline Perl tooling tests use mocked Ruff and temporary Python fixtures.
+The Linux knfmt installer runs the upstream build unprivileged and uses
+system install(1) for the binary and manual page.
 The native Windows workflow exercises installation and reinstall under
 `RUNNER_TEMP` with `--no-path`, verifies rollback on a locked launcher,
 and fails on PSScriptAnalyzer error diagnostics. The manual agent-knowledge workflow accepts an

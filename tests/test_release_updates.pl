@@ -134,6 +134,53 @@ subtest 'release helper handles USTAR paths and enforces byte limits' => sub {
     is( slurp($file), 'data', 'selected entry is extracted' );
 };
 
+subtest 'Fastfetch verifies digest and package metadata before APT' => sub {
+    my $root    = new_tempdir('fastfetch-release-');
+    my $asset   = 'fastfetch-linux-amd64.deb';
+    my $payload = 'fixture package';
+    write_file( "$root/package", $payload );
+    my $metadata = {
+        tag_name => 'v1.2.3',
+        assets   => [
+            {
+                name                 => $asset,
+                digest               => 'sha256:' . sha256_hex($payload),
+                browser_download_url =>
+"https://github.com/fastfetch-cli/fastfetch/releases/download/v1.2.3/$asset",
+            }
+        ],
+    };
+    write_file( "$root/metadata", JSON::PP::encode_json($metadata) );
+    my $commands = <<'SH';
+RELEASE_HELPER="$HELPER_PATH"
+get_release_metadata() { cat "$TEST_ROOT/metadata"; }
+detect_pkg_arch() { printf '%s\n' amd64; }
+fastfetch() { printf '%s\n' 'fastfetch 0.0.1'; }
+net_curl() { cp -- "$TEST_ROOT/package" "$3"; }
+dpkg() { printf '%s\n' amd64; }
+dpkg-deb() {
+    case "$3" in
+    Version) printf '%s\n' 1.2.3 ;;
+    Package) printf '%s\n' "$PACKAGE_NAME" ;;
+    Architecture) printf '%s\n' amd64 ;;
+    esac
+}
+apt-get() { printf '%s\n' called >"$TEST_ROOT/apt.log"; }
+run_fastfetch_update
+SH
+    my %context = ( HELPER_PATH => "$ROOT/scripts/release-verify.pl" );
+    my $script  = 'debian/update-fastfetch.bash';
+    my $result =
+      run_shell( $root, $script, $commands, %context, PACKAGE_NAME => 'other' );
+    isnt( $result->{returncode}, 0, 'unexpected package is rejected' );
+    ok( !-e "$root/apt.log", 'APT not called for wrong package metadata' );
+    $result = run_shell( $root, $script, $commands, %context,
+        PACKAGE_NAME => 'fastfetch' );
+    is( $result->{returncode}, 0, 'verified package is installed' )
+      or diag $result->{stdout} . $result->{stderr};
+    is( slurp("$root/apt.log"), "called\n", 'verified package reaches APT' );
+};
+
 subtest 'msedit checks digest and exact entry' => sub {
     for my $kind (qw(valid digest duplicate link)) {
         subtest $kind => sub {

@@ -24,10 +24,13 @@ require_cmd() {
 main() {
 	# Exit 0 after a successful install; 1 for an unsupported OS, a missing
 	# build tool, or a failed build/install; 2 for usage errors.
-	# Optional installation prefix; a leading dash is rejected so a mistyped
-	# option is not passed to configure as a path.
+	# Optional absolute installation prefix.
 	PREFIX=${1:-/usr/local}
-	[ "${PREFIX#-}" = "$PREFIX" ] || usage
+	[ "$#" -le 1 ] || usage
+	case "$PREFIX" in
+	/*) ;;
+	*) usage ;;
+	esac
 	REPO_URL="https://github.com/mptre/knfmt"
 
 	# knfmt's build system and this installer target Linux only. Report the
@@ -44,6 +47,10 @@ main() {
 	require_cmd make
 	require_cmd cc
 	require_cmd mktemp
+	if [ "$(id -u)" -eq 0 ]; then
+		printf '%s\n' '[ERROR] Run knfmt builds as a non-root user.' >&2
+		exit 1
+	fi
 
 	if command -v knfmt >/dev/null 2>&1; then
 		printf '%s\n' "[INFO] Existing knfmt found at: $(command -v knfmt)"
@@ -64,8 +71,7 @@ main() {
 	printf '%s\n' "[INFO] Cloning knfmt source..."
 	git clone --depth 1 "$REPO_URL" "$TMP_DIR/knfmt"
 
-	# configure consumes PREFIX from the environment; make install may need
-	# write access to that prefix (run with elevated privileges if required).
+	# configure and make run only as the invoking user.
 	cd "$TMP_DIR/knfmt"
 	printf '%s\n' "[INFO] Configuring knfmt with PREFIX=$PREFIX..."
 	PREFIX="$PREFIX" ./configure
@@ -78,21 +84,20 @@ main() {
 		make
 	fi
 
-	printf '%s\n' "[INFO] Installing/updating knfmt..."
-	# With set -e, an install failure would normally exit; the explicit branch
-	# turns it into a cleanup-and-exit-1 path with a privilege hint.
-	if make install; then
-		if command -v knfmt >/dev/null 2>&1; then
-			printf '%s\n' "[INFO] knfmt available at: $(command -v knfmt)"
-		fi
-		printf '%s\n' "[INFO] knfmt install/update completed successfully"
-		exit 0
+	if [ ! -f knfmt ] || [ ! -x knfmt ] || [ ! -f knfmt.1 ]; then
+		printf '%s\n' '[ERROR] Build did not produce the expected installation files.' >&2
+		exit 1
 	fi
-
-	printf '%s\n' \
-		"[ERROR] Installation failed." \
-		" Re-run with elevated privileges if needed." >&2
-	exit 1
+	set -- /usr/bin/install
+	if ! mkdir -p "$PREFIX/bin" "$PREFIX/man/man1" 2>/dev/null ||
+		[ ! -w "$PREFIX/bin" ] || [ ! -w "$PREFIX/man/man1" ]; then
+		require_cmd sudo
+		set -- sudo -- /usr/bin/install
+	fi
+	"$@" -d -- "$PREFIX/bin" "$PREFIX/man/man1"
+	"$@" -m 0755 -- knfmt "$PREFIX/bin/knfmt"
+	"$@" -m 0644 -- knfmt.1 "$PREFIX/man/man1/knfmt.1"
+	printf '%s\n' "[INFO] Installed knfmt at $PREFIX/bin/knfmt"
 }
 
 main "$@"

@@ -35,6 +35,34 @@ use TestHarness qw(
 
 my $REPOSITORY_ROOT = repo_root();
 
+subtest 'APT key checks admit exactly one approved primary key' => sub {
+    my $awk = find_command('awk');
+    plan skip_all => 'awk is unavailable' unless $awk;
+    my $pin     = 'A' x 40;
+    my $primary = join ':', 'fpr', ( ('') x 8 ), $pin, '';
+    my $subkey  = join ':', 'fpr', ( ('') x 8 ), ( 'B' x 40 ), '';
+    for my $repository (qw(gh-cli i2pd lynis tor)) {
+        my $source = slurp("$REPOSITORY_ROOT/debian/add-$repository-repo.bash");
+        my ($filter) = $source =~ /awk -F: '(\s*\$1 == "pub".*?\})'\)/s;
+        ok( defined $filter, "$repository reads primary key records" )
+          or next;
+        my $allowed = "pub\n$primary\nsub\n$subkey\n";
+        for my $case ( [ $allowed, $pin ], [ "$allowed\npub\n$subkey\n", '' ] )
+        {
+            my ( $input, $expected ) = @$case;
+            my $root   = new_tempdir('apt-key-fixture-');
+            my $file   = write_file( "$root/key-list", $input );
+            my $result = run_command(
+                cmd     => [ $awk, '-F:', $filter, $file ],
+                timeout => 15,
+            );
+            is( $result->{returncode}, 0, "$repository key records parsed" );
+            is( trim( $result->{stdout} ),
+                $expected, "$repository selects a single primary fingerprint" );
+        }
+    }
+};
+
 subtest 'repository synchronization retains local Git metadata' => sub {
     plan skip_all => 'SecureBlue synchronization targets Linux'
       unless is_linux();
