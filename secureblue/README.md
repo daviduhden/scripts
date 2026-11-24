@@ -79,7 +79,7 @@ root-owned directory `/var/log/scripts-sysupgrade`.
 ## xerj
 
 Run `update-xerj` to install xerj in `~/.local/bin` and configure compatible
-installed clients. Run `update-xerj codex claude` to select clients or
+installed clients. Run `update-xerj codex swival` to select clients or
 `update-xerj --binary-only` to install only xerj. The updater verifies and
 checks the staged executable before publication and runs as your desktop user.
 See the [xerj configuration guide](../docs/update-xerj.md).

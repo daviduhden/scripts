@@ -29,6 +29,10 @@ Each directory documents its scripts, requirements, and usage:
 - [Validation and formatting tools](tests-format/README.md)
 - [Architecture](docs/architecture.md), [AI CLI updater](docs/update-ai-clis.md), [xerj agent configuration](docs/update-xerj.md), [troubleshooting](docs/troubleshooting.md), [Python-to-Perl migration](docs/python-migration.md), [security policy](SECURITY.md), and [changelog](CHANGELOG.md)
 
+On Debian, SecureBlue and Windows, `update-ai-clis swival` manages an
+isolated Swival installation, and `update-xerj swival` registers xerj
+with an existing Swival installation.
+
 ## Installation
 
 Targets are system-specific. Install the set for your host with

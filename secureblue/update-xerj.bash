@@ -63,7 +63,7 @@ EOF
 parse_args() {
 	while (($#)); do
 		case "$1" in
-		all | --binary-only | opencode | codex | crush | copilot-cli | claude | --opencode | --codex | --crush | --copilot-cli | --claude)
+		all | --binary-only | opencode | codex | crush | copilot-cli | claude | swival | --opencode | --codex | --crush | --copilot-cli | --claude | --swival)
 			xerj_select "$1"
 			shift
 			;;

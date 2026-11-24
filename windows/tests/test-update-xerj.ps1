@@ -77,10 +77,21 @@ function crush {
     return @('fixture logo', "crush version v$global:xerjTestCrushVersion")
 }
 
+$swivalFixture = Join-Path $testRoot 'swival.ps1'
+$swivalProbe = @'
+if ($args[0] -ne '--list-profiles' -or $args[1] -ne '--base-dir' -or
+    -not [IO.Directory]::Exists($args[2])) { exit 2 }
+$text = [IO.File]::ReadAllText((Join-Path $env:XDG_CONFIG_HOME 'swival/config.toml'))
+if ($text.Contains('INVALID_TOML') -or
+    [regex]::Matches($text, '(?m)^\[mcp_servers\.xerj\]$').Count -gt 1) { exit 1 }
+exit 0
+'@
+
 function Get-Command {
     param([string]$Name, $CommandType, $ErrorAction)
     if ($Name -in $global:xerjTestMissing) { return $null }
     if ($Name -in @('copilot', 'claude')) { return 'must-not-execute-fixture-client' }
+    if ($Name -eq 'swival') { return [pscustomobject]@{ Source = $swivalFixture } }
     if ($Name -in @('codex', 'opencode', 'crush')) {
         return (Microsoft.PowerShell.Core\Get-Command $Name -CommandType Function)
     }
@@ -159,6 +170,7 @@ try {
     $env:CRUSH_GLOBAL_CONFIG = $null
     $env:XERJ_URL = $null
     $null = New-Item -ItemType Directory -Force (Join-Path $env:XDG_CONFIG_HOME 'crush'), (Join-Path $env:XDG_CONFIG_HOME 'opencode'), $env:CODEX_HOME, $env:COPILOT_HOME, $env:CLAUDE_CONFIG_DIR
+    [IO.File]::WriteAllText($swivalFixture, $swivalProbe)
     $crushConfig = Join-Path $env:XDG_CONFIG_HOME 'crush/crushrc'
     $openConfig = Join-Path $env:XDG_CONFIG_HOME 'opencode/opencode.json'
     $copilotConfig = Join-Path $env:COPILOT_HOME 'mcp-config.json'
@@ -197,6 +209,35 @@ try {
     Assert-True ($claude.mcpServers.xerj.type -eq 'stdio' -and $claude.mcpServers.xerj.args[2] -eq 'http://127.0.0.1:9300') 'Wrong Claude registration'
     Assert-True ($claude.theme -eq 'keep' -and $claude.mcpServers.other.command -eq 'keep' -and $copilot.mcpServers.other.command -eq 'keep') 'Unrelated Copilot or Claude settings lost'
     Assert-True ($global:xerjTestCodexCalls -eq 1) 'Selective registration called Codex'
+    $swivalConfig = Join-Path $env:XDG_CONFIG_HOME 'swival/config.toml'
+    & $updater swival --version v1.2.3
+    Assert-True ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $swivalConfig)) 'Missing Swival config was not created'
+    $swivalOriginal = @'
+commands = "ask"
+[profiles.local]
+provider = "generic"
+model = "keep"
+base_url = "http://127.0.0.1:8080"
+'@
+    [IO.File]::WriteAllText($swivalConfig, $swivalOriginal)
+    $claudeBefore = Get-Content -Raw $claudeConfig
+    & $updater swival --version v1.2.3 --url http://127.0.0.1:9300
+    $swivalPublished = Get-Content -Raw $swivalConfig
+    Assert-True ($LASTEXITCODE -eq 0 -and $swivalPublished.StartsWith($swivalOriginal) -and
+        $swivalPublished.Contains('[mcp_servers.xerj]') -and $swivalPublished.Contains('http://127.0.0.1:9300')) 'Swival registration failed'
+    Assert-True ((Get-Content -Raw $claudeConfig) -ceq $claudeBefore) 'Swival selection changed Claude'
+    & $updater -Swival --version v1.2.3 --url http://127.0.0.1:9300
+    Assert-True ($LASTEXITCODE -eq 0 -and (Get-Content -Raw $swivalConfig) -ceq $swivalPublished) 'Swival registration is not idempotent'
+    & $updater swival --version v1.2.3 --url https://example.org
+    Assert-True ($LASTEXITCODE -eq 0 -and (Get-Content -Raw $swivalConfig).Contains('https://example.org')) 'Swival URL did not change'
+    [IO.File]::WriteAllText($swivalConfig, 'INVALID_TOML')
+    & $updater swival --version v1.2.3
+    Assert-True ($LASTEXITCODE -eq 1 -and (Get-Content -Raw $swivalConfig) -ceq 'INVALID_TOML') 'Invalid Swival config was replaced'
+    [IO.File]::WriteAllText($swivalConfig, $swivalOriginal)
+    $global:xerjTestMissing = @('swival')
+    & $updater -Swival --version v1.2.3
+    Assert-True ($LASTEXITCODE -eq 1 -and (Get-Content -Raw $swivalConfig) -ceq $swivalOriginal) 'Missing Swival was configured'
+    $global:xerjTestMissing = @()
     $binaryOnlyBefore = Get-Content -Raw $claudeConfig
     & $updater --binary-only --version v1.2.3 --url 'http://127.0.0.1:9400'
     Assert-True ($LASTEXITCODE -eq 0 -and (Get-Content -Raw $claudeConfig) -ceq $binaryOnlyBefore) 'Binary-only run touched configuration'

@@ -190,6 +190,10 @@ tool is missing, report the check as skipped rather than passed.
   system Python, Swival profiles, and optional sandbox installations separate
   from agent delivery.
 
+- Swival's user MCP configuration is TOML under the XDG configuration root.
+  Register only the xerj stdio command. Validate staged TOML with the client
+  in an isolated config directory and preserve inference and sandbox settings.
+
 - `secureblue/setup-clamav.bash` must not write `ScanOnAccess`: that directive
   only applies to ClamAV <= 0.101. Current releases enable on-access scanning
   through `OnAccessIncludePath`, with `clamonacc` performing the scans, so

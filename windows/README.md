@@ -145,6 +145,7 @@ current user. Close a running xerj process before replacing its binary.
 ```powershell
 update-xerj --help
 update-xerj codex claude
+update-xerj swival
 update-xerj --binary-only
 ```
 

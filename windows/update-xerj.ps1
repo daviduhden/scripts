@@ -20,6 +20,7 @@ param(
     [switch]$Codex,
     [switch]$Crush,
     [switch]$OpenCode,
+    [switch]$Swival,
     [switch]$BinaryOnly
 )
 Set-StrictMode -Version Latest
@@ -425,22 +426,136 @@ function Register-CrushMcp {
     Save-Config $Config $text $old
 }
 
+function Confirm-SwivalConfig {
+    param($Command, [string]$Candidate, [string]$Stage)
+
+    $configDir = Join-Path $Stage 'swival'
+    $project = Join-Path $Stage 'swival-config-check'
+    $null = New-Item -ItemType Directory -Force -Path $configDir, $project
+    $configPath = Join-Path $configDir 'config.toml'
+    if ([Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([Runtime.InteropServices.OSPlatform]::Windows) -and
+        -not (Test-Path -LiteralPath $configPath)) {
+        # Existing Swival settings can contain secrets. Restrict the validation
+        # copy before writing user data, including under a custom TEMP path.
+        $null = New-Item -ItemType File -Path $configPath
+        $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+        try {
+            $acl = [Security.AccessControl.FileSecurity]::new()
+            $acl.SetAccessRuleProtection($true, $false)
+            $acl.SetAccessRule([Security.AccessControl.FileSystemAccessRule]::new($identity.User, 'FullControl', 'Allow'))
+            Set-Acl -LiteralPath $configPath -AclObject $acl
+        }
+        finally { $identity.Dispose() }
+    }
+    [IO.File]::WriteAllText($configPath, $Candidate, [Text.UTF8Encoding]::new($false))
+    $engine = if ($PSVersionTable.PSEdition -eq 'Desktop') { 'powershell.exe' }
+    elseif ([Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([Runtime.InteropServices.OSPlatform]::Windows)) { 'pwsh.exe' }
+    else { 'pwsh' }
+    $probe = @'
+$ErrorActionPreference = 'Stop'
+$PSNativeCommandUseErrorActionPreference = $false
+& $env:XERJ_SWIVAL_PROBE --list-profiles --base-dir $env:XERJ_SWIVAL_PROJECT
+if (-not $?) { exit 1 }
+if ($null -ne $LASTEXITCODE) { exit $LASTEXITCODE }
+'@
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($probe))
+    $start = [Diagnostics.ProcessStartInfo]::new()
+    $start.FileName = Join-Path $PSHOME $engine
+    $start.Arguments = "-NoProfile -NonInteractive -EncodedCommand $encoded"
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    $start.RedirectStandardInput = $true
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    $start.WorkingDirectory = $project
+    $start.EnvironmentVariables['XDG_CONFIG_HOME'] = $Stage
+    $start.EnvironmentVariables['XERJ_SWIVAL_PROBE'] = $Command.Source
+    $start.EnvironmentVariables['XERJ_SWIVAL_PROJECT'] = $project
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $start
+    try {
+        if (-not $process.Start()) { throw 'Could not start Swival configuration validation.' }
+        $process.StandardInput.Close()
+        $output = $process.StandardOutput.BaseStream.CopyToAsync([IO.Stream]::Null)
+        $errors = $process.StandardError.BaseStream.CopyToAsync([IO.Stream]::Null)
+        if (-not $process.WaitForExit(20000) -or $process.ExitCode -ne 0 -or
+            -not [Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]@($output, $errors), 3000)) {
+            throw 'Swival could not validate its TOML configuration.'
+        }
+    }
+    finally {
+        try {
+            if (-not $process.HasExited) {
+                if ($PSVersionTable.PSEdition -eq 'Desktop') { $process.Kill() }
+                else { $process.Kill($true) }
+            }
+        }
+        catch { Write-Verbose 'The Swival validation process could not be stopped.' }
+        $process.Dispose()
+    }
+}
+
+function Register-SwivalMcp {
+    param($Command, [string]$Config, [string]$Binary, [string]$Endpoint, [string]$Stage)
+
+    Assert-XerjPrivateDirectory (Split-Path $Config)
+    $old = Read-Config $Config
+    if ($null -ne $old) {
+        try {
+            $strictUtf8 = [Text.UTF8Encoding]::new($false, $true)
+            $decoded = $strictUtf8.GetString([IO.File]::ReadAllBytes($Config))
+        }
+        catch { throw 'Swival configuration must be valid UTF-8.' }
+        if ($decoded -cne $old) { throw 'Swival configuration must be UTF-8 without a BOM.' }
+    }
+    $body = [string]$old
+    $begin = '# BEGIN xerj managed'
+    $end = '# END xerj managed'
+    $table = '[mcp_servers.xerj]'
+    $commandLine = 'command = ' + (ConvertTo-Json -InputObject $Binary -Compress)
+    $prefix = 'args = ["mcp", "--url", '
+    $encodedUrl = ConvertTo-Json -InputObject $Endpoint -Compress
+    $argsLine = $prefix + $encodedUrl + ']'
+    $block = "$begin`n$table`n$commandLine`n$argsLine`n$end`n"
+    $markers = [regex]::Matches($body, '(?m)^(?:' + [regex]::Escape($begin) + '|' + [regex]::Escape($end) + ')\r?$')
+    if ($markers.Count) {
+        $owned = '(?m)^' + [regex]::Escape($begin) + '\r?\n' + [regex]::Escape($table) + '\r?\n' +
+        [regex]::Escape($commandLine) + '\r?\n' + [regex]::Escape($prefix) + '(?<url>"https?://[^"\r\n]+")\]\r?\n' +
+        [regex]::Escape($end) + '\r?(?:\n|\z)\s*\z'
+        $match = [regex]::Match($body, $owned)
+        if ($markers.Count -ne 2 -or -not $match.Success) {
+            throw 'Existing xerj MCP definition requires manual editing.'
+        }
+        $urlMatch = $match.Groups['url']
+        $text = $body.Substring(0, $urlMatch.Index) + $encodedUrl + $body.Substring($urlMatch.Index + $urlMatch.Length)
+    }
+    else {
+        $separator = if ($body -and -not $body.EndsWith("`n")) { "`n" } else { '' }
+        $text = $body + $separator + $block
+    }
+
+    if ($body) { Confirm-SwivalConfig $Command $body $Stage }
+    if ($text -cne $old) { Confirm-SwivalConfig $Command $text $Stage }
+    Save-Config $Config $text $old
+}
+
 if ($Arguments -and $Arguments.Count -eq 1 -and $Arguments[0] -ceq '--help') {
     Write-Output @'
 Usage: update-xerj [all | AGENT ... | --binary-only] [--version TAG] [--url URL]
-Agents: codex crush opencode copilot-cli claude
+Agents: codex crush opencode copilot-cli claude swival
 Without selectors or with all, configure detected clients only.
-Windows also accepts -Version, -Url, -BinaryOnly, -Codex, -Crush and -OpenCode.
+Windows also accepts -Version, -Url, -BinaryOnly, -Codex, -Crush, -OpenCode and -Swival.
 '@
     exit 0
 }
 
 try {
-    $clients = [ordered]@{ codex = 'codex'; crush = 'crush'; opencode = 'opencode'; 'copilot-cli' = 'copilot'; claude = 'claude' }
+    $clients = [ordered]@{ codex = 'codex'; crush = 'crush'; opencode = 'opencode'; 'copilot-cli' = 'copilot'; claude = 'claude'; swival = 'swival' }
     $selected = @()
     if ($Codex) { $selected += 'codex' }
     if ($Crush) { $selected += 'crush' }
     if ($OpenCode) { $selected += 'opencode' }
+    if ($Swival) { $selected += 'swival' }
     $selectAll = $false
     $Version = $null
     $Url = if ($env:XERJ_URL) { $env:XERJ_URL } else { 'http://127.0.0.1:9200' }
@@ -605,6 +720,9 @@ try {
                 'copilot-cli' {
                     $root = if ($env:COPILOT_HOME) { $env:COPILOT_HOME } else { Join-Path $userHome '.copilot' }
                     Register-JsonMcp $client (Join-Path $root 'mcp-config.json') $binary $Url
+                }
+                'swival' {
+                    Register-SwivalMcp $commands[$client] (Join-Path $configRoot 'swival/config.toml') $binary $Url $stage
                 }
                 'claude' {
                     $root = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { $userHome }

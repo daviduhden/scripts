@@ -22,7 +22,7 @@ xerj_client_help() {
 	cat <<'HELP'
   all                  Register MCP with all installed agents (default)
   AGENT ...            Register MCP only with the selected installed agents
-                       opencode, codex, crush, copilot-cli, claude
+                       opencode, codex, crush, copilot-cli, claude, swival
   --binary-only        Skip agent configuration
   --url URL            Node endpoint (XERJ_URL or http://127.0.0.1:9200)
 HELP
@@ -100,7 +100,7 @@ xerj_find_clients() {
 		agents=("${XERJ_CLIENTS[@]}")
 		XERJ_EXPLICIT=1
 	else
-		agents=(opencode codex crush copilot-cli claude)
+		agents=(opencode codex crush copilot-cli claude swival)
 	fi
 	for client in "${agents[@]}"; do
 		command=$client
@@ -172,6 +172,7 @@ xerj_config_kind() {
 
 xerj_configure_clients() {
 	local binary=$1 client command helper kind perl status failed=0
+	local -a client_args
 	((XERJ_BINARY_ONLY == 0)) || return 0
 	[[ $EUID -ne 0 ]] || return 1
 	local directory=${BASH_SOURCE[0]%/*}
@@ -212,7 +213,9 @@ xerj_configure_clients() {
 				fi
 				continue
 			fi
-			if "$perl" "$helper" "$kind" "$binary" "$NODE_URL"; then
+			client_args=("$kind" "$binary" "$NODE_URL")
+			if [[ $kind == swival ]]; then client_args+=("$command"); fi
+			if "$perl" "$helper" "${client_args[@]}"; then
 				printf 'xerj MCP %-12s configured\n' "$client"
 				continue
 			fi

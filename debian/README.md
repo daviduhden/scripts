@@ -108,6 +108,7 @@ Python packages are installed outside Debian's managed Python environment.
 ```bash
 update-xerj
 update-xerj codex claude
+update-xerj swival
 update-xerj --binary-only
 update-xerj --help
 ```

@@ -160,6 +160,8 @@ already-installed PSScriptAnalyzer; it does not install it.
   Verify its version before publishing the launcher and check the effective
   command from a new session. The Swival wheel and dependency index must
   come from official PyPI. Keep the Python interpreter outside user PATH.
+  Validate Swival's xerj TOML using a private staging directory with no
+  project configuration and keep credentials in the inherited environment.
 - Probe the command actually resolved from PATH and explicitly recognize
   executable, CMD and PowerShell script candidates. Report shadowed paths
   without running every candidate. Parse semantic version tokens across

@@ -10,19 +10,22 @@ use Fcntl          qw(LOCK_EX O_NOFOLLOW O_RDONLY);
 use Encode         qw(decode FB_CROAK);
 use File::Basename qw(dirname);
 use File::Path     qw(make_path);
-use File::Temp     qw(tempfile);
+use File::Temp     qw(tempdir tempfile);
 use JSON::PP       ();
 use POSIX          qw(_exit);
 
-my ( $client, $binary, $url ) = @ARGV;
-if (   @ARGV != 3
+my ( $client, $binary, $url, $swival ) = @ARGV;
+if (   !defined $client
+    || @ARGV != ( $client eq 'swival' ? 4 : 3 )
+    || ( $client eq 'swival' && ( $swival !~ m{\A/} || !-x $swival ) )
     || $binary !~ m{\A/}
     || $binary =~ /[\x00-\x1f\x7f]/
     || $url !~
 m{\Ahttps?://(?:\[[a-fA-F0-9:.]+\]|[A-Za-z0-9._-]+)(?::[0-9]{1,5})?(?:/[A-Za-z0-9._~/-]*)?\z}
-    || $client !~ /\A(?:crush|opencode[12]?|copilot-cli|claude|codex-check)\z/ )
+    || $client !~
+    /\A(?:crush|opencode[12]?|copilot-cli|claude|swival|codex-check)\z/ )
 {
-    print STDERR "Usage: xerj-config.pl CLIENT BINARY URL\n";
+    print STDERR "Usage: xerj-config.pl CLIENT BINARY URL [SWIVAL]\n";
     exit 2;
 }
 
@@ -93,6 +96,9 @@ if ( $client eq 'crush' ) {
 elsif ( $client eq 'copilot-cli' ) {
     my $dir = $ENV{COPILOT_HOME} || "$home/.copilot";
     $path = "$dir/mcp-config.json";
+}
+elsif ( $client eq 'swival' ) {
+    $path = "$root/swival/config.toml";
 }
 elsif ( $client eq 'claude' ) {
     my $dir = $ENV{CLAUDE_CONFIG_DIR} || $home;
@@ -219,8 +225,70 @@ sub update_entry {
     }
 }
 
+sub validate_swival {
+    my ( $candidate, $stage ) = @_;
+    my $config = "$stage/swival/config.toml";
+    open my $out, '>:raw', $config or die "Cannot stage Swival TOML\n";
+    print {$out} $candidate or die "Cannot write staged Swival TOML\n";
+    close $out              or die "Cannot close staged Swival TOML\n";
+
+    my $pid = fork();
+    die "Cannot start Swival configuration validation\n" unless defined $pid;
+    if ( !$pid ) {
+        open STDIN,  '<', '/dev/null' or _exit(1);
+        open STDOUT, '>', '/dev/null' or _exit(1);
+        open STDERR, '>', '/dev/null' or _exit(1);
+        $ENV{XDG_CONFIG_HOME} = $stage;
+        exec '/usr/bin/timeout', '--kill-after=3s', '20s', $swival,
+          '--list-profiles', '--base-dir', "$stage/project"
+          or _exit(1);
+    }
+    waitpid( $pid, 0 );
+    die "Swival could not validate its TOML configuration\n" if $?;
+}
+
+sub swival_config {
+    my ($body)      = @_;
+    my $begin       = '# BEGIN xerj managed';
+    my $end         = '# END xerj managed';
+    my $command     = $json->encode($binary);
+    my $table       = '[mcp_servers.xerj]';
+    my $prefix      = "args = [\"mcp\", \"--url\", ";
+    my $encoded_url = $json->encode($url);
+    my $wanted =
+        "$begin\n$table\ncommand = $command\n"
+      . $prefix
+      . $encoded_url
+      . "]\n$end\n";
+
+    if ( $body =~ /^(?:\Q$begin\E|\Q$end\E)\r?$/m ) {
+        my $count = () = $body =~ /^(?:\Q$begin\E|\Q$end\E)\r?$/mg;
+        conflict() if $count != 2;
+        $body =~ s{
+            (^\Q$begin\E\r?\n
+            \Q$table\E\r?\n
+            command\ =\ \Q$command\E\r?\n
+            \Q$prefix\E)"https?://[^"\r\n]+"
+            (\]\r?\n\Q$end\E\r?(?:\n|\z)\s*\z)
+        }{$1$encoded_url$2}mx or conflict();
+    }
+    else {
+        $body .= "\n" if length($body) && $body !~ /\n\z/;
+        $body .= $wanted;
+    }
+    return $body;
+}
+
 my $text;
-if ( $client eq 'crush' ) {
+if ( $client eq 'swival' ) {
+    my $stage =
+      tempdir( '.xerj-swival-XXXXXX', DIR => $directory, CLEANUP => 1 );
+    make_path( "$stage/swival", "$stage/project" );
+    $text = swival_config($old);
+    validate_swival( $old,  $stage ) if length($old);
+    validate_swival( $text, $stage ) if $text ne $old || !length($old);
+}
+elsif ( $client eq 'crush' ) {
     my ($legacy) = read_config("$directory/crush.json");
     if ( $legacy =~ /\S/ ) {
         my $old_json = read_json($legacy);

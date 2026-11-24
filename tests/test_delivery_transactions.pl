@@ -589,6 +589,77 @@ subtest 'xerj client configuration stages edits without backups' => sub {
     }
 };
 
+subtest 'Swival TOML registration validates private candidates' => sub {
+    plan skip_all => 'The configuration helper uses Linux directory locks'
+      unless is_linux();
+    my $root   = new_tempdir('xerj-swival-');
+    my $client = "$root/swival";
+    my $config = "$root/xdg/swival/config.toml";
+    my $helper = "$REPOSITORY_ROOT/secureblue/xerj-config.pl";
+    make_path("$root/xdg/swival");
+    write_file( $client, <<'SWIVAL' );
+#!/bin/sh
+set -eu
+[ "$1" = --list-profiles ] && [ "$2" = --base-dir ] && [ -d "$3" ]
+case "$XDG_CONFIG_HOME" in */.xerj-swival-*) ;; *) exit 5 ;; esac
+file="$XDG_CONFIG_HOME/swival/config.toml"
+if grep -q INVALID_TOML "$file"; then exit 6; fi
+[ "$(grep -c '^\[mcp_servers\.xerj\]$' "$file")" -lt 2 ]
+SWIVAL
+    chmod oct('700'), $client or die "$client: $!";
+    my $run = sub {
+        my ($endpoint) = @_;
+        return run_command(
+            cmd => [
+                $^X,       $helper,
+                'swival',  '/opt/xerj test/xerj',
+                $endpoint, $client
+            ],
+            env => env_with(
+                HOME            => $root,
+                XDG_CONFIG_HOME => "$root/xdg",
+                XERJ_AUTH       => 'synthetic-secret'
+            ),
+        );
+    };
+    my $url = 'http://localhost:9200';
+    is( $run->($url)->{returncode}, 0, 'created missing Swival config' );
+    is( ( stat($config) )[2] & oct('777'),
+        oct('600'), 'new Swival configuration is private' );
+    my $original = <<'TOML';
+commands = "ask"
+[profiles.local]
+provider = "generic"
+model = "retained"
+base_url = "http://127.0.0.1:8080"
+TOML
+    write_file( $config, $original );
+    is( $run->($url)->{returncode}, 0, 'registered Swival' );
+    my $first = slurp($config);
+    is( substr( $first, 0, length($original) ), $original, 'retained TOML' );
+    like( $first, qr/\[mcp_servers\.xerj\]/, 'uses native schema' );
+    unlike( $first, qr/synthetic-secret/, 'does not write credentials' );
+    is( $run->($url)->{returncode}, 0,      'same endpoint is idempotent' );
+    is( slurp($config),             $first, 'no duplicate Swival block' );
+    is( $run->('https://example.org')->{returncode}, 0, 'updated endpoint' );
+    like( slurp($config), qr{https://example\.org}, 'replaced managed URL' );
+    my $read_only = slurp($config);
+    chmod oct('400'), $config or die "$config: $!";
+    isnt( $run->($url)->{returncode}, 0, 'read-only config fails safely' );
+    is( slurp($config), $read_only, 'read-only TOML stays intact' );
+    chmod oct('600'), $config or die "$config: $!";
+
+    for
+      my $bad ( "INVALID_TOML\n", "[mcp_servers.xerj]\ncommand = \"other\"\n" )
+    {
+        write_file( $config, $bad );
+        isnt( $run->($url)->{returncode}, 0, 'unsafe config is rejected' );
+        is( slurp($config), $bad, 'unsafe config remains byte-identical' );
+    }
+    is_deeply( [ matching_entries( "$root/xdg/swival", qr/^\.xerj-/ ) ],
+        [], 'validation and update leave no staging artifacts' );
+};
+
 subtest 'xerj MCP selections and ownership checks' => sub {
     plan skip_all => 'The xerj updaters require Linux' unless is_linux();
     my $root   = new_tempdir('xerj-mcp-');

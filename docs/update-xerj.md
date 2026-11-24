@@ -8,6 +8,8 @@ or update the clients themselves.
 update-xerj
 update-xerj all
 update-xerj codex claude
+update-xerj swival
+update-xerj codex swival
 update-xerj copilot-cli --url https://search.example.org
 update-xerj --binary-only
 update-xerj --help
@@ -50,6 +52,7 @@ native end-to-end check is still pending.
 | Crush | Partial | Partial | Partial | Managed stdio block in `~/.config/crush/crushrc` or the XDG equivalent. `CRUSH_GLOBAL_CONFIG` selects the directory. | `provider add` and `model add` configure compatible API protocols, endpoint, credentials and models. [Crush configuration](https://github.com/charmbracelet/crush/blob/main/docs/config/README.md) |
 | GitHub Copilot CLI | Partial | Partial | Partial | JSON in `${COPILOT_HOME:-~/.copilot}/mcp-config.json`, `mcpServers.xerj` | BYOK providers and models in `providers.json` or `COPILOT_PROVIDER_*` and `COPILOT_MODEL`. [Copilot providers](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-llm-models) |
 | Claude Code | Partial | Partial | Partial | `~/.claude.json` or `$CLAUDE_CONFIG_DIR/.claude.json`, `mcpServers.xerj`. [Claude directories](https://code.claude.com/docs/en/claude-directory) | Anthropic-compatible gateways use `ANTHROPIC_BASE_URL`, gateway credentials and model settings. [Claude gateway](https://code.claude.com/docs/en/llm-gateway) |
+| Swival | Partial | Partial | Partial | `${XDG_CONFIG_HOME:-~/.config}/swival/config.toml`, `[mcp_servers.xerj]` with the verified local command and endpoint as arguments. | The generic provider accepts an OpenAI-compatible Chat Completions endpoint and an explicit model. Its optional key can come from `OPENAI_API_KEY`. [Swival providers](https://swival.dev/pages/providers.html#generic-openai-compatible) |
 
 On Windows, `~` refers to the user's profile. OpenCode and Crush use their
 XDG config root when applicable, normally `~/.config`. User registration
@@ -82,6 +85,25 @@ Crush registration requires version 0.88.0 or later with `crushrc` support.
 Existing conflicting legacy `crush.json` registrations need manual editing.
 [Crush configuration](https://github.com/charmbracelet/crush/blob/main/docs/config/README.md)
 
+Swival gives a project-level `xerj` table precedence over the global entry.
+TOML wins over an MCP JSON definition with the same name, and `--no-mcp`
+disables all MCP connections. The updater validates the Swival TOML with
+the installed client and preserves conflicting user-managed definitions.
+It appends a marked table on first registration. Keep that managed table
+at the end of the file for automatic endpoint updates. Edit conflicts
+manually if the table was moved or extended.
+Existing model settings, provider endpoints, context limits and sandbox
+policy are kept. Swival profiles can also set generation parameters such as
+`temperature`, `top_p` and `max_output_tokens`. Swival needs an explicit
+model for its generic inference provider. It can derive the context window
+from model metadata when the
+chosen inference server advertises it. XERJ provides search tools through
+stdio MCP. For a remote authenticated XERJ node, make `XERJ_AUTH` available
+to the Swival process. The registration contains the command and endpoint.
+[Swival configuration precedence](https://swival.dev/pages/customization.html) ·
+[Swival MCP](https://swival.dev/pages/mcp.html) ·
+[Swival providers](https://swival.dev/pages/providers.html)
+
 ## Validation
 
 Repository tests use disposable configuration directories and fake agents.
@@ -90,6 +112,9 @@ and missing clients, preservation of unrelated settings, invalid input and
 failed publication. The native commands and resulting user-scope schemas
 were also checked on Linux for OpenCode V2, Codex, Copilot CLI and Claude Code.
 The Crush block was checked against Charm's documented Bash configuration.
+The Swival fixtures check an initial registration, a changed endpoint,
+repeated runs and rejection of invalid or conflicting TOML. They exercise
+staged publication with a substitute for the Swival validator.
 
 | Platform | Registration tests | Native end-to-end connection |
 | --- | --- | --- |

@@ -54,7 +54,7 @@ EOF
 parse_args() {
 	while (($#)); do
 		case "$1" in
-		all | --binary-only | opencode | codex | crush | copilot-cli | claude | --opencode | --codex | --crush | --copilot-cli | --claude)
+		all | --binary-only | opencode | codex | crush | copilot-cli | claude | swival | --opencode | --codex | --crush | --copilot-cli | --claude | --swival)
 			xerj_select "$1"
 			;;
 		--version)
@@ -246,7 +246,7 @@ install_xerj() {
 	if [[ -n $installed ]] && dpkg --compare-versions "$installed" gt "$version"; then
 		error "Installed xerj $installed is newer than $version"
 	fi
-	if ((!VERIFY_ATTESTATION)) && verify_install "$version" "$tag"; then
+	if ((VERIFY_ATTESTATION == 0)) && verify_install "$version" "$tag"; then
 		log "$tag already installed: $XERJ_BIN"
 		return
 	fi
@@ -302,7 +302,7 @@ main() {
 		xerj_configure_clients "$XERJ_BIN"
 		return
 	fi
-	if ((!XERJ_BINARY_ONLY)); then
+	if ((XERJ_BINARY_ONLY == 0)); then
 		error 'Invoke update-xerj as the desktop user for MCP registration or pass --binary-only'
 	fi
 	require_cmd dpkg
