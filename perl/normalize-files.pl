@@ -965,13 +965,47 @@ sub stage_to_temp {
     return;
 }
 
+sub move_symlink_no_replace {
+    my ( $source, $destination ) = @_;
+    my @original = lstat $source;
+    return 0 unless @original && -l _;
+    my $link_text = readlink $source;
+    return 0 unless defined $link_text;
+
+    # link(2) may follow the source on some systems. symlink(2) creates
+    # a new link with the same text and never overwrites an existing name.
+    return 0 unless symlink $link_text, $destination;
+    my @created      = lstat $destination;
+    my $created_text = @created && -l _ ? readlink($destination) : undef;
+    my @current      = lstat $source;
+    my $failure      = EAGAIN;
+    if (   defined $created_text
+        && $created_text eq $link_text
+        && same_snapshot( \@original, \@current ) )
+    {
+        return 1 if unlink $source;
+        $failure = $!;
+    }
+
+    my @remaining = lstat $destination;
+    unlink $destination
+      if defined $created_text
+      && $created_text eq $link_text
+      && same_snapshot( \@created, \@remaining );
+    $! = $failure;
+    return 0;
+}
+
 sub move_no_replace {
     my ( $source, $destination ) = @_;
     if ( is_windows() ) {
         require Win32API::File;
         return Win32API::File::MoveFileEx( $source, $destination, 0 );
     }
-    if ( -d $source && !-l $source ) {
+    if ( -l $source ) {
+        return move_symlink_no_replace( $source, $destination );
+    }
+    if ( -d $source ) {
 
         # Reserve an empty directory atomically. POSIX rename can only
         # replace an empty directory with a directory.
@@ -997,8 +1031,10 @@ sub move_no_replace {
 sub rename_op {
     my ( $cfg, $op, $src, $dst, $R, $label ) = @_;
     my $hash_before;
+    my $is_link;
     if ( $cfg->{verify} && $op->{is_dir} == 0 ) {
-        $hash_before = sha256_file($src);
+        $is_link     = -l $src;
+        $hash_before = $is_link ? readlink($src) : sha256_file($src);
         if ( !defined $hash_before ) {
             $R->{errors}++;
             emit_error(
@@ -1013,7 +1049,7 @@ sub rename_op {
     }
     $R->{renames_applied}++;
     if ( defined $hash_before ) {
-        my $hash_after = sha256_file($dst);
+        my $hash_after = $is_link ? readlink($dst) : sha256_file($dst);
         if ( !defined $hash_after || $hash_after ne $hash_before ) {
             $R->{errors}++;
             emit_error(
@@ -2409,8 +2445,9 @@ ambiguous. ENC is any name understood by L<Encode>.
 
 =item B<--verify>
 
-Verify renamed files with SHA-256, and validate every conversion before
-replacing the original.
+Verify renamed regular files with SHA-256 and renamed symbolic links by
+their stored link text. Validate every conversion before replacing the
+original.
 
 =item B<--no-git>
 

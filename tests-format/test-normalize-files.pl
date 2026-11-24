@@ -505,7 +505,14 @@ subtest 'symlinks are not followed and targets are untouched' => sub {
     if ( !$made ) {
         plan skip_all => 'symlinks not supported here';
     }
-    my ( $rc, undef ) = run_capture( '--apply', '--rename', $tmp );
+    my $occupied = File::Spec->catfile( $tmp, 'occupied.txt' );
+    write_raw( $occupied, "keep\n" );
+    ok(
+        !NormalizeFiles::move_no_replace( $link, $occupied ),
+        'a symbolic link cannot overwrite an occupied destination'
+    );
+    is( slurp_raw($occupied), "keep\n", 'occupied destination is untouched' );
+    my ( $rc, undef ) = run_capture( '--apply', '--rename', '--verify', $tmp );
     is( $rc, 0, 'exit 0' );
     is( slurp_raw( File::Spec->catfile( $tmp, 'target-file.txt' ) ),
         "data\n", 'target content preserved under its new name' );
@@ -513,6 +520,9 @@ subtest 'symlinks are not followed and targets are untouched' => sub {
         -l File::Spec->catfile( $tmp, 'link-name' ),
         'the symlink itself was renamed (still a link)'
     );
+    is( readlink( File::Spec->catfile( $tmp, 'link-name' ) ),
+        $target,
+        'verification compares exact link text, even after its target moved' );
     done_testing();
 };
 

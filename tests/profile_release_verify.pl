@@ -19,9 +19,9 @@ my $src     = "$root/source";
 my $out     = "$root/output";
 my $scratch = "$root/scratch";
 make_path("$src/release/small");
-mkdir $_, oct('700')
-  or die "cannot create profile directory: $!\n"
-  for ( $out, $scratch );
+for my $directory ( $out, $scratch ) {
+    mkdir $directory, oct('700') or die "mkdir $directory: $!\n";
+}
 
 open my $payload, '>:raw', "$src/release/payload" or die "open payload: $!\n";
 my $size = 128 * 1024 * 1024;
@@ -59,7 +59,8 @@ while ( ( $wait = waitpid( $pid, WNOHANG ) ) == 0 ) {
             no_chdir => 1,
             wanted   => sub { $bytes += -s _ if -f $File::Find::name; }
         },
-        $out, $scratch
+        $out,
+        $scratch
     );
     $peak = $bytes if $bytes > $peak;
     sleep(0.025);
@@ -69,6 +70,6 @@ die "verification profile failed\n" if $wait != $pid || $status;
 die "wrong result in verification profile\n"
   unless -s "$out/release/payload" == $size && -f "$out/release/small/1024";
 
-printf
-"archive_bytes=%d payload_bytes=%d peak_sampled_extraction_bytes=%d elapsed_seconds=%.3f\n",
-  -s $archive, $size, $peak, time() - $start;
+my $format = "archive_bytes=%d payload_bytes=%d "
+  . "peak_sampled_extraction_bytes=%d elapsed_seconds=%.3f\n";
+printf $format, -s $archive, $size, $peak, time() - $start;

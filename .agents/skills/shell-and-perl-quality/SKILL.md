@@ -28,6 +28,9 @@ description: >-
      Windows installer checks for them.
 2. Match the file's existing style. Shell uses tabs and `shfmt -s`. Perl uses
    4-space indentation and an 80-column limit.
+   Keep Bash compatible with Ubuntu's shfmt 3.8 and current releases.
+   When they disagree, use explicit zero comparisons and attach heredoc
+   error handling to a standalone command.
 3. Keep error handling explicit. Bash scripts use `set -euo pipefail` except
    where the script is interactive by design. ksh scripts use `set -eu` and
    guard optional options.
@@ -178,7 +181,9 @@ pipe. Drain past the tar end marker so gzip trailer integrity and expansion
 limits are checked, and reap the worker before accepting extracted output.
 
 For portable rename groups, use no-replace operations for forward moves
-and rollback. On Windows, use bundled `Win32API::File::MoveFileEx` without
+and rollback. POSIX `link` may follow a symbolic-link source on some systems.
+Use `readlink` and exclusive `symlink` creation to move that entry without
+reading the target file. On Windows, use bundled `Win32API::File::MoveFileEx` without
 the replace flag. SSH preference updates reread and merge under a short
 sibling lock, and validate login and host before persisting a login.
 
