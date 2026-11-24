@@ -23,12 +23,16 @@ uses `chattr` to manage immutable attributes. Override `SECUREBLUE_USER` or
 `BASH_CONF_DST_DIR` to select another destination; your Bash configuration must
 source that directory's files.
 
-Use `codex-yolo`, `copilot-yolo`, `opencode-auto`, `crush-yolo`, or
-`claude-yolo` to opt in to the corresponding CLI's approval mode.
+Use `codex-yolo`, `copilot-yolo`, `opencode-auto`, `crush-yolo`,
+`claude-yolo`, or `swival-yolo` to opt in to the corresponding CLI mode.
 `crush-yolo` skips approval prompts and retains Crush's dangerous-command
 blocks. `claude-yolo` selects Claude Code's `bypassPermissions` mode.
 [Crush releases](https://github.com/charmbracelet/crush/releases/latest) ·
 [Claude Code CLI reference](https://code.claude.com/docs/en/cli-reference)
+
+`swival-yolo` passes Swival's `--yolo` flag, shorthand for
+`--files all --commands all`.
+[Swival 1.9.6 flag definition](https://github.com/Swival/swival/blob/1.9.6/swival/agent.py#L7987-L7992)
 
 `sysupgrade-all` calls the maintenance helpers documented in
 [../secureblue/README.md](../secureblue/README.md), followed by `pipx upgrade-all`.

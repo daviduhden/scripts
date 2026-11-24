@@ -71,7 +71,8 @@ GNU options, paths, privilege tools, and service commands. Do not add `sudo`,
    Define Bash agent aliases once in `shell/aliases.bash` and use `command`
    to bypass shell functions. Check the vendor's current flag semantics
    before documenting approval behavior. Crush's `--yolo` retains its
-   dangerous-command blocks.
+   dangerous-command blocks. Swival's `--yolo` abbreviates
+   `--files all --commands all`. Describe the vendor's specific controls.
    Wrapper and tests-format installers must verify link or profile ownership
    before replacement or removal. Keep staged links valid after relocation.
    The Debian, OpenBSD, SecureBlue, and Perl installers track exact installed

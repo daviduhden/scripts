@@ -49,6 +49,7 @@ alias copilot-yolo='command copilot --yolo'
 alias opencode-auto='JavaScriptCoreUseJIT=1 command opencode --auto'
 alias crush-yolo='command crush --yolo'
 alias claude-yolo='command claude --dangerously-skip-permissions'
+alias swival-yolo='command swival --yolo'
 
 # --------------------------------------------------
 # Editors
