@@ -68,8 +68,17 @@ GNU options, paths, privilege tools, and service commands. Do not add `sudo`,
    configuration keys, and do not duplicate PATH or firewall entries.
    Keep shell aliases that request unrestricted assistant modes under distinct
    opt-in names so sourcing the aliases preserves ordinary CLI invocations.
+   Define Bash agent aliases once in `shell/aliases.bash` and use `command`
+   to bypass shell functions. Check the vendor's current flag semantics
+   before documenting approval behavior. Crush's `--yolo` retains its
+   dangerous-command blocks.
    Wrapper and tests-format installers must verify link or profile ownership
    before replacement or removal. Keep staged links valid after relocation.
+   The Debian, OpenBSD, SecureBlue, and Perl installers track exact installed
+   file contents in `.scripts-install` under each destination. Keep preflight
+   checks ahead of publication. Uninstall must leave modified and unmanaged
+   files in place. Legacy adoption is explicit with `ADOPT_LEGACY=1` and
+   requires byte-for-byte matching source files.
 8. For privileged or destructive code, follow `system-change-safety` before
    writing the implementation.
 9. Run the validations below. Do not run the script against the host.
@@ -131,18 +140,47 @@ tool is missing, report the check as skipped rather than passed.
 - `secureblue/update-xerj.bash` installs the static musl release per user in
   `~/.local/bin`, without rpm-ostree layering or run0. Verify the archive's own
   SHA-256 and exact checksum filename before reading the expected binary.
-  Client flags register stdio MCP only: Codex uses its CLI, Crush a managed
-  `crushrc` block, and OpenCode `mcp.xerj` in strict JSON. Preserve other
-  settings and backups; refuse existing JSONC for manual merging. The user
-  must run an authenticated node separately and supply `XERJ_AUTH` when local
-  key discovery cannot find its data directory. Do not execute this updater
-  during validation.
+  Check that the staged executable reports the selected tag before replacing
+  the installed binary.
+  The POSIX updaters share `xerj-clients` and `xerj-config`. Install both
+  helpers with Debian and SecureBlue. Select all installed clients by
+  default, validate explicit selectors before downloading, and keep
+  `--binary-only` independent of client configuration. On Debian keep all
+  client commands, discovery and config writes under the invoking account.
+  Register only stdio MCP and follow the versioned schemas and user scopes
+  in the [configuration matrix](../../../docs/update-xerj.md). OpenCode V2
+  uses `mcp.servers`. Stage file edits beside their destination, preserve
+  unowned registrations and existing backups, and keep credentials out of
+  persistent configuration and arguments. Validate with temporary user
+  directories and mocked installation operations.
   Resolve its default version with curl HEAD, HTTPS-only redirects and
   `url_effective` from the public release URL, without the GitHub API. Validate
   the complete repository/tag URL before constructing asset names; pinned
   versions bypass discovery. `perl tests/test_delivery_transactions.pl`
   covers discovery, rejected redirects and failures with mocked curl and
   temporary install paths, including preservation of an existing binary.
+
+- `debian/update-xerj.bash` selects the official amd64 or arm64 Debian
+  package via `dpkg --print-architecture`. Verify the published checksum and
+  the package's name, architecture, and version before passing it to APT.
+  Upstream uses Debian's `~` for prerelease package versions. If the native
+  package's glibc floor exceeds the host version, package the verified
+  official static musl build locally using `dpkg-deb`. Do not raise the
+  installed glibc floor to fit an application release. Use the shared
+  `release-verify` helper for bounded member extraction. The optional GitHub
+  release attestation check must fail closed and verify each upstream
+  artifact used by the run before installation.
+
+- The Debian and SecureBlue `update-ai-clis` wrappers use the same private
+  Linux helper. Keep the helper in both installer lists and keep the
+  installed-name and checkout-relative lookup working. Verify every
+  selected executable before recording a successful result. Cover selectors
+  with a hyphen in Bash associative maps after formatting. Keep the managed
+  PATH directories user-owned or administrator-controlled, and check which
+  executable a new session resolves before claiming it is available.
+  Use the tests in [test_ai_cli_updates.pl](../../../tests/test_ai_cli_updates.pl)
+  for offline selector, version, conflict and failure coverage. The Copilot
+  CLI version banner ends its SemVer token with a sentence period.
 
 - `secureblue/setup-clamav.bash` must not write `ScanOnAccess`: that directive
   only applies to ClamAV <= 0.101. Current releases enable on-access scanning

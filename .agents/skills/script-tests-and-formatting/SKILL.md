@@ -30,13 +30,18 @@ sources. `make format` invokes all four explicitly. Formatting drift exits 2
 even if repaired, so inspect the diff and rerun checks. Safe `mktemp` logs
 remain for inspection; transient failure, skip and format lists are cleaned.
 
+The shell validator inventories sources once. Treat failures from discovery
+or shfmt as validation errors even if the tool produces no offending filenames.
+Use `make test VALIDATION_FLAGS='--check --strict'` in CI to run strict
+shell and Perl validation once before isolated regressions.
+
 Use `--strict` to fail when optional tools or Perl modules are missing.
 Non-strict runs record `[SKIP]` diagnostics and counts rather than claiming
 those checks passed. Make dialect/platform omissions are expected skips.
 Python validation requires Ruff whenever `.py` files exist, in both normal
 and strict modes, and skips Ruff for an empty tree. `make test-python` runs
 this validator; `install-tests-format` installs it. Ruff calls disable caches
-and only format mode runs `ruff clean`. The Linux workflow installs Ruff;
+and only format mode runs `ruff clean`. The Linux workflow installs Ruff when the checkout contains Python sources;
 offline Perl tooling tests use mocked Ruff and temporary Python fixtures.
 The Linux knfmt installer runs the upstream build unprivileged and uses
 system install(1) for the binary and manual page.
@@ -54,9 +59,10 @@ sources must also be trusted.
 
 Windows batch/PowerShell checks run natively. The manual Platform Validation
 workflow (`workflow_dispatch`) runs safe checks and regressions on Ubuntu 24.04,
-Windows Server 2025 (`windows-2025`), and an OpenBSD 8.0 VM; it must never
-execute administrative scripts against a host and must not run on pushes, pull
-requests, or a schedule.
+Debian 13 in a container, Windows Server 2025 (`windows-2025`), and an
+OpenBSD 8.0 VM. Keep it manual and use the separate Static Validation workflow
+for lightweight pull request and main checks. Keep administrative operations
+inside mocks and disposable test paths.
 The Windows job pins `PSScriptAnalyzer` 1.25.0. `actions/checkout` is pinned to
 v7.0.1 and `vmactions/openbsd-vm` to v1.4.9 by full commit SHA. Keep runner
 images, VM releases, analyzer versions, and action SHAs as separate
@@ -133,7 +139,7 @@ with a wrapper that hides whether the batch files actually ran.
      check; the platform workflow runs native/isolated checks. The standalone
      Windows xerj updater suite is `pwsh -NoProfile -File windows/tests/test-update-xerj.ps1`;
      it uses temporary paths and mocked downloads/clients, not real installs.
-     The AI CLI updater suite is `pwsh -NoProfile -File windows/tests/test-update-aiclis.ps1`;
+     The AI CLI updater suite is `pwsh -NoProfile -File windows/tests/test-update-ai-clis.ps1`;
      it uses fixture ZIPs and mocked versions/daemon calls, checks exact-path
      duplicate rejection and incomplete caches, and exercises main dispatch
      after failures without touching user PATH or real daemon state.
@@ -256,8 +262,16 @@ Makefiles whose generated `config.mk` is absent. On OpenBSD, `mbake` and
   and accept case labels containing `:`. Keep Debian-only tools such as
   `dracut`, `dtc`, and `lsinitrd` in `DEBIAN_CMDS` so the Ubuntu runner does
   not report them as missing.
+- For Debian and SecureBlue xerj callers, the correctness probe reads
+  declarations from the shared `scripts/xerj-clients.bash` helper. Keep
+  the lookup scoped to the actual callers. Exercise shared functions
+  through staged launchers without sourcing the helper in the validator.
 - `validate-perl.sh --format` runs `perltidy` in place; it uses `-npro` so a developer
   profile does not change the result.
+- Run updater regressions with fake PATH entries, mock package managers and
+  temporary user directories. Include installed-name coverage through staged
+  Make targets or the disposable Windows installer. A launcher `--help`
+  invocation checks argument forwarding without downloading software.
 - `make test-tooling` covers the shell, Perl, and Make validator modes, strict
   missing tools, make execution opt-in, installation paths with spaces, and
   early failures using temporary paths and offline tool doubles. It also runs

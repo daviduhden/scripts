@@ -280,28 +280,48 @@ restore_xd_if_needed() {
 }
 trap restore_xd_if_needed EXIT
 
-# Download the upstream unit, install it mode 0644, reload systemd,
-# and enable xd. The service is restarted only if it was active before
-# this run; otherwise the user is told how to start it.
+# The system service runs as the dedicated XD account. Keep the unit
+# independent of the unprivileged source checkout.
 install_systemd_service() {
 	log "Updating systemd unit: $SYSTEMD_UNIT_FILE..."
 	install -d /etc/systemd/system
 
 	local unit_tmp
-	unit_tmp="$(mktemp /tmp/xd-service-XXXXXX)"
-	if ! run_build git show HEAD:contrib/systemd/xd.service >"$unit_tmp"; then
-		rm -f "$unit_tmp"
-		error "Failed to read the systemd unit from the XD checkout."
-	fi
+	unit_tmp=$(mktemp /etc/systemd/system/.xd.service.XXXXXX)
+	if ! cat >"$unit_tmp" <<'UNIT'
+[Unit]
+Description=Standalone I2P BitTorrent Client
 
-	install -m 0644 "$unit_tmp" "$SYSTEMD_UNIT_FILE"
-	rm -f "$unit_tmp"
+[Service]
+User=xd
+Group=xd
+WorkingDirectory=/var/lib/XD
+ExecStart=/usr/bin/XD /var/lib/XD/xd.ini
+Restart=on-failure
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+CapabilityBoundingSet=
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+	then
+		rm -f -- "$unit_tmp"
+		error 'Cannot stage xd.service'
+	fi
+	if ! chmod 0644 "$unit_tmp" || ! mv -fT -- "$unit_tmp" "$SYSTEMD_UNIT_FILE"; then
+		rm -f -- "$unit_tmp"
+		error 'Cannot publish xd.service'
+	fi
 
 	log "Reloading systemd daemon..."
 	systemctl daemon-reload
 
 	log "Enabling xd service at boot..."
-	systemctl enable xd >/dev/null 2>&1 || true
+	systemctl enable xd >/dev/null
 
 	if [ "$WAS_ACTIVE" -eq 1 ]; then
 		log "Restarting xd..."

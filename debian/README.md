@@ -28,16 +28,18 @@ users.
 | [install-hardened-malloc.bash](install-hardened-malloc.bash) | Builds GrapheneOS hardened_malloc on Debian 13 and configures global preloading; supports amd64 and arm64. |
 | [sync-website.bash](sync-website.bash) | Synchronizes a deployed website from GitHub, using `gh`, Git, or a ZIP fallback; applies permissions and restarts the configured service. |
 | [sysupgrade.bash](sysupgrade.bash) | Updates APT packages, runs full-upgrade and cleanup, handles service maintenance, and collects system information. |
+| [update-ai-clis.bash](update-ai-clis.bash) | Installs or updates selected coding agents. See the [distribution and PATH details](../docs/update-ai-clis.md). |
 | [update-argon-one-v3.bash](update-argon-one-v3.bash) | Updates Argon One V3 EEPROM and fan/power-button scripts; supports reboot options. |
-| [update-btop.bash](update-btop.bash) | Builds and installs the latest btop++ release and its build dependencies. |
+| [update-btop.bash](update-btop.bash) | Builds and stages btop++ as an unprivileged account in a disposable directory. Publishes selected outputs under `/usr/local`. |
 | [update-fastfetch.bash](update-fastfetch.bash) | Verifies the latest Fastfetch package against the GitHub release digest and checks Debian package metadata before installing through APT. |
 | [update-golang.bash](update-golang.bash) | Installs the latest stable Go from official tarballs into `/usr/local/go` and updates the system PATH. |
-| [update-lyrebird.bash](update-lyrebird.bash) | Builds the Lyrebird Tor transport with Go and Make and installs it into `/usr/local/bin`. |
+| [update-lyrebird.bash](update-lyrebird.bash) | Builds the Lyrebird Tor transport with Go and Make as an unprivileged account in a disposable directory. Publishes the binary in `/usr/local/bin`. |
 | [update-monero.bash](update-monero.bash) | Updates Monero CLI binaries, configures `monerod`, and optionally builds and configures monero-lws. Verifies the signed hash list against the pinned binaryFate fingerprint and the upstream systemd unit against a pinned SHA-256. The LWS account is auto-detected (`monero-lws` if present, else the monerod user); override with `LWS_USER`/`LWS_GROUP`. Opens the firewall ports with nftables (`FIREWALL_TCP_PORTS`, default `18080 8443`). |
 | [update-msedit.bash](update-msedit.bash) | Installs or updates Microsoft Edit from precompiled GitHub release binaries. |
 | [update-openrsync.bash](update-openrsync.bash) | Builds and installs openrsync, installing build dependencies through APT. |
 | [update-signify.bash](update-signify.bash) | Builds and installs the portable OpenBSD signify utility. |
-| [update-xd-torrent.bash](update-xd-torrent.bash) | Builds XD as an unprivileged account, installs selected outputs and reads the unit from the same checkout. `--skip-service-and-user-setup` skips service setup. |
+| [update-xd-torrent.bash](update-xd-torrent.bash) | Builds XD as an unprivileged account and installs the system unit defined by this repository. The service runs as `xd`. `--skip-service-and-user-setup` skips service setup. |
+| [update-xerj.bash](update-xerj.bash) | Installs verified upstream xerj assets through APT on Debian 13 or later. |
 | [rpi-update-safe.bash](rpi-update-safe.bash) | Runs `rpi-update` without rebooting on Raspberry Pi 5, then validates and repairs the selected DTB and initramfs with backups. Requires root and can change firmware, modules, and boot files; it does not provide a complete updater rollback. |
 
 Examples from the repository root:
@@ -61,7 +63,64 @@ deployment script against a production document root as a test.
 Run history cleanup as the user whose data should be removed; set
 `SWIVAL_PROJECT_HOME` to select a different project.
 
+## System maintenance
+
+System maintenance stores its reports in the private root-owned directory
+`/var/log/scripts-sysupgrade`. Process summaries use executable names.
+
+## AI CLI updates
+
+Run `update-ai-clis codex claude` as your normal user. The updater uses
+`sudo` for APT operations. It tracks the Debian candidates for its selected
+download, metadata and verification tools. APT resolves the declared
+dependencies of Crush and Claude Code.
+Version discovery uses existing tools when available. An installation or
+update refreshes Debian package metadata before installing its prerequisites.
+
+OpenCode, Codex and Copilot use `~/.local/bin` launchers for releases under
+`~/.local/share/scripts-ai-clis`. The updater queries Anthropic's signed
+stable APT index in a temporary directory. Crush and Claude Code install under
+`/usr/bin`. For a version managed by a different package channel, the
+updater reports the existing path. See the [agent matrix and PATH
+behavior](../docs/update-ai-clis.md).
+
+## xerj
+
+```bash
+update-xerj
+update-xerj codex claude
+update-xerj --binary-only
+update-xerj --help
+```
+
+The Debian updater supports amd64 and arm64. It verifies the published
+SHA-256 checksum and inspects the Debian package metadata. If the package
+requires a newer system C library, it uses the upstream verified static
+musl binary in a locally built Debian package. This fallback uses Perl and
+the bundled `release-verify` helper. APT manages installation
+and dependencies. Both packages install `/usr/bin/xerj`. The
+repository's `uninstall-debian` target removes the updater. Use APT to remove
+the installed xerj package.
+
+Run as your normal user. Installation requests elevation for system work
+and client registration runs with your account. With no selectors, the
+updater registers xerj with compatible installed clients. See the
+[xerj configuration guide](../docs/update-xerj.md).
+
+The upstream latest release can be a release candidate. Use `--version TAG`
+to pin a release. `--verify-attestation` additionally requires an authenticated
+GitHub CLI that supports `gh release verify-asset`. Under sudo it uses the
+invoking user's GitHub CLI configuration. See the [xerj Debian packaging
+documentation](https://github.com/xerj-org/xerj/blob/main/docs/PACKAGING_DEBIAN.md).
+
 ## Website publication modes
+
+Both Git download methods and Git LFS run as the configured non-root
+`GH_USER`. The configured `GH_HOST` and `REPO_SLUG` select the source.
+Publication uses a separately captured, validated snapshot. The document
+tree must be root-owned, contain only regular files and directories, and
+deny write access to the web-service account. Keep application data that
+requires web-service write access outside the static document tree.
 
 `sync-website.bash` retains in-place copying by default. The deployment mutex
 is now a sibling `.<docroot>.sync.lock`, outside the document root. It never

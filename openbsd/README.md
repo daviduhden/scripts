@@ -15,7 +15,7 @@ and is not user-facing.
 | [sudo-wrapper.ksh](sudo-wrapper.ksh) | Routes `sudo` to `doas` and handles `visudo` and `sudoedit`. The install target creates matching symlinks; configure `doas` permissions separately. |
 | [sync-website.ksh](sync-website.ksh) | Synchronizes the configured website from GitHub through `gh`, Git, or a ZIP fallback, fixes permissions, and restarts its service. |
 | [sysupgrade-current.ksh](sysupgrade-current.ksh) | Upgrades to an OpenBSD snapshot and schedules post-upgrade tasks through `/upgrade.site` and `/etc/rc.firsttime`, including configuration maintenance, `dbupdate` system databases, package upgrades, Lynis auditing, and system reporting. `--skip-audit` omits the first-boot Lynis audit; `--help` shows usage. |
-| [update-crush.ksh](update-crush.ksh) | Installs the latest OpenBSD Crush binary after checksum verification, keeps a timestamped backup of the previous binary, and configures DeepSeek for the specified user. Usage: `update-crush.ksh [USER]`; the default user is root. |
+| [update-crush.ksh](update-crush.ksh) | Installs the latest OpenBSD Crush binary after Sigstore and checksum verification. Requires the `cosign` package and the installed `release-verify` helper. Keeps a uniquely named copy of the previous binary and updates DeepSeek configuration under the selected account. Usage: `update-crush.ksh [USER]`. The default user is root. |
 
 Example from the repository root:
 
@@ -23,6 +23,10 @@ Example from the repository root:
 ksh openbsd/clean-logs.ksh --dry-run
 ksh openbsd/sysupgrade-current.ksh --skip-audit
 ```
+
+Newly generated first-boot tasks store package, audit and information
+reports in `/var/log/scripts-sysupgrade`,
+which is private to root.
 
 Inspect deployment settings before running `sync-website.ksh`. For history
 cleanup, `SWIVAL_PROJECT_HOME` selects the project whose `.swival` state is
@@ -36,6 +40,12 @@ public site assets. Test changes with temporary trees; never use the live
 document root for validation.
 
 ## Website publication modes
+
+`sync-website.ksh` runs both Git download methods and Git LFS as a configured
+non-root `GH_USER` (default `admin`). It uses `release-verify` to capture and
+validate a private publication snapshot. The static tree must be root-owned,
+contain only regular files and directories, and deny write access to the
+web-service account. Keep service-writable data outside the static tree.
 
 `sync-website.ksh` keeps its compatible in-place copy mode by default. Its
 mutex now lives beside the configured document root as `.<docroot>.sync.lock`,

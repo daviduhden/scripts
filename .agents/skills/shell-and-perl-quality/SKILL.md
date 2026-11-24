@@ -59,6 +59,10 @@ description: >-
 - When a test replaces `PATH` with a mock directory, link every external
   command the exercised validator calls. OpenBSD `ksh` has no `printf`
   builtin, so `printf` must be present as a command.
+  For Debian scripts that deliberately reset `PATH`, mock calls to helper
+  interpreters explicitly when the test host provides them outside the system
+  directories. Match mock installer options by argument position so temporary
+  path names cannot accidentally trigger an option match.
 - In `tests-format/`, stay POSIX: no arrays, `[[ ]]`, `local`, or `pipefail`.
 - Sourced `shell/` helpers must not assume they are executed; avoid `exit`
   and use `return` where appropriate.
@@ -162,6 +166,16 @@ temporary trees and must not touch repository files.
   misclassified by the permission policy.
 
 ## Maintenance & Continuous Learning
+
+Keep release extraction roots private to their invoking account, reject
+pre-existing linked member parents, and open member outputs exclusively.
+Measure representative archive scratch space, RSS and elapsed time using
+the synthetic CI profile before replacing the bounded extractor.
+
+For portable rename groups, use no-replace operations for forward moves
+and rollback. On Windows, use bundled `Win32API::File::MoveFileEx` without
+the replace flag. SSH preference updates reread and merge under a short
+sibling lock, and validate login and host before persisting a login.
 
 After using this skill to modify the repository, review this skill and the
 applicable agent instructions as part of the task's final synchronization

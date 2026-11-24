@@ -63,7 +63,7 @@ check_root() {
 fetch_url() {
 	typeset url="$1" out="$2"
 	if command -v curl >/dev/null 2>&1; then
-		curl -fLsS --retry 5 "$url" -o "$out"
+		curl --disable -fLsS --retry 5 --proto '=https' --proto-redir '=https' "$url" -o "$out"
 	elif command -v ftp >/dev/null 2>&1; then
 		ftp -o "$out" "$url"
 	else
@@ -103,7 +103,7 @@ resolve_home() {
 # without disturbing other providers or models. The API key is referenced from
 # the environment at startup, never stored here, and the file stays mode 0600.
 configure_deepseek() {
-	typeset user_home crushrc_dir crushrc
+	typeset user_home crushrc_dir crushrc config_script
 
 	user_home=$(resolve_home "$CRUSH_USER")
 	[ -n "$user_home" ] || {
@@ -166,52 +166,36 @@ model large deepseek/deepseek-flash \
 CRUSHRC_EOF
 	)
 
-	mkdir -p "$crushrc_dir" || {
-		error "Cannot create $crushrc_dir"
+	config_script=$(
+		cat <<'CONFIG_SCRIPT'
+		set -eu
+		umask 077
+		directory=$1
+		config=$2
+		mkdir -p "$directory"
+		if [ -h "$config" ] || { [ -e "$config" ] && [ ! -f "$config" ]; }; then
+			exit 1
+		fi
+		stage=$(mktemp "$directory/.crushrc.XXXXXX")
+		trap "rm -f -- \"\$stage\"" EXIT
+		if [ -f "$config" ]; then
+			awk "
+				/^# --- DeepSeek provider / { if (skip || starts++) exit 1; skip = 1; next }
+				/^# --- End DeepSeek section ---$/ { if (!skip) exit 1; skip = 0; next }
+				!skip { print }
+				END { if (skip) exit 1 }
+			" "$config" >"$stage"
+		fi
+		printf "%s\n" "$3" >>"$stage"
+		if [ -f "$config" ] && cmp -s "$stage" "$config"; then exit 0; fi
+		mv -f "$stage" "$config"
+CONFIG_SCRIPT
+	)
+	if ! /usr/bin/su -s /bin/sh "$CRUSH_USER" -c "$config_script" sh \
+		"$crushrc_dir" "$crushrc" "$crushrc_block"; then
+		error "Cannot publish Crush configuration for $CRUSH_USER."
 		return 1
-	}
-
-	# Drop any previously managed DeepSeek block, then re-add it.
-	if [ -f "$crushrc" ]; then
-		# Refuse to rewrite a file whose start marker lost its end
-		# marker: the awk filter would otherwise discard everything
-		# after the start marker.
-		if grep -q '^# --- DeepSeek provider ' "$crushrc" &&
-			! grep -q '^# --- End DeepSeek section ---$' "$crushrc"; then
-			error "Cannot update $crushrc:" \
-				"DeepSeek start marker has no end marker."
-			return 1
-		fi
-		awk '
-			/^# --- DeepSeek provider / { skip = 1; next }
-			/^# --- End DeepSeek section ---$/ { skip = 0; next }
-			skip == 0 { print }
-		' "$crushrc" >"$tmpdir/crushrc.new" || {
-			error "Cannot rewrite $crushrc"
-			return 1
-		}
-		if ! mv "$tmpdir/crushrc.new" "$crushrc"; then
-			error "Cannot replace $crushrc"
-			return 1
-		fi
 	fi
-
-	if [ -f "$crushrc" ]; then
-		printf '\n%s\n' "$crushrc_block" >>"$crushrc" || {
-			error "Cannot update $crushrc"
-			return 1
-		}
-	else
-		printf '%s\n' "$crushrc_block" >"$crushrc" || {
-			error "Cannot create $crushrc"
-			return 1
-		}
-	fi
-
-	chown -R "$CRUSH_USER" "$crushrc_dir" ||
-		warn "chown failed for $crushrc_dir"
-	# Mode 0600 keeps the user's provider configuration private.
-	chmod 0600 "$crushrc"
 
 	log "DeepSeek provider configured in $crushrc"
 	if [ -z "${DEEPSEEK_API_KEY:-}" ]; then
@@ -226,9 +210,19 @@ CRUSHRC_EOF
 # Resolve the release asset for the running architecture, verify its SHA-256
 # digest against the release's checksums.txt, then install the binary, man
 # page, and license under /usr/local. An existing binary is backed up first.
+probe_crush() {
+	typeset command
+	command=$(
+		cat <<'PROBE'
+exec "$1" --version
+PROBE
+	)
+	/usr/bin/su -s /bin/sh nobody -c "$command" sh "$1"
+}
+
 install_crush() {
 	typeset arch asset url checksum expected_checksum
-	typeset extracted release_base
+	typeset extracted release_base backup pending member banner
 
 	arch=$(map_arch)
 	[ -n "$arch" ] || {
@@ -247,10 +241,19 @@ install_crush() {
 	fetch_url \
 		"${release_base}/releases/download/v${CRUSH_VERSION}/checksums.txt" \
 		"$tmpdir/checksums.txt" || return 1
+	fetch_url \
+		"${release_base}/releases/download/v${CRUSH_VERSION}/checksums.txt.sigstore.json" \
+		"$tmpdir/checksums.txt.sigstore.json" || return 1
+	TUF_ROOT="$tmpdir/sigstore" cosign verify-blob \
+		--bundle "$tmpdir/checksums.txt.sigstore.json" \
+		--certificate-identity "${release_base}/.github/workflows/release.yml@refs/tags/v${CRUSH_VERSION}" \
+		--certificate-oidc-issuer https://token.actions.githubusercontent.com \
+		"$tmpdir/checksums.txt" || return 1
 
 	expected_checksum=$(awk -v f="$asset" \
-		'$2 == f { print $1 }' "$tmpdir/checksums.txt")
-	[ -n "$expected_checksum" ] || {
+		'$2 == f || $2 == "*" f { digest=$1; count++ }
+		 END { if (count != 1) exit 1; print digest }' "$tmpdir/checksums.txt") || return 1
+	print -r -- "$expected_checksum" | grep -Eq '^[0-9a-f]{64}$' || {
 		error "No checksum found for $asset in checksums.txt"
 		return 1
 	}
@@ -267,40 +270,51 @@ install_crush() {
 	log "Checksum OK."
 
 	log "Extracting $asset..."
-	tar -xzf "$tmpdir/$asset" -C "$tmpdir" || return 1
-	extracted="$tmpdir/crush_${CRUSH_VERSION}_Openbsd_${arch}"
-
-	[ -f "$extracted/crush" ] || {
-		error "crush binary not found in $asset"
+	extracted="${asset%.tar.gz}"
+	/usr/bin/perl "$RELEASE_HELPER" tar-extract-entry "$tmpdir/$asset" \
+		"$tmpdir/crush" "$extracted/crush" 536870912 || return 1
+	pending=$(mktemp "$BINDIR/.crush.XXXXXX") || return 1
+	PENDING_CRUSH=$pending
+	install -m 0755 -o root -g wheel "$tmpdir/crush" "$pending" || return 1
+	banner=$(probe_crush "$pending") || return 1
+	[ "$banner" = "crush version v$CRUSH_VERSION" ] || {
+		error "The staged Crush executable did not report $CRUSH_VERSION."
 		return 1
 	}
+	[ ! -h "$BINDIR/crush" ] && { [ ! -e "$BINDIR/crush" ] || [ -f "$BINDIR/crush" ]; } ||
+		return 1
 
 	if [ -x "$BINDIR/crush" ]; then
 		# Keep a timestamped copy of the previous binary. A failed backup
 		# only warns; it does not block the install.
-		backup="$BINDIR/crush.bak.$(date +%Y%m%d%H%M%S)"
+		backup=$(mktemp "$BINDIR/crush.bak.XXXXXX") || return 1
 		if cp -p "$BINDIR/crush" "$backup"; then
 			log "Previous crush binary saved to $backup"
 		else
+			rm -f -- "$backup"
 			warn "Could not back up $BINDIR/crush to $backup"
 		fi
 	fi
 
 	log "Installing crush ${CRUSH_VERSION} to $BINDIR..."
-	install -m 0755 -o root -g wheel "$extracted/crush" \
-		"$BINDIR/crush" || return 1
+	mv -f "$pending" "$BINDIR/crush" || return 1
+	PENDING_CRUSH=
 
-	if [ -f "$extracted/manpages/crush.1.gz" ]; then
+	member="$extracted/manpages/crush.1.gz"
+	if /usr/bin/perl "$RELEASE_HELPER" tar-extract-entry "$tmpdir/$asset" \
+		"$tmpdir/crush.1.gz" "$member" 536870912 2>/dev/null; then
 		mkdir -p "$MANDIR" || return 1
 		install -m 0644 -o root -g wheel \
-			"$extracted/manpages/crush.1.gz" \
+			"$tmpdir/crush.1.gz" \
 			"$MANDIR/crush.1.gz" || return 1
 	fi
 
-	if [ -f "$extracted/LICENSE.md" ]; then
+	member="$extracted/LICENSE.md"
+	if /usr/bin/perl "$RELEASE_HELPER" tar-extract-entry "$tmpdir/$asset" \
+		"$tmpdir/LICENSE.md" "$member" 536870912 2>/dev/null; then
 		mkdir -p "$DOCDIR" || return 1
 		install -m 0644 -o root -g wheel \
-			"$extracted/LICENSE.md" \
+			"$tmpdir/LICENSE.md" \
 			"$DOCDIR/LICENSE.md" || return 1
 	fi
 
@@ -311,9 +325,11 @@ install_crush() {
 # binary or output without a version yields nothing; the caller treats that
 # as "not installed".
 installed_version() {
-	[ -x "$BINDIR/crush" ] || return 0
-	"$BINDIR/crush" --version 2>/dev/null |
-		grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n 1
+	typeset banner
+	[ -x "$BINDIR/crush" ] && [ ! -h "$BINDIR/crush" ] || return 0
+	banner=$(probe_crush "$BINDIR/crush" 2>/dev/null) ||
+		return 1
+	print -r -- "$banner" | sed -nE 's/^crush version v?([0-9]+\.[0-9]+\.[0-9]+)$/\1/p'
 }
 
 ###################
@@ -338,15 +354,29 @@ if [ "$(uname -s)" != "OpenBSD" ]; then
 	error "This script is intended for OpenBSD."
 	exit 1
 fi
+command -v cosign >/dev/null 2>&1 || {
+	error "Install the OpenBSD cosign package to verify the release signature."
+	exit 1
+}
+script_dir=$(cd "$(dirname "$0")" && pwd -P)
+RELEASE_HELPER="$script_dir/release-verify"
+if [ ! -f "$RELEASE_HELPER" ]; then
+	RELEASE_HELPER="$script_dir/../scripts/release-verify.pl"
+fi
+[ -f "$RELEASE_HELPER" ] || {
+	error "Cannot locate the release-verify helper."
+	exit 1
+}
 
 # Work in a private temporary directory and remove it on exit or signal.
 tmpdir=$(mktemp -d /tmp/crush-update.XXXXXX) || {
 	error "Cannot create temporary directory."
 	exit 1
 }
-trap 'rm -rf "$tmpdir"' EXIT
-trap 'rm -rf "$tmpdir"; exit 130' INT
-trap 'rm -rf "$tmpdir"; exit 143' TERM
+PENDING_CRUSH=
+trap 'if [ -n "$PENDING_CRUSH" ]; then rm -f -- "$PENDING_CRUSH"; fi; rm -rf -- "$tmpdir"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # Ask the GitHub API for the latest release and read the tag name from the
 # JSON. Network access and a CA bundle are required for this request.
@@ -363,7 +393,7 @@ fetch_url \
 CRUSH_VERSION=$(sed -n -E \
 	's/.*"tag_name"[[:space:]]*:[[:space:]]*"v?([^"]+)".*/\1/p' \
 	"$tmpdir/release.json" | head -n 1)
-[ -n "$CRUSH_VERSION" ] || {
+print -r -- "$CRUSH_VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || {
 	error "Cannot determine latest crush version."
 	exit 1
 }
@@ -389,6 +419,11 @@ fi
 # Refresh the managed DeepSeek block even when the binary is already current,
 # so crushrc stays in sync with this script.
 configure_deepseek || exit 1
+
+[ "$(installed_version)" = "$CRUSH_VERSION" ] || {
+	error "Installed Crush version does not match the verified release."
+	exit 1
+}
 
 log "Done. Run 'crush' as $CRUSH_USER to start using" \
 	" DeepSeek."

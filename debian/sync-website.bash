@@ -29,9 +29,8 @@ set -euo pipefail
 #
 # The branch is fixed to main and the service to apache2; the GitHub
 # account, host, and repository slug can be overridden with GH_USER,
-# GH_HOST, and REPO_SLUG. The gh path runs as GH_USER (default admin)
-# through sudo or su, using that account's gh configuration; the git
-# and ZIP fallbacks run as the invoking user.
+# GH_HOST, and REPO_SLUG. Both Git methods use the non-root GH_USER
+# (default admin). The ZIP fallback uses a private deployment stage.
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
@@ -54,6 +53,12 @@ if command -v readlink >/dev/null 2>&1; then
 	SCRIPT_PATH="$(readlink -f "$SCRIPT_PATH")"
 fi
 SCRIPT_ARGS=("$@")
+SCRIPT_DIR=${SCRIPT_PATH%/*}
+SNAPSHOT_HELPER=$SCRIPT_DIR/release-verify
+if [ ! -f "$SNAPSHOT_HELPER" ]; then
+	SNAPSHOT_HELPER=$SCRIPT_DIR/../scripts/release-verify.pl
+fi
+GIT_STAGE=''
 
 log() { printf '%s [INFO] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
 warn() { printf '%s [WARN] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
@@ -195,11 +200,9 @@ fetch_lfs_files() {
 			"LFS files will not be downloaded."
 		return 1
 	fi
-	if [ -d "$dir/.git" ]; then
+	if run_as_gh_user test -d "$dir/.git"; then
 		log "Fetching Git LFS files in $dir..."
-		# The clone may belong to GH_USER while this process runs as root;
-		# trust only this exact path instead of disabling ownership checks.
-		git -c safe.directory="$dir" -C "$dir" lfs pull >/dev/null 2>&1 ||
+		run_as_gh_user git -C "$dir" lfs pull >/dev/null 2>&1 ||
 			warn "git lfs pull failed in $dir"
 	fi
 }
@@ -245,12 +248,64 @@ run_as_gh_user() {
 # instead of trying to guess which links are safe.
 reject_source_symlinks() {
 	local dir="$1" links
-	links=$(find "$dir" -type l -print 2>/dev/null)
+	links=$(find "$dir" ! -type f ! -type d -print) || return 1
 	if [ -n "$links" ]; then
-		error "Refusing to publish symbolic links from $dir:"
+		error "Refusing to publish links or special files from $dir:"
 		printf '%s\n' "$links" >&2
 		return 1
 	fi
+}
+
+prepare_git_stage() {
+	local uid
+	uid=$(id -u "$GH_USER") || return 1
+	if [ "$uid" -eq 0 ]; then
+		warn 'Git downloads require a non-root GH_USER. Trying the ZIP fallback.'
+		return 1
+	fi
+	GIT_STAGE=$(mktemp -d "/tmp/site-sync.XXXXXX") || return 1
+	# The fetch account can enter its own child but cannot replace its
+	# root-owned parent or see the separate captured archive.
+	chmod 0711 "$GIT_STAGE" || return 1
+	mkdir -m 0700 "$GIT_STAGE/fetch" || return 1
+	chown "$uid" "$GIT_STAGE/fetch"
+}
+
+finish_git_stage() {
+	if [ -n "${GIT_STAGE:-}" ]; then
+		rm -rf -- "$GIT_STAGE" || return 1
+		GIT_STAGE=''
+	fi
+}
+
+check_deployment_tree() {
+	local parent checkroot unsafe
+	parent=${WWW_DIR%/*}
+	checkroot=$(cd "$WWW_DIR" && pwd -P) || return 1
+	unsafe=$(find "$parent" -maxdepth 0 \( ! -type d -o ! -user root -o -perm -020 -o -perm -002 \) -print) || return 1
+	if [ -n "$unsafe" ]; then
+		error 'The publication parent must be a root-owned directory without group or other write access.'
+		return 1
+	fi
+	unsafe=$(find "$checkroot" \( ! -user root -o -perm -020 -o -perm -002 -o \( ! -type d ! -type f \) \) -print) || return 1
+	if [ -n "$unsafe" ]; then
+		error 'The existing static document tree must be root-owned, contain only files/directories, and have no group or other write access.'
+		return 1
+	fi
+}
+
+publish_git_snapshot() {
+	local snapshot="$GIT_STAGE/snapshot"
+	mkdir -m 0700 "$snapshot" || return 1
+	# Capture as the account that can read this mutable checkout. Never
+	# traverse its files or interpret its Git configuration as root.
+	(ulimit -f 2097152 &&
+		run_as_gh_user tar -czf - -C "$GIT_STAGE/fetch" src) \
+		>"$snapshot/site.tgz" || return 1
+	mkdir -m 0700 "$snapshot/tree" || return 1
+	perl "$SNAPSHOT_HELPER" tar-extract-all "$snapshot/site.tgz" \
+		"$snapshot/tree" src 2147483648 || return 1
+	stage_from_source "$snapshot/tree/src"
 }
 
 # Replace the deployed content with a filtered checkout. rsync and the cp
@@ -261,11 +316,11 @@ copy_from_source() {
 	local srcdir="$1"
 	filter_site_tree "$srcdir" || return 1
 	reject_source_symlinks "$srcdir" || return 1
-	filter_site_tree "$WWW_DIR" preserve-lock || return 1
 	if ! has_repo_content "$srcdir"; then
 		warn "staged source has no publishable website files"
 		return 1
 	fi
+	filter_site_tree "$WWW_DIR" preserve-lock || return 1
 
 	if command -v rsync >/dev/null 2>&1; then
 		if ! rsync -a --delete --safe-links \
@@ -364,7 +419,7 @@ replace_public_link() {
 		rmdir "$linkdir"
 		return 1
 	fi
-	rmdir "$linkdir"
+	rmdir "$linkdir" || warn 'Could not remove temporary publication link directory'
 }
 
 restart_web_service() {
@@ -427,7 +482,7 @@ WWW_DIR="/var/www/daviduhden-website"
 WWW_HOST="uhden.dev"
 BRANCH="main"
 SERVICE_NAME="apache2"
-OWNER_USER="www-data"
+OWNER_USER="root"
 OWNER_GROUP="www-data"
 
 ZIP_URL="https://${GH_HOST}/${REPO_SLUG}"
@@ -439,11 +494,10 @@ ZIP_URL="${ZIP_URL}/archive/refs/heads/${BRANCH}.zip"
 # Preferred path: clone the branch with the deployment account's gh
 # credentials, retrying up to five times. Returns non-zero when gh,
 # git, or the account configuration is missing, when authentication
-# fails, when the clone never succeeds, or when the checkout has no
-# content. The temporary tree is created by and owned by GH_USER.
+# fails, or when the checkout cannot be captured and validated.
 sync_with_gh_cli() {
 	local repo_slug="$REPO_SLUG" attempt=1
-	local tmpdir stagedir
+	local stagedir status=0
 
 	if ! command -v gh >/dev/null 2>&1; then return 1; fi
 	if ! command -v git >/dev/null 2>&1; then return 1; fi
@@ -454,9 +508,11 @@ sync_with_gh_cli() {
 		gh auth status --hostname "$GH_HOST" \
 		>/dev/null 2>&1 || return 1
 
-	tmpdir="$(run_as_gh_user mktemp \
-		-d "/tmp/site-sync.XXXXXX")" || return 1
-	stagedir="$tmpdir/src"
+	prepare_git_stage || {
+		finish_git_stage
+		return 1
+	}
+	stagedir="$GIT_STAGE/fetch/src"
 
 	while [ "$attempt" -le 5 ]; do
 		if run_as_gh_user env \
@@ -474,22 +530,14 @@ sync_with_gh_cli() {
 	done
 	if [ $attempt -gt 5 ]; then
 		error "gh repo clone failed"
-		rm -rf "$tmpdir"
+		finish_git_stage
 		return 1
 	fi
 
-	if ! has_repo_content "$stagedir"; then
-		rm -rf "$tmpdir"
-		return 1
-	fi
-
-	fetch_lfs_files "$stagedir"
-
-	if ! stage_from_source "$stagedir"; then
-		rm -rf "$tmpdir"
-		return 1
-	fi
-	rm -rf "$tmpdir"
+	fetch_lfs_files "$stagedir" || :
+	publish_git_snapshot || status=$?
+	finish_git_stage || return 1
+	[ "$status" -eq 0 ] || return "$status"
 	log "Repository successfully updated via GitHub CLI."
 	return 0
 }
@@ -497,50 +545,26 @@ sync_with_gh_cli() {
 ############
 # Git sync #
 ############
-# Fallback path: clone with plain git. Reuse the destination's existing
-# origin when it is a work tree, otherwise build an HTTPS URL from
-# REPO_SLUG and GH_HOST. Unlike the gh path, this clone does not use
-# GH_USER's gh configuration.
+# Clone the configured HTTPS remote as GH_USER without reading the live tree.
 sync_with_git() {
-	local origin_url="" tmpdir stagedir
-	if ! command -v git >/dev/null 2>&1; then
-		return 1
-	fi
-
-	if git -C "$WWW_DIR" rev-parse \
-		--is-inside-work-tree >/dev/null 2>&1; then
-		origin_url=$(git -C "$WWW_DIR" \
-			remote get-url origin 2>/dev/null ||
-			printf '')
-	fi
-	[ -z "$origin_url" ] &&
-		[ -n "$REPO_SLUG" ] &&
-		origin_url="https://${GH_HOST}/${REPO_SLUG}.git"
-	[ -z "$origin_url" ] && return 1
-
-	tmpdir=$(mktemp -d "/tmp/site-sync.XXXXXX") || return 1
-	stagedir="$tmpdir/src"
-
-	if ! git clone --branch "$BRANCH" \
-		--single-branch "$origin_url" \
-		"$stagedir" >/dev/null 2>&1; then
-		rm -rf "$tmpdir"
-		return 1
-	fi
-	[ ! -d "$stagedir" ] && {
-		rm -rf "$tmpdir"
+	local origin_url stagedir status=0
+	command -v git >/dev/null 2>&1 || return 1
+	origin_url="https://${GH_HOST}/${REPO_SLUG}.git"
+	prepare_git_stage || {
+		finish_git_stage
 		return 1
 	}
-
-	fetch_lfs_files "$stagedir"
-
-	if ! stage_from_source "$stagedir"; then
-		rm -rf "$tmpdir"
+	stagedir="$GIT_STAGE/fetch/src"
+	if ! run_as_gh_user git clone --branch "$BRANCH" --single-branch \
+		-- "$origin_url" "$stagedir" >/dev/null 2>&1; then
+		finish_git_stage
 		return 1
 	fi
-	rm -rf "$tmpdir"
+	fetch_lfs_files "$stagedir" || :
+	publish_git_snapshot || status=$?
+	finish_git_stage || return 1
+	[ "$status" -eq 0 ] || return "$status"
 	log "Repository successfully staged via git clone."
-	return 0
 }
 
 #######################
@@ -588,7 +612,7 @@ sync_with_github_zip() {
 			return 1
 		fi
 	else
-		if ! wget -qO "$zipfile" "$ZIP_URL"; then
+		if ! wget --https-only -qO "$zipfile" "$ZIP_URL"; then
 			rm -rf "$tmpdir"
 			return 1
 		fi
@@ -683,14 +707,14 @@ post_update_steps() {
 			if certbot --nginx renew \
 				--non-interactive \
 				>/dev/null 2>&1; then
-				systemctl restart "$SERVICE_NAME"
+				restart_web_service || return 1
 			fi
 			;;
 		apache2 | apache)
 			if certbot --apache renew \
 				--non-interactive \
 				>/dev/null 2>&1; then
-				systemctl restart "$SERVICE_NAME"
+				restart_web_service || return 1
 			fi
 			;;
 		*)
@@ -698,7 +722,7 @@ post_update_steps() {
 				--non-interactive \
 				-d "$WWW_HOST" \
 				>/dev/null 2>&1; then
-				systemctl restart "$SERVICE_NAME"
+				restart_web_service || return 1
 			fi
 			;;
 		esac
@@ -713,12 +737,10 @@ post_update_steps() {
 # Main #
 ########
 LOCKDIR=""
-# Create the lock directory atomically and record the PID. A lock with
-# a recorded PID whose process no longer exists is treated as stale and
-# reacquired. A lock without a PID is left in place (fail closed) and
-# causes this run to skip syncing.
+# Create the lock directory atomically. Stale locks require manual handling.
 cleanup_lock() {
 	rollback_publication
+	finish_git_stage || warn 'Could not remove temporary Git staging directory'
 	if [ "${LOCK_OWNED:-0}" -eq 1 ] && [ ! -L "$LOCKDIR" ] &&
 		[ "$(cat "$LOCKDIR/pid" 2>/dev/null)" = "$$" ]; then
 		rm -f "$LOCKDIR/pid"
@@ -728,6 +750,7 @@ cleanup_lock() {
 }
 
 acquire_lock() {
+	local pid
 	# Respect a lock left by the previous in-docroot locking scheme.
 	if [ -e "$WWW_DIR/.sync.lock" ] || [ -L "$WWW_DIR/.sync.lock" ]; then
 		warn 'Legacy in-docroot lock exists; verify its owner before removing it.'
@@ -736,7 +759,20 @@ acquire_lock() {
 	LOCKDIR="${WWW_DIR%/*}/.${WWW_DIR##*/}.sync.lock"
 	# Never steal locks automatically: PID reuse and concurrent stale-lock
 	# recovery cannot be made safe with a PID file alone.
-	if ! mkdir -m 0700 "$LOCKDIR" 2>/dev/null; then return 1; fi
+	if ! mkdir -m 0700 "$LOCKDIR" 2>/dev/null; then
+		if [ -d "$LOCKDIR" ] && [ ! -L "$LOCKDIR" ] &&
+			[ -f "$LOCKDIR/pid" ] && [ ! -L "$LOCKDIR/pid" ] &&
+			IFS= read -r pid <"$LOCKDIR/pid"; then
+			case "$pid" in
+			'' | *[!0-9]*) ;;
+			*)
+				if [ "$pid" -gt 1 ] 2>/dev/null && kill -0 "$pid" 2>/dev/null; then return 2; fi
+				;;
+			esac
+		fi
+		error 'Could not acquire publication lock. Check permissions and any stale lock.'
+		return 1
+	fi
 	LOCK_OWNED=1
 	if ! printf '%s\n' "$$" >"$LOCKDIR/pid"; then
 		rmdir "$LOCKDIR" 2>/dev/null || true
@@ -747,6 +783,7 @@ acquire_lock() {
 }
 
 main() {
+	local lock_status
 	case "${1:-}" in
 	--atomic)
 		ATOMIC_DEPLOY=1
@@ -771,9 +808,16 @@ main() {
 		exit 1
 	}
 
-	if ! acquire_lock; then
-		log "Another sync already running; exiting."
-		exit 0
+	check_deployment_tree || exit 1
+	if acquire_lock; then
+		:
+	else
+		lock_status=$?
+		if [ "$lock_status" -eq 2 ]; then
+			log 'Another sync is running.'
+			exit 0
+		fi
+		exit 1
 	fi
 	# Always release the lock, including on interruption or failure.
 	trap 'cleanup_lock' EXIT

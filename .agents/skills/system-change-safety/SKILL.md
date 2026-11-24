@@ -76,6 +76,12 @@ description: >-
     Apply the same single-root ZIP entry policy before extraction on Debian
     and OpenBSD. Check types and declared expansion size from ZIP metadata
     before extraction, then check the resulting tree before publication.
+    Execute Git clone and LFS as the non-root fetch account. Capture via
+    that account into a root-private archive and validate its extraction
+    before deployment. Never run Git as root against the live tree or the
+    fetch account's checkout. Keep static public content root-owned and
+    service-readable. In-place publication can be partial on failure,
+    while the configured symlink mode supports activation rollback.
 11. For Debian repository keys, check the entire set of primary keys and
     restrict the deb822 `Signed-By` declaration to the approved fingerprint.
     For GitHub .deb releases such as Fastfetch, verify the exact published
@@ -84,6 +90,21 @@ description: >-
     Use system
     install(1) to publish selected build outputs instead of elevating an
     upstream Makefile.
+12. For a Debian AI CLI package downloaded as the target user, retain the
+    expected digest from the verified publisher metadata. Before granting
+    APT access, copy the file to a root-owned temporary directory and
+    verify the copy against that digest. Pass only the root-owned path to
+    APT and retain `--no-remove`. Claude Code uses an isolated APT index
+    pinned to Anthropic's signing fingerprint. Crush checks the release
+    manifest's Sigstore publisher identity before the handoff; Codex
+    validates the equivalent package signature before its user-level
+    deployment.
+13. Keep xerj MCP registration under the desktop account. On Debian limit
+    the elevated phase to the binary package and its dependencies. Never
+    pass a node credential in a command argument or print configuration
+    parse excerpts. Refuse to replace an existing Codex registration when
+    its inspection API omits supported fields. Use the Claude user MCP
+    JSON schema directly so the native CLI does not create state backups.
 
 ## Risk checklist for this tree
 
@@ -106,8 +127,11 @@ description: >-
   timestamped backup.
 - `debian/update-monero.bash` edits service units, Tor/I2P/Monero configs,
   and adds runtime nftables rules.
-- Debian XD runs checkout and build commands under a non-root account and
-  reads its systemd unit from that checkout. Monero stages and backs up its
+- Debian btop and Lyrebird build in disposable staging as an unprivileged
+  account. Publish selected files through root-owned staging. Keep the
+  Perl interpreter and helper discovery fixed for the Go and btop updaters.
+  Debian XD builds as a non-root account and installs the repository-defined
+  unit, which runs as the dedicated XD account. Monero stages and backs up its
   release binaries before stopping the service, and restores them on an
   incomplete core update. Optional LWS work follows that commit point.
 - `debian/rpi-update-safe.bash` runs `rpi-update` as root with rebooting disabled,
@@ -123,13 +147,21 @@ description: >-
   backup on error.
 - `openbsd/sysupgrade-current.ksh` runs `sysmerge`, `dbupdate`, package
   upgrades, and Lynis on first boot, then `sysupgrade -sf` reboots by default.
+  Debian, SecureBlue and newly generated OpenBSD first-boot reports use
+  `/var/log/scripts-sysupgrade` with root-only access. Keep retention scoped
+  there and collect process names in Debian reports.
   `--skip-audit` must reach the generated `/upgrade.site` and the existing
   `/etc/rc.firsttime` policy without rewriting unrelated tasks.
 - `secureblue/sysupgrade.bash` relinks selected Homebrew formulae before
   `brew cleanup`; keep the `unlink && link` ordering and run both as the
   administrative linuxbrew account.
-- `openbsd/update-crush.ksh` installs over `/usr/local/bin/crush` after
-  checksum verification and rewrites the user's `crushrc`.
+- `openbsd/update-crush.ksh` verifies the Charm release's Sigstore checksum
+  manifest and extracts named regular members only. Check the staged binary's
+  version under an unprivileged account before activation. Publish the
+  `crushrc` edit atomically as the target user.
+- Keep SecureBlue xerj's per-user lock held until binary publication, MCP
+  registration and active-version verification finish. Debian AI CLI version
+  discovery uses existing tools so a current installation can skip APT.
 
 ## Validations
 

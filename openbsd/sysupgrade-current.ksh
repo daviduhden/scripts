@@ -60,14 +60,10 @@ parse_args() {
 	done
 }
 
-# Clear leftovers from an interrupted run. /upgrade.site is regenerated
-# below; stale info dumps in /tmp would otherwise accumulate across runs.
+# Clear the managed upgrade script from an interrupted run.
 cleanup_previous_artifacts() {
 	if [ -f /upgrade.site ]; then
 		rm -f /upgrade.site
-	fi
-	if ls /tmp/openbsd-info.* >/dev/null 2>&1; then
-		rm -f /tmp/openbsd-info.*
 	fi
 }
 
@@ -213,8 +209,7 @@ run_dbupdate() {
 }
 
 upgrade_packages() {
-    log_file="/var/log/openbsd/pkg-upgrade-$(date +%Y%m%d-%H%M%S).log"
-    mkdir -p /var/log/openbsd
+    log_file=$(mktemp "$LOG_DIR/pkg-upgrade.XXXXXX") || return
     print "Upgrading packages (pkg_add -Uu -Dsnap)"
     print "and removing unused ones (pkg_delete -a)..."
     if run_logged_cmd "$log_file" /usr/sbin/pkg_add -Uu -Dsnap \
@@ -236,7 +231,7 @@ run_lynis_audit() {
     if [ -x /usr/local/bin/lynis ]; then
         audit_ts=$(date +%Y%m%d-%H%M%S)
         umask 077
-        audit_dir=$(mktemp -d "${TMPDIR:-/tmp}/lynis-audit.XXXXXX") || {
+        audit_dir=$(mktemp -d "$LOG_DIR/lynis-audit.XXXXXX") || {
             print "Cannot create a private Lynis log directory."
             return
         }
@@ -275,7 +270,7 @@ run_lynis_audit() {
 collect_system_info() {
     print "Collecting system info..."
     umask 077
-    out_log=$(mktemp "${TMPDIR:-/tmp}/openbsd-info.XXXXXX") || {
+    out_log=$(mktemp "$LOG_DIR/openbsd-info.XXXXXX") || {
         print "Cannot create a private system information log."
         return
     }
@@ -350,6 +345,12 @@ collect_system_info() {
 }
 
 main() {
+    LOG_DIR=/var/log/scripts-sysupgrade
+    if [ -h "$LOG_DIR" ] || { [ -e "$LOG_DIR" ] && { [ ! -d "$LOG_DIR" ] || [ ! -O "$LOG_DIR" ]; }; }; then
+        print -u2 "Unsafe maintenance log directory."
+        return 1
+    fi
+    install -d -o root -g wheel -m 0700 "$LOG_DIR" || return
     run_sysmerge
     run_dbupdate
     upgrade_packages

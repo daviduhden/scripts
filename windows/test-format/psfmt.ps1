@@ -386,7 +386,26 @@ function Write-PsfmtAtomicFile {
     $bytes = [byte[]] ($Document.Encoding.GetPreamble() + $Document.Encoding.GetBytes($Text))
     $temporary = [IO.Path]::Combine([IO.Path]::GetDirectoryName($Path), '.psfmt-' + [guid]::NewGuid().ToString('N') + '.tmp')
     try {
-        $stream = [IO.FileStream]::new($temporary, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+        if ($IsWindows) {
+            $acl = Get-Acl -LiteralPath $Path
+            $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+            try {
+                $private = [Security.AccessControl.FileSecurity]::new()
+                $private.SetAccessRuleProtection($true, $false)
+                $private.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($identity.User, 'FullControl', 'Allow'))
+                $stream = [IO.FileSystemAclExtensions]::Create([IO.FileInfo]::new($temporary), 'CreateNew', 'Write', 'None', 4096, 'None', $private)
+            }
+            finally { $identity.Dispose() }
+        }
+        else {
+            $mode = [IO.File]::GetUnixFileMode($Path)
+            $options = [IO.FileStreamOptions]::new()
+            $options.Mode = 'CreateNew'
+            $options.Access = 'Write'
+            $options.Share = 'None'
+            $options.UnixCreateMode = 'UserRead, UserWrite'
+            $stream = [IO.FileStream]::new($temporary, $options)
+        }
         try { $stream.Write($bytes, 0, $bytes.Length); $stream.Flush($true) } finally { $stream.Dispose() }
         if ([Convert]::ToBase64String([IO.File]::ReadAllBytes($temporary)) -cne [Convert]::ToBase64String($bytes)) { throw 'Temporary file verification failed.' }
         if (Test-PsfmtReparsePath $Path) { throw 'Path became a reparse point during writing.' }
@@ -394,6 +413,15 @@ function Write-PsfmtAtomicFile {
             throw 'File changed since reading; refusing to overwrite concurrent edits.'
         }
         [IO.File]::SetAttributes($temporary, $attributes)
+        if ($IsWindows) {
+            $currentAcl = Get-Acl -LiteralPath $Path
+            $access = [Security.AccessControl.AccessControlSections]::Access
+            if ($currentAcl.GetSecurityDescriptorSddlForm($access) -cne $acl.GetSecurityDescriptorSddlForm($access)) {
+                throw 'File ACL changed since reading.'
+            }
+            Set-Acl -LiteralPath $temporary -AclObject $acl
+        }
+        else { [IO.File]::SetUnixFileMode($temporary, $mode) }
         # Same-directory replacement is atomic on supported filesystems. No unsafe
         # delete-then-move fallback: failure leaves the original file in place.
         [IO.File]::Replace($temporary, $Path, [NullString]::Value)

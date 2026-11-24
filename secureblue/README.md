@@ -20,12 +20,13 @@ the target user's session.
 | [sudo-wrapper.bash](sudo-wrapper.bash) | Routes `sudo` and `visudo` through `run0`, and `sudoedit` through `run0edit`; installed symlinks select the matching behavior. |
 | [sync-gh-repos.bash](sync-gh-repos.bash) | Clones or refreshes a GitHub user's repositories over SSH. Retains old Git metadata and working files in a private sibling backup. Uses authenticated `gh`; accepts `OWNER`, `BASE_DIR`, and `--non-interactive`. |
 | [sysupgrade.bash](sysupgrade.bash) | Maintains the rpm-ostree image, firmware, Homebrew, Flatpak, storage, and system diagnostics. Homebrew uplift also unlinks system-shadowing formulae and relinks `ffmpeg-full`/`imagemagick-full` before cleanup. Scrub runs by default; full btrfs balance/defrag is opt-in with `BTRFS_MAINTENANCE=1`, and a lock prevents concurrent runs. |
+| [update-ai-clis.bash](update-ai-clis.bash) | Installs or updates selected coding agents using official Homebrew packages. See the [distribution and PATH details](../docs/update-ai-clis.md). |
 | [update-arti-oniux.bash](update-arti-oniux.bash) | Builds and installs Arti and oniux with Rust/Cargo, manages OpenSSL dependencies, and patches binary library paths. |
 | [update-krohnkite.bash](update-krohnkite.bash) | Builds the Krohnkite KWin package and installs or updates it with `kpackagetool6`. |
 | [update-lyrebird.bash](update-lyrebird.bash) | Builds the Lyrebird Go-based Tor transport and installs it into `/usr/local/bin`. |
 | [update-perl-modules.bash](update-perl-modules.bash) | Updates the Perl distributions in the user's local::lib (default `$HOME/perl5`) with `cpan-outdated` and `cpanm`, excluding dual-life core modules unless `--include-core` is given. |
 | [update-xd-torrent.bash](update-xd-torrent.bash) | Builds XD and installs its systemd user service and XDG data directory; supports `--skip-service-and-user-setup`. |
-| [update-xerj.bash](update-xerj.bash) | Installs/updates the SHA-256-verified static musl xerj release in `~/.local/bin`; optional `--codex`, `--crush`, and `--opencode` register its stdio MCP server. No elevation or service changes. |
+| [update-xerj.bash](update-xerj.bash) | Installs the verified static xerj release in `~/.local/bin` and registers its stdio MCP server with selected installed agents. |
 
 Examples from the repository root:
 
@@ -45,57 +46,25 @@ in [../shell/README.md](../shell/README.md). `update-xerj` uses the auxiliary
 `release-verify.pl` and `xerj-config.pl` helpers installed beside the command
 without their source extensions; they are not user-facing commands.
 
+## AI CLI updates
+
+Set up Homebrew using your SecureBlue configuration, then run
+`update-ai-clis` as your desktop user. The updater uses the platform's
+Homebrew dispatcher and its authorization policy. It discovers the Homebrew
+prefix and works with the official Homebrew packages and Charm's official
+tap. No base-image changes are required. See the [agent matrix and PATH
+behavior](../docs/update-ai-clis.md).
+
+System maintenance stores its audit and information reports in the private
+root-owned directory `/var/log/scripts-sysupgrade`.
+
 ## xerj
 
-Requires `curl`, Perl with core `JSON::PP`/`Archive::Tar`, `sha256sum`, and
-standard GNU utilities.
-Supports x86_64 and aarch64. Run as your desktop user:
-
-```bash
-bash secureblue/update-xerj.bash
-bash secureblue/update-xerj.bash --codex --crush --opencode
-bash secureblue/update-xerj.bash --version v1.0.0-rc.100 --opencode
-```
-
-Without client flags, only the binary is installed. Re-running downloads and
-verifies the requested release again. `--version TAG` pins a release; otherwise
-the latest GitHub release is resolved through the public release redirect,
-without using the rate-limited GitHub API. `--url URL` selects the ES-compatible node
-endpoint (default `http://127.0.0.1:9200`). Add `~/.local/bin` to your PATH if
-needed; MCP registrations use the absolute binary path.
-
-Codex must already be installed when selected: registration uses `codex mcp
-add` and respects `CODEX_HOME`. Crush uses a managed block in
-`${XDG_CONFIG_HOME:-~/.config}/crush/crushrc` (current Bash config format).
-OpenCode merges `mcp.xerj` into `opencode/opencode.json` under the same config
-root. Existing JSONC configurations are refused for manual merging; JSON must
-be a valid object. Shared configurations are backed up before modification.
-Project settings and environment overrides can take precedence over these
-global registrations. The scripts do not install the clients.
-
-MCP does not start the engine. In a separate terminal, start a local authenticated
-node (no service is installed):
-
-```bash
-mkdir -p "$HOME/.xerj/data"
-"$HOME/.local/bin/xerj" --bind 127.0.0.1 --data-dir "$HOME/.xerj/data"
-```
-
-Before launching a configured client, supply the generated key in that client's
-environment if automatic local key discovery does not find this data directory:
-
-```bash
-export XERJ_AUTH="ApiKey $(cat "$HOME/.xerj/data/admin.key")"
-codex  # or crush / opencode
-```
-
-Restart existing clients after registration. For a remote endpoint, supply
-`XERJ_AUTH` explicitly through the client environment. No key is written by the
-updater. Sources: [installation](https://xerj.org/docs/install),
-[MCP and authentication](https://xerj.org/docs/cli#mcp),
-[OpenCode MCP](https://opencode.ai/docs/mcp-servers/),
-[Crush configuration](https://github.com/charmbracelet/crush/blob/main/docs/config/README.md),
-and [Codex MCP](https://learn.chatgpt.com/docs/extend/mcp).
+Run `update-xerj` to install xerj in `~/.local/bin` and configure compatible
+installed clients. Run `update-xerj codex claude` to select clients or
+`update-xerj --binary-only` to install only xerj. The updater verifies and
+checks the staged executable before publication and runs as your desktop user.
+See the [xerj configuration guide](../docs/update-xerj.md).
 
 ## Arti installation transactions
 
@@ -118,7 +87,9 @@ percent signs. Control characters are refused; the optional socat bridge
 also refuses commas in socket paths because socat treats them as delimiters.
 The optional bridge remains a separate best-effort installation.
 
-The xerj updater publishes through a unique same-directory temporary file,
+The xerj updater serializes runs through the user's installation directory
+and verifies the active version after MCP registration. It publishes through
+a unique same-directory temporary file,
 so concurrent invocations cannot share an intermediate executable. Concurrent
 successful updates may still select different releases; the last publication
 wins. Each published binary has passed its own checksum and archive checks.

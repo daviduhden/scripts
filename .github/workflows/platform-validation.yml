@@ -24,16 +24,18 @@ jobs:
       - name: Install analysis tools in the disposable runner
         run: |
           sudo apt-get update
-          sudo apt-get install -y shellcheck shfmt devscripts ksh bmake perltidy libperl-critic-perl mandoc rsync
-          python3 -m pip install 'ruff==0.17.3'
+          sudo apt-get install -y shellcheck shfmt devscripts ksh bmake perltidy libperl-critic-perl mandoc rsync time
+          if git ls-files -- '*.py' | grep -q .; then
+            python3 -m pip install 'ruff==0.17.3'
+          fi
       - name: Check and test without invoking administrative utilities
         run: |
           export TMPDIR="$RUNNER_TEMP/validation"
           mkdir -p "$TMPDIR"
-          time /bin/sh tests-format/validate-shell.sh --check --strict .
-          time /bin/sh tests-format/validate-perl.sh --check --strict .
-          make check
-          make test-regression
+          make test VALIDATION_FLAGS='--check --strict'
+      - name: Measure bounded release extraction
+        if: ${{ !cancelled() }}
+        run: /usr/bin/time -v perl tests/profile_release_verify.pl
       - name: Show validator logs, including skipped checks
         if: always()
         run: |
@@ -64,6 +66,21 @@ jobs:
           $destination = Join-Path $env:RUNNER_TEMP 'scripts-install-test'
           & windows/install-windows.bat --no-path --install-dir $destination
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & (Join-Path $destination 'bin/update-ai-clis.cmd') --help
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $retired = @('bin\update-aiclis.cmd', 'windows\update-aiclis.ps1')
+          foreach ($entry in $retired) {
+            if (Test-Path -LiteralPath (Join-Path $destination $entry)) {
+              throw "Fresh install published retired file $entry"
+            }
+          }
+          Set-Content -LiteralPath (Join-Path $destination $retired[0]) -Value 'rem scripts-powershell-launcher'
+          Set-Content -LiteralPath (Join-Path $destination $retired[1]) -Value '# retired updater'
+          Add-Content -LiteralPath (Join-Path $destination 'installed-files.txt') -Value $retired
+          & (Join-Path $destination 'bin/update-xerj.cmd') --help
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & (Join-Path $destination 'bin/update-xerj.cmd') codex invalid-agent
+          if ($LASTEXITCODE -ne 2) { throw 'xerj launcher did not reject an invalid selection' }
           $unmanaged = Join-Path $destination 'keep.txt'
           Set-Content -LiteralPath $unmanaged -Value 'unmanaged'
           $versionPath = Join-Path $destination 'VERSION'
@@ -80,6 +97,11 @@ jobs:
           finally { $lock.Dispose() }
           & windows/install-windows.bat --no-path --install-dir $destination
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          foreach ($entry in $retired) {
+            if (Test-Path -LiteralPath (Join-Path $destination $entry)) {
+              throw "Reinstall retained retired file $entry"
+            }
+          }
           if ((Get-Content -LiteralPath $unmanaged -Raw).Trim() -ne 'unmanaged') {
             throw 'Reinstall did not preserve an unmanaged file'
           }
@@ -106,7 +128,9 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & pwsh -NoProfile -File windows/tests/test-update-xerj.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & pwsh -NoProfile -File windows/tests/test-update-aiclis.ps1
+          & pwsh -NoProfile -File windows/tests/test-update-ai-clis.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & pwsh -NoProfile -File windows/tests/test-path-safety.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $env:CRUSH_GLOBAL_DATA = $env:USERPROFILE
           & pwsh -NoProfile -File windows/ai-purge-history.ps1 -IncludeCrushData -DryRun
@@ -114,6 +138,16 @@ jobs:
           $env:CRUSH_GLOBAL_DATA = Join-Path $env:RUNNER_TEMP 'crush-custom'
           & pwsh -NoProfile -File windows/ai-purge-history.ps1 -IncludeCrushData -DryRun
           exit $LASTEXITCODE
+      - name: Check updater entry points on Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          if ($PSVersionTable.PSVersion.Major -ne 5) { throw 'Expected Windows PowerShell' }
+          foreach ($script in @('update-xerj', 'update-ai-clis')) {
+            & powershell.exe -NoProfile -File "windows/$script.ps1" --help
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            & powershell.exe -NoProfile -File "windows/$script.ps1" invalid-agent
+            if ($LASTEXITCODE -ne 2) { throw "Unexpected usage exit status for $script" }
+          }
       - name: Run portable Perl syntax and regressions
         shell: pwsh
         run: |
@@ -125,6 +159,22 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & perl tests-format/test-ssh-menu.pl
           exit $LASTEXITCODE
+
+  debian:
+    name: Debian 13 isolated regression checks
+    runs-on: ubuntu-24.04
+    container: debian:13
+    timeout-minutes: 20
+    steps:
+      - name: Install test tools in the disposable container
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git make curl ca-certificates file perl rsync
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Test delivery and packaging with isolated fixtures
+        run: make test-regression
 
   openbsd:
     name: OpenBSD platform checks

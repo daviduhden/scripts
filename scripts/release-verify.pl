@@ -20,8 +20,8 @@ use strict;
 use warnings;
 
 use Archive::Tar;
+use Fcntl                  qw(O_CREAT O_EXCL O_WRONLY);
 use File::Basename         qw(dirname);
-use File::Path             qw(make_path);
 use File::Temp             qw(tempfile);
 use IO::Uncompress::Gunzip qw($GunzipError);
 use JSON::PP               ();
@@ -158,31 +158,63 @@ sub validate_member {
     return $canonical;
 }
 
+sub private_directory {
+    my ( $path, $disallowed_mode ) = @_;
+    $disallowed_mode //= oct('077');
+    my @info = lstat $path;
+    die "extraction requires an owned private directory\n"
+      unless @info
+      && -d _
+      && $info[4] == $>
+      && !( $info[2] & $disallowed_mode );
+    return 1;
+}
+
+sub ensure_member_directory {
+    my ( $root, @parts ) = @_;
+    my $path = $root;
+    for my $part (@parts) {
+        $path .= "/$part";
+        if ( !lstat $path ) {
+            mkdir $path, oct('755')
+              or die "cannot create archive directory: $!\n";
+            chmod oct('755'), $path
+              or die "cannot set archive directory mode: $!\n";
+        }
+        private_directory( $path, oct('022') );
+    }
+    return $path;
+}
+
 sub write_entry {
     my ( $entry, $target ) = @_;
-    open my $out, '>:raw', $target or die "cannot create $target: $!\n";
+    sysopen my $out, $target, O_WRONLY | O_CREAT | O_EXCL, oct('600')
+      or die "cannot create unique archive output: $!\n";
+    binmode $out or die "cannot set archive output mode: $!\n";
     my $content = $entry->get_content_by_ref;
     print {$out} $$content or die "cannot write $target: $!\n";
     close $out             or die "cannot close $target: $!\n";
-    chmod $entry->mode & oct("777"), $target
+    chmod $entry->mode & oct('755'), $target
       or die "cannot set archive entry mode: $!\n";
 }
 
 sub extract_all {
     my ( $archive, $destination, $root, $limit ) = @_;
     usage() unless defined $limit && $limit =~ /\A[0-9]+\z/ && $limit > 0;
+    private_directory($destination);
     my $next = archive_iterator( $archive, $limit );
     my %seen;
     my $total = 0;
     while ( my $entry = $next->() ) {
-        my $name   = validate_member( $entry, $root, \%seen, \$total, $limit );
-        my $target = "$destination/$name";
+        my $name  = validate_member( $entry, $root, \%seen, \$total, $limit );
+        my @parts = split m{/}, $name;
         if ( $entry->is_dir ) {
-            make_path($target);
+            ensure_member_directory( $destination, @parts );
             next;
         }
-        make_path( dirname($target) );
-        write_entry( $entry, $target );
+        my $leaf      = pop @parts;
+        my $directory = ensure_member_directory( $destination, @parts );
+        write_entry( $entry, "$directory/$leaf" );
     }
     die "archive does not contain any entries\n" unless keys %seen;
     return 1;
@@ -192,6 +224,7 @@ sub extract_entry {
     my ( $archive, $destination, $entry_name, $limit ) = @_;
     usage() unless defined $entry_name && length $entry_name;
     usage() unless defined $limit && $limit =~ /\A[0-9]+\z/ && $limit > 0;
+    private_directory( dirname($destination) );
     my $next = archive_iterator( $archive, $limit );
     my $match;
     while ( my $entry = $next->() ) {

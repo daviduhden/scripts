@@ -45,6 +45,18 @@ collisions. Resolve compatibility symlinks before locating those files.
 through `uninstall-tests-format`. An empty `TESTS_FORMAT_PROFILE_DIR` disables
 this integration for either target.
 
+Debian and SecureBlue install `update-ai-clis` together with its private
+`update-ai-clis-linux` entry point. Windows discovers the self-contained
+`update-ai-clis.ps1` and generates the `update-ai-clis.cmd` launcher.
+Keep the shared selectors, exit codes and summary fields aligned across these
+entry points. The public matrix is in [docs/update-ai-clis.md](docs/update-ai-clis.md).
+
+`update-xerj` shares those selectors and registers only xerj's stdio MCP
+server for installed clients. Debian and SecureBlue install both the shared
+`xerj-clients` dispatcher and `xerj-config` helper alongside the updater.
+Debian client configuration runs under the invoking account. The protocol
+and configuration matrix is in [docs/update-xerj.md](docs/update-xerj.md).
+
 ## Conventions
 
 - Preserve the copyright/license header that points to `LICENSE`. Do not edit
@@ -180,9 +192,11 @@ pwsh -NoProfile -File .\windows\test-format\tests\run-tests.ps1
   - real execution: running the system-changing script itself.
 - Record the exact command and result. Report skipped optional tools as
   skipped, not passed.
-- Both the agent-knowledge and Platform Validation workflows are manual
-  (`workflow_dispatch`). Platform Validation runs isolated Linux, Windows, and
-  OpenBSD 8.0 checks. Actions use verified commit hashes; updating them requires
+- Static Validation runs shell parsing and worktree knowledge validation on
+  pull requests and pushes to main. The agent-knowledge and Platform
+  Validation workflows are manual (`workflow_dispatch`). Platform Validation
+  runs isolated Ubuntu, Debian 13, Windows, and OpenBSD 8.0 checks. Actions
+  use verified commit hashes; updating them requires
   checking the upstream repository/ref. Do not claim a platform was tested
   until that job actually ran successfully.
 - Before changing a script, read its platform README and check `git status`.
@@ -222,7 +236,7 @@ A code change without the corresponding agent knowledge maintenance is considere
 
 Never claim completion when the synchronization step has been skipped or has failed.
 
-This review is required after every change to code, configuration, dependencies, features, bug fixes, refactors, tests, workflows, documentation, or repository architecture. At task end, inspect the root and nested `AGENTS.md`, `.github/agents/*.agent.md`, `.agents/skills/**/SKILL.md`, `.github/skills/**/SKILL.md`, `.claude/skills/**/SKILL.md`, and any tool-specific instruction files present (including Cursor and Copilot files). The current repository has one root `AGENTS.md`, five skills under `.agents/skills/`, and manual workflows at `.github/workflows/agent-knowledge-validation.yml` and `.github/workflows/platform-validation.yml`; no specialized agent definitions exist.
+This review is required after every change to code, configuration, dependencies, features, bug fixes, refactors, tests, workflows, documentation, or repository architecture. At task end, inspect the root and nested `AGENTS.md`, `.github/agents/*.agent.md`, `.agents/skills/**/SKILL.md`, `.github/skills/**/SKILL.md`, `.claude/skills/**/SKILL.md`, and any tool-specific instruction files present (including Cursor and Copilot files). The current repository has one root `AGENTS.md`, five skills under `.agents/skills/`, manual workflows at `.github/workflows/agent-knowledge-validation.yml` and `.github/workflows/platform-validation.yml`, and an automatic check at `.github/workflows/static-validation.yml`. No specialized agent definitions exist.
 
 Map changed paths to the instructions whose scope covers them, then read the applicable skill(s) and their linked references. Update an existing skill when its procedures, tools, assumptions, validation, or reusable knowledge change. Create a skill only when a durable responsibility has no suitable existing skill. Update specialized agent instructions when their workflow or responsibility changes. Remove obsolete or conflicting guidance and verify that changed local references still resolve. Do not add cosmetic edits, timestamps, or task-specific notes solely to satisfy this rule.
 

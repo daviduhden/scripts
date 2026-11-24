@@ -48,6 +48,7 @@ export LANG=C.UTF-8
 export LC_ALL=C.UTF-8
 
 APT_BIN="/bin/apt"
+LOG_DIR=/var/log/scripts-sysupgrade
 
 # Prefer preserving local configuration files.
 # Force defend-against-confold by not overwriting local config.
@@ -352,7 +353,7 @@ restart_services() {
 	fi
 }
 
-# Run optional Lynis and systemcheck audits, tee their output to /tmp,
+# Run optional Lynis and systemcheck audits, tee their output to the private log directory,
 # restrict the resulting files to the owner, then delete audit files
 # older than seven days. Missing tools are skipped with a warning.
 run_security_audit() {
@@ -361,7 +362,7 @@ run_security_audit() {
 
 	if command -v lynis >/dev/null 2>&1; then
 		umask 077
-		audit_dir=$(mktemp -d "${TMPDIR:-/tmp}/lynis-audit.XXXXXX") || {
+		audit_dir=$(mktemp -d "${LOG_DIR}/lynis-audit.XXXXXX") || {
 			warn "Cannot create a private Lynis log directory."
 			return
 		}
@@ -387,7 +388,7 @@ run_security_audit() {
 
 	if command -v systemcheck >/dev/null 2>&1; then
 		umask 077
-		syscheck_log=$(mktemp "${TMPDIR:-/tmp}/systemcheck.XXXXXX") || {
+		syscheck_log=$(mktemp "${LOG_DIR}/systemcheck.XXXXXX") || {
 			warn "Cannot create a private systemcheck log."
 			return
 		}
@@ -408,7 +409,7 @@ run_security_audit() {
 		warn "systemcheck not found; skipping systemcheck run."
 	fi
 
-	if find "${TMPDIR:-/tmp}" -maxdepth 1 -type f \
+	if find "$LOG_DIR" -xdev -maxdepth 1 -type f \
 		-name 'systemcheck.*' \
 		-mtime +7 -print0 2>/dev/null |
 		xargs -0r rm -f; then
@@ -417,7 +418,7 @@ run_security_audit() {
 		warn "Failed to clean old systemcheck logs."
 	fi
 
-	if find "${TMPDIR:-/tmp}" -maxdepth 1 -type d \
+	if find "$LOG_DIR" -xdev -maxdepth 1 -type d \
 		-name 'lynis-audit.*' -mtime +7 -print0 2>/dev/null |
 		xargs -0r rm -rf --; then
 		log "Old Lynis audit directories older than 7 days removed (if any)."
@@ -473,7 +474,7 @@ collect_system_info_and_upload() {
 	local rc=0
 	info_ts="$(date +%Y%m%d-%H%M%S)"
 	umask 077
-	info_log=$(mktemp "${TMPDIR:-/tmp}/debian-info.XXXXXX") || {
+	info_log=$(mktemp "${LOG_DIR}/debian-info.XXXXXX") || {
 		warn "Cannot create a private system information log."
 		return 1
 	}
@@ -548,7 +549,7 @@ collect_system_info_and_upload() {
 		# sed reads the whole stream; `| head -n 20` would exit
 		# early and make ps die of SIGPIPE, failing the pipeline
 		# under pipefail on busy systems.
-		ps -eo pid,ppid,cmd,%mem,%cpu,rss --sort=-rss |
+		ps -eo pid,ppid,comm,%mem,%cpu,rss --sort=-rss |
 			sed -n '1,20p'
 	} 2>&1 | tee "$info_log" || rc=$?
 	set +o pipefail
@@ -560,7 +561,7 @@ collect_system_info_and_upload() {
 		warn "System info collection had errors; see ${info_log}."
 	fi
 
-	if find "${TMPDIR:-/tmp}" -maxdepth 1 -type f \
+	if find "$LOG_DIR" -xdev -maxdepth 1 -type f \
 		-name 'debian-info.*' \
 		-mtime +7 -print0 2>/dev/null | xargs -0r rm -f; then
 		log "Old system info logs older than 7 days removed (if any)."
@@ -618,6 +619,11 @@ main() {
 	parse_args "$@"
 	require_root
 	check_prereqs
+	if [[ -L $LOG_DIR || (-e $LOG_DIR && (! -d $LOG_DIR || ! -O $LOG_DIR)) ]]; then
+		error 'Unsafe maintenance log directory.'
+		return 1
+	fi
+	install -d -o root -g root -m 0700 -- "$LOG_DIR" || return
 	run_maintenance
 }
 

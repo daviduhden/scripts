@@ -1,0 +1,28 @@
+name: Static Validation
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: static-validation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  syntax:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Parse shell sources
+        run: |
+          git ls-files -z -- '*.sh' | xargs -0 -r -n 1 sh -n
+          git ls-files -z -- '*.bash' | xargs -0 -r -n 1 bash -n
+      - name: Verify agent knowledge references
+        run: perl scripts/validate-agent-knowledge.pl --scope worktree

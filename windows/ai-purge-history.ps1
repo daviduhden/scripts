@@ -49,85 +49,97 @@ $opencodeStateHome = if ($env:OPENCODE_STATE_HOME) { $env:OPENCODE_STATE_HOME } 
 $crushDataHome = if ($env:CRUSH_GLOBAL_DATA) { $env:CRUSH_GLOBAL_DATA } else { Join-Path $env:LOCALAPPDATA 'crush' }
 $swivalProjectHome = if ($env:SWIVAL_PROJECT_HOME) { $env:SWIVAL_PROJECT_HOME } else { (Get-Location).Path }
 
-if ($IncludeCrushData) {
-    if ($crushDataHome -notmatch '^[A-Za-z]:[\\/]' -and $crushDataHome -notmatch '^\\\\[^\\]+\\[^\\]+\\') {
-        throw 'Crush data must be an absolute filesystem directory.'
-    }
-    $crushDataHome = [IO.Path]::GetFullPath($crushDataHome).TrimEnd('\', '/')
-    foreach ($protected in @([IO.Path]::GetPathRoot($crushDataHome + '\'), $HOME, $env:LOCALAPPDATA, $env:APPDATA,
+function Resolve-HistoryRoot {
+    param([string]$Path)
+
+    if ($Path -notmatch '^[A-Za-z]:[\\/]') { throw 'History roots must be absolute paths on a local filesystem.' }
+    $full = [IO.Path]::GetFullPath($Path).TrimEnd('\', '/')
+    foreach ($protected in @([IO.Path]::GetPathRoot($Path), $HOME, $env:LOCALAPPDATA, $env:APPDATA,
             $env:USERPROFILE, $env:WINDIR, $env:ProgramFiles, $env:ProgramData)) {
         if (-not $protected) { continue }
         $protected = [IO.Path]::GetFullPath($protected).TrimEnd('\', '/')
-        if ($protected.Equals($crushDataHome, [StringComparison]::OrdinalIgnoreCase) -or
-            $protected.StartsWith($crushDataHome + '\', [StringComparison]::OrdinalIgnoreCase)) {
-            throw "Refusing broad Crush data path: $crushDataHome"
+        if ($protected -ieq $full -or $protected.StartsWith($full + '\', [StringComparison]::OrdinalIgnoreCase)) {
+            throw "Refusing broad history root: $full"
         }
     }
-    if ((Test-Path -LiteralPath $crushDataHome) -and -not (Test-Path -LiteralPath $crushDataHome -PathType Container)) {
-        throw "Crush data is not a directory: $crushDataHome"
+    return $full
+}
+
+function Assert-HistoryTarget {
+    param([string]$Path, [bool]$Directory)
+
+    # Inspect every ancestor and the leaf before recursing. Missing paths
+    # are harmless, but a file masquerading as an ancestor is not.
+    $current = $Path
+    $isDirectory = $Directory
+    while ($current) {
+        $item = Get-Item -LiteralPath $current -Force -ErrorAction SilentlyContinue
+        if ($item -and (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
+                [bool]$item.PSIsContainer -ne $isDirectory)) {
+            throw "Refusing an unexpected history file type or reparse path: $current"
+        }
+        $isDirectory = $true
+        $current = [IO.Path]::GetDirectoryName($current)
     }
-    for ($directory = [IO.DirectoryInfo]::new($crushDataHome); $null -ne $directory; $directory = $directory.Parent) {
-        if ($directory.Exists -and ($directory.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
-            throw "Refusing Crush data through a reparse point: $($directory.FullName)"
+    if (-not $Directory -or -not [IO.Directory]::Exists($Path)) { return }
+
+    $pending = [Collections.Generic.Stack[string]]::new()
+    $pending.Push($Path)
+    while ($pending.Count) {
+        foreach ($child in Get-ChildItem -LiteralPath ($pending.Pop()) -Force) {
+            if ($child.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+                throw "Refusing a reparse point in a history directory: $($child.FullName)"
+            }
+            if ($child.PSIsContainer) { $pending.Push($child.FullName) }
         }
     }
 }
 
-# Missing targets are ignored, so an installation that never created one of
-# these paths is not an error.
-$paths = @(
-    (Join-Path $codexHome 'sessions'),
-    (Join-Path $codexHome 'archived_sessions'),
-    (Join-Path $copilotHome 'session-state'),
-    (Join-Path $copilotHome 'logs'),
-    (Join-Path $opencodeStateHome 'prompt-history.jsonl'),
-    (Join-Path $opencodeDataHome 'opencode.db'),
-    (Join-Path $opencodeDataHome 'opencode.db-wal'),
-    (Join-Path $opencodeDataHome 'opencode.db-shm'),
-    (Join-Path $opencodeDataHome 'log'),
-    (Join-Path $swivalProjectHome '.swival\HISTORY.md'),
-    (Join-Path $swivalProjectHome '.swival\HISTORY.md.lock'),
-    (Join-Path $swivalProjectHome '.swival\continue.md'),
-    (Join-Path $swivalProjectHome '.swival\repl_history'),
-    (Join-Path $swivalProjectHome '.swival\memory'),
-    (Join-Path $swivalProjectHome '.swival\cache.db'),
-    (Join-Path $swivalProjectHome '.swival\audit')
-)
+function Get-HistoryTarget {
+    param([string]$Root, [string[]]$Files, [string[]]$Directories)
 
-<#
-.SYNOPSIS
-    Removes one history or state path unless -DryRun is set.
-.PARAMETER Path
-    Literal file or directory path. A missing path is ignored.
-.NOTES
-    Directories are removed recursively with -Recurse -Force, so the whole tree
-    is deleted. $ErrorActionPreference is Stop, which makes a removal failure
-    terminate the script.
-#>
-function Remove-Target {
+    $resolvedRoot = Resolve-HistoryRoot $Root
+    foreach ($name in @($Files) + @($Directories)) {
+        if (-not $name) { continue }
+        $path = [IO.Path]::GetFullPath((Join-Path $resolvedRoot $name))
+        if (-not $path.StartsWith($resolvedRoot + '\', [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'History target escapes the application root.'
+        }
+        [pscustomobject]@{ Path = $path; Directory = $name -in $Directories }
+    }
+}
+
+function Remove-HistoryTarget {
     [CmdletBinding(SupportsShouldProcess)]
-    param([string]$Path)
+    param([string]$Path, [bool]$Directory)
 
-    if (Test-Path -LiteralPath $Path) {
-        if ($DryRun) {
-            Write-Information "[DRY-RUN] Would remove: $Path" -InformationAction Continue
-        }
-        elseif ($PSCmdlet.ShouldProcess($Path, 'Remove history or state')) {
-            Remove-Item -LiteralPath $Path -Recurse -Force
-            Write-Information "[INFO] Removed: $Path" -InformationAction Continue
-        }
+    Assert-HistoryTarget $Path $Directory
+    if (-not (Test-Path -LiteralPath $Path)) { return }
+    if ($DryRun) {
+        Write-Information "[DRY-RUN] Would remove: $Path" -InformationAction Continue
+    }
+    elseif ($PSCmdlet.ShouldProcess($Path, 'Remove history or state')) {
+        Remove-Item -LiteralPath $Path -Recurse:$Directory -Force
+        Write-Information "[INFO] Removed: $Path" -InformationAction Continue
     }
 }
 
-foreach ($path in $paths) {
-    Remove-Target -Path $path
+$paths = @(
+    Get-HistoryTarget $codexHome -Directories @('sessions', 'archived_sessions')
+    Get-HistoryTarget $copilotHome -Directories @('session-state', 'logs')
+    Get-HistoryTarget $opencodeStateHome -Files @('prompt-history.jsonl')
+    Get-HistoryTarget $opencodeDataHome -Files @('opencode.db', 'opencode.db-wal', 'opencode.db-shm') -Directories @('log')
+    Get-HistoryTarget (Join-Path $swivalProjectHome '.swival') -Files @('HISTORY.md', 'HISTORY.md.lock', 'continue.md',
+        'repl_history', 'cache.db') -Directories @('memory', 'audit')
+)
+if ($IncludeCrushData) {
+    $paths += [pscustomobject]@{ Path = Resolve-HistoryRoot $crushDataHome; Directory = $true }
 }
 
-# Crush's data directory may include configuration; require an explicit opt-in.
-if ($IncludeCrushData) {
-    Remove-Target -Path $crushDataHome
-}
-else {
+# Preflight all selected targets before deleting any of them.
+foreach ($target in $paths) { Assert-HistoryTarget $target.Path $target.Directory }
+foreach ($target in $paths) { Remove-HistoryTarget $target.Path $target.Directory }
+if (-not $IncludeCrushData) {
     Write-Information "[INFO] Preserving Crush data directory (use -IncludeCrushData to remove it): $crushDataHome" -InformationAction Continue
 }
 

@@ -278,4 +278,41 @@ subtest 'public symlink is rejected' => sub {
     }
 };
 
+subtest 'fetch handoff uses a private snapshot and fails closed' => sub {
+    for my $implementation (@SYNC_IMPLEMENTATIONS) {
+        my ( $relative_script, $shell_name ) = @$implementation;
+        next if $^O eq 'openbsd' && $relative_script =~ m{^debian/};
+        my $shell = find_command($shell_name);
+        next unless defined $shell;
+        my $root = new_tempdir('website-snapshot-');
+        make_path("$root/fetch/src");
+        write_file( "$root/fetch/src/index.html", "first\n" );
+        my $source_text = slurp("$REPOSITORY_ROOT/$relative_script");
+        my $functions   = join "\n",
+          map { extract_function( $source_text, $_ ) }
+          qw(publish_git_snapshot reject_source_symlinks);
+        my $commands = <<'SH';
+GIT_STAGE=$1
+SNAPSHOT_HELPER=$2
+run_as_gh_user() { "$@"; }
+stage_from_source() {
+    printf '%s\n' changed >"$GIT_STAGE/fetch/src/index.html"
+    [ "$(cat "$1/index.html")" = first ]
+}
+publish_git_snapshot || exit 90
+find() { return 1; }
+if reject_source_symlinks "$GIT_STAGE/snapshot/tree"; then exit 91; fi
+SH
+        my $result = run_command(
+            cmd => [
+                $shell, '-eu', '-c', "$functions\n$commands", 'test',
+                $root,  "$REPOSITORY_ROOT/scripts/release-verify.pl"
+            ],
+        );
+        is( $result->{returncode}, 0,
+            "$relative_script only consumes snapshot" )
+          or diag $result->{stderr};
+    }
+};
+
 done_testing();

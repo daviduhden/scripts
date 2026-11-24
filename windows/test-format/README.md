@@ -89,11 +89,12 @@ including the absence of a trailing newline. UTF-32, invalid bytes, NUL,
 ambiguous UTF-16 without a BOM, bare CR, and mixed LF/CRLF endings are rejected
 to avoid guessing encodings or changing multiline literals during conversion.
 
-Each write creates a unique temporary file in the same directory, writes all
-bytes, calls `Flush(true)`, reads it back for verification, and checks that the
-original has not changed. It then uses `File.Replace`, which preserves
-destination permissions on Windows and supports atomic replacement on
-compatible file systems. There is no fallback that deletes the original first.
+Each write creates an exclusively opened temporary file in the same directory
+with private permissions before writing any bytes. It flushes and verifies
+the content, checks for concurrent changes, and transfers the original
+Windows ACL or Unix file mode before atomic replacement. Unix writes require
+the file-mode APIs introduced in .NET 7. Setup and permission-preservation
+failures stop the write.
 Read-only files produce an error. Already formatted files are not written and
 retain their modification timestamps. `finally` attempts to remove temporary
 files after an error or normal pipeline interruption.

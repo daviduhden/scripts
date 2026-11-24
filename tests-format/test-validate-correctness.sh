@@ -96,7 +96,11 @@ trap 'rm -rf "$BASE"' EXIT HUP INT TERM
 # Mirror the repository layout under T so report paths have the same
 # openbsd/, debian/, and tests-format/ prefixes the validator expects.
 T="$BASE/tree"
-mkdir -p "$T/openbsd" "$T/debian"
+mkdir -p "$T/openbsd" "$T/debian" "$T/shell"
+cat >"$T/shell/wrong-shebang.bash" <<'EOF'
+#!/bin/ksh
+exit 0
+EOF
 
 # ---- OpenBSD fixture: GNU-only find -printf ----
 cat >"$T/openbsd/gnu-only.ksh" <<'EOF'
@@ -280,6 +284,22 @@ printf '%s\n' "${ROOT_ENV_VARS[*]}"
 EOF
 fi
 
+case "$HOST_FAMILY" in
+debian | secureblue)
+	mkdir -p "$T/scripts"
+	cat >"$T/scripts/xerj-clients.bash" <<'EOF'
+#!/bin/bash
+xerj_fixture_helper() { printf '%s\n' ok; }
+EOF
+	cat >"$T/$HOST_FAMILY/update-xerj.bash" <<'EOF'
+#!/bin/bash
+set -eu
+source scripts/xerj-clients.bash
+xerj_fixture_helper
+EOF
+	;;
+esac
+
 # ---- Run with --target all (static checks for everything) ----
 out=$("$VALIDATE" --target all "$T" 2>&1)
 rc=$?
@@ -301,6 +321,8 @@ assert_no_error 'openbsd/case-label.ksh' "$out" \
 	"case label alternatives are not treated as commands"
 assert_no_error 'debian/gnu-ok.bash' "$out" \
 	"GNU find -printf not an ERROR in Debian fixture"
+assert_error 'shell/wrong-shebang.bash' "$out" \
+	"--target all includes interactive shell helpers"
 assert_error 'debian/wrong-shebang.bash' "$out" \
 	"wrong shebang detected"
 if [ -n "$HOST_FAMILY" ]; then
@@ -309,6 +331,12 @@ if [ -n "$HOST_FAMILY" ]; then
 	assert_no_error "$HOST_FAMILY/multiline-array.ksh" "$out" \
 		"multi-line array elements are not treated as commands"
 fi
+case "$HOST_FAMILY" in
+debian | secureblue)
+	assert_no_error "$HOST_FAMILY/update-xerj.bash" "$out" \
+		"shared xerj declaration is not mistaken for an external command"
+	;;
+esac
 assert_rc 1 "$rc" "--target all with ERRORs exits 1"
 
 if printf '%s' "$out" | grep -q 'WARNING tests-format/bounded.sh'; then

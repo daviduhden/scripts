@@ -12,6 +12,7 @@ use Archive::Tar;
 use Digest::SHA qw(sha256_hex);
 use File::Path  qw(make_path);
 use FindBin     qw($Bin);
+use JSON::PP    ();
 use lib $Bin;
 use Test::More;
 
@@ -236,7 +237,7 @@ subtest 'website transaction helpers' => sub {
         my $script    = slurp("$REPOSITORY_ROOT/debian/sync-website.bash");
         my $functions = join "\n\n",
           map { extract_function( $script, $_ ) }
-          qw(acquire_lock cleanup_lock rollback_publication);
+          qw(acquire_lock cleanup_lock rollback_publication finish_git_stage);
         my $root     = new_tempdir('website-term-');
         my $commands = <<'SH';
 WWW_DIR=$1
@@ -290,6 +291,30 @@ SH
         unlike( $result->{stdout}, qr/exit 99/, 'failure is not masked' );
     };
 
+    subtest 'certificate reload failure is reported' => sub {
+        my $root     = new_tempdir('website-cert-restart-');
+        my $script   = slurp("$REPOSITORY_ROOT/debian/sync-website.bash");
+        my $function = extract_function( $script, 'post_update_steps' );
+        my $commands = <<'SH';
+log() { :; }
+warn() { :; }
+error() { :; }
+chown() { :; }
+find() { :; }
+systemctl() { :; }
+certbot() { :; }
+restart_web_service() { return 1; }
+WWW_DIR=$1
+OWNER_USER=unused
+OWNER_GROUP=unused
+SERVICE_NAME=apache2
+post_update_steps
+SH
+        my $result = run_command( cmd =>
+              [ 'bash', '-eu', '-c', "$function\n$commands", 'test', $root ], );
+        isnt( $result->{returncode}, 0, 'failed second restart fails rollout' );
+    };
+
     subtest 'atomic publication and rollback' => sub {
         plan skip_all => 'Debian helper uses GNU mv' unless is_linux();
         exercise_atomic( 'debian/sync-website.bash', 'bash' );
@@ -316,6 +341,7 @@ sub exercise_atomic {
       stage_from_source
       acquire_lock
       cleanup_lock
+      finish_git_stage
     );
     my $root   = new_tempdir('website-atomic-');
     my $old    = "$root/old";
@@ -341,7 +367,9 @@ OWNER_GROUP=unused
 WWW_DIR=$1
 acquire_lock
 [ "$LOCKDIR" != "$WWW_DIR/.sync.lock" ]
-if acquire_lock; then exit 10; fi
+status=0
+acquire_lock || status=$?
+[ "$status" -eq 2 ]
 stage_from_source "$2"
 [ "$(cat "$WWW_DIR/index.html")" = new ]
 [ ! -e "$WWW_DIR/AGENTS.md" ]
@@ -379,7 +407,7 @@ subtest 'xerj publication' => sub {
     make_path($fixtures);
 
     my $asset      = 'xerj-1.0.0-x86_64-unknown-linux-musl.tar.gz';
-    my $executable = "#!/bin/sh\nexit 0\n";
+    my $executable = "#!/bin/sh\nprintf '%s\\n' 'xerj v1.0.0'\n";
     create_tar_gz(
         "$fixtures/$asset",
         [
@@ -491,6 +519,382 @@ SH
     isnt( $failure->{returncode}, 0, 'release lookup failure is propagated' );
     is( slurp("$root/.local/bin/xerj"),
         $executable, 'lookup failure preserves installed binary' );
+
+    create_tar_gz(
+        "$fixtures/$asset",
+        [
+            {
+                name => 'xerj-1.0.0-x86_64-unknown-linux-musl/xerj',
+                data => "#!/bin/sh\nprintf '%s\\n' 'xerj v9.9.0'\n",
+                kind => 'regular',
+            }
+        ]
+    );
+    $digest = sha256_hex( slurp("$fixtures/$asset") );
+    write_file( "$fixtures/$asset.sha256", "$digest  $asset\n" );
+    my $wrong_version = run_command(
+        cmd => [ 'bash', '-eu', '-c', $functions . $commands ],
+        env => $environment,
+    );
+    isnt( $wrong_version->{returncode},
+        0, 'binary version mismatch is rejected' );
+    is( slurp("$root/.local/bin/xerj"),
+        $executable, 'version mismatch preserves installed binary' );
+    is_deeply( [ matching_entries( "$root/.local/bin", qr/^xerj\.new/ ) ],
+        [], 'failed version check removes staging file' );
+};
+
+subtest 'xerj client configuration stages edits without backups' => sub {
+    plan skip_all => 'The configuration helper uses Linux directory locks'
+      unless is_linux();
+    my $root   = new_tempdir('xerj-config-');
+    my $helper = "$REPOSITORY_ROOT/secureblue/xerj-config.pl";
+    for my $client (qw(crush opencode)) {
+        my $dir = "$root/$client";
+        make_path($dir);
+        my $config = $client eq 'crush' ? "$dir/crushrc" : "$dir/opencode.json";
+        my $content =
+          $client eq 'crush' ? "# retained\n" : '{"theme":"retained"}';
+        write_file( $config,                $content );
+        write_file( "$config.bak.previous", 'previous copy' );
+        my $cmd = [
+            $^X, $helper, $client, '/tmp/path with spaces/xerj',
+            'http://127.0.0.1:9200'
+        ];
+        my $env   = env_with( XDG_CONFIG_HOME => $root, HOME => $root );
+        my $first = run_command( cmd => $cmd, env => $env );
+        is( $first->{returncode}, 0, "configure $client" )
+          or diag $first->{stderr};
+        my $published = slurp($config);
+        like( $published, qr/retained/, "$client retains existing settings" );
+        my $second = run_command( cmd => $cmd, env => $env );
+        is( $second->{returncode}, 0,  "configure $client again" );
+        is( $second->{stdout},     '', "$client skips the unchanged write" );
+        is( slurp($config),        $published, "$client settings are stable" );
+        is_deeply(
+            [ matching_entries( $dir, qr/\.bak\./ ) ],
+            [
+                ( $client eq 'crush' ? 'crushrc' : 'opencode.json' )
+                . '.bak.previous'
+            ],
+            "$client creates no backups"
+        );
+        is(
+            slurp("$config.bak.previous"),
+            'previous copy',
+            "$client preserves existing backup contents"
+        );
+        is_deeply( [ matching_entries( $dir, qr/^\.xerj-/ ) ],
+            [], "$client leaves no staging files" );
+    }
+};
+
+subtest 'xerj MCP selections and ownership checks' => sub {
+    plan skip_all => 'The xerj updaters require Linux' unless is_linux();
+    my $root   = new_tempdir('xerj-mcp-');
+    my $helper = "$REPOSITORY_ROOT/secureblue/xerj-config.pl";
+    my $binary = '/opt/Tool Path/xerj';
+    my $url    = 'http://127.0.0.1:9200';
+    my $env    = env_with(
+        HOME                => $root,
+        XDG_CONFIG_HOME     => "$root/config",
+        COPILOT_HOME        => "$root/copilot",
+        CLAUDE_CONFIG_DIR   => "$root/claude",
+        CRUSH_GLOBAL_CONFIG => "$root/crush",
+    );
+    my $run = sub {
+        my ( $client, $endpoint, $stdin ) = @_;
+        return run_command(
+            cmd   => [ $^X, $helper, $client, $binary, $endpoint // $url ],
+            env   => $env,
+            stdin => $stdin,
+        );
+    };
+    for my $spec (
+        [ 'copilot-cli', 'copilot/mcp-config.json', 'local' ],
+        [ 'claude',      'claude/.claude.json',     'stdio' ],
+      )
+    {
+        my ( $client, $relative, $transport ) = @$spec;
+        my $path = "$root/$relative";
+        is( $run->($client)->{returncode}, 0, "$client registers new server" );
+        my $data   = JSON::PP::decode_json( slurp($path) );
+        my $server = $data->{mcpServers}{xerj};
+        is( $server->{type},    $transport, "$client uses official transport" );
+        is( $server->{command}, $binary,    "$client stores absolute command" );
+        is_deeply( $server->{args}, [ 'mcp', '--url', $url ], "$client args" );
+        $server->{timeout} = 321;
+        $data->{other}     = { retained => JSON::PP::true };
+        write_file( $path, JSON::PP::encode_json($data) );
+        my $new_url = 'https://example.org:9201/search';
+        is( $run->( $client, $new_url )->{returncode},
+            0, "$client updates URL" );
+        $data = JSON::PP::decode_json( slurp($path) );
+        is( $data->{mcpServers}{xerj}{args}[2], $new_url, "$client new URL" );
+        is( $data->{mcpServers}{xerj}{timeout}, 321,
+            "$client retains timeout" );
+        ok( $data->{other}{retained}, "$client retains unrelated settings" );
+        my $foreign =
+          '{"mcpServers":{"xerj":{"type":"http","url":"https://localhost"}}}';
+        write_file( $path, $foreign );
+        isnt( $run->($client)->{returncode}, 0,
+            "$client rejects foreign xerj" );
+        is( slurp($path), $foreign, "$client leaves foreign server untouched" );
+    }
+    my $opencode = "$root/config/opencode/opencode.json";
+    make_path("$root/config/opencode");
+    my $legacy = {
+        mcp => {
+            xerj => {
+                type    => 'local',
+                command => [ $binary, 'mcp', '--url', $url ],
+                enabled => JSON::PP::false,
+            }
+        },
+    };
+    write_file( $opencode, JSON::PP::encode_json($legacy) );
+    is( $run->('opencode2')->{returncode},
+        0, 'OpenCode 2 migrates known entry' );
+    my $data = JSON::PP::decode_json( slurp($opencode) );
+    ok( !exists $data->{mcp}{xerj}, 'OpenCode legacy entry removed' );
+    ok( $data->{mcp}{servers}{xerj}{disabled}, 'OpenCode stays disabled' );
+    my $ambiguous = '{"mcp":{"servers":{},"servers":{}}}';
+    write_file( $opencode, $ambiguous );
+    isnt( $run->('opencode2')->{returncode}, 0, 'Duplicate JSON key rejected' );
+    is( slurp($opencode), $ambiguous,     'Duplicate-key file preserved' );
+    is( $run->('crush')->{returncode}, 0, 'Crush honors config directory' );
+    my $crush    = "$root/crush/crushrc";
+    my $previous = slurp($crush);
+    write_file( "$root/crush/crush.json", '{"mcp":{"xerj":{}}}' );
+    isnt( $run->('crush')->{returncode},
+        0, 'Crush refuses shadowing legacy xerj' );
+    is( slurp($crush), $previous, 'Crush preserves existing managed block' );
+    write_file( "$root/crush/crush.json", '{}' );
+    my $bad_shell = "if true; then\n# possible secret\n";
+    write_file( $crush, $bad_shell );
+    my $bad_config = $run->('crush');
+    isnt( $bad_config->{returncode}, 0,
+        'Crush rejects malformed shell config' );
+    unlike( $bad_config->{stderr}, qr/secret/,
+        'Syntax check hides file content' );
+    is( slurp($crush), $bad_shell, 'Malformed Crush config stays untouched' );
+    my $codex = {
+        transport => {
+            type    => 'stdio',
+            command => $binary,
+            args    => [ 'mcp', '--url', $url ],
+        },
+    };
+    my $result = $run->( 'codex-check', $url, JSON::PP::encode_json($codex) );
+    is( $result->{stdout}, "current\n", 'Codex exact tuple is a no-op' );
+    my $payload = JSON::PP::encode_json($codex);
+    $result = $run->( 'codex-check', 'http://localhost:9300', $payload );
+    isnt( $result->{returncode}, 0, 'Codex changed URL requires manual edit' );
+    $codex->{transport}{args}[1] = '--unrelated';
+    $result = $run->( 'codex-check', $url, JSON::PP::encode_json($codex) );
+    isnt( $result->{returncode}, 0,
+        'Codex exact command with foreign args fails' );
+
+    for my $platform (qw(debian secureblue)) {
+        my $script = "$REPOSITORY_ROOT/$platform/update-xerj.bash";
+        for my $args (
+            [qw(all claude)],
+            [qw(--binary-only copilot-cli)],
+            [ '--url', 'https://token@localhost' ],
+            [ '--url', 'http://localhost:99999' ]
+          )
+        {
+            $result = run_command( cmd => [ $script, @$args ], env => $env );
+            is( $result->{returncode}, 2,
+                "$platform rejects invalid selection" );
+            unlike( $result->{stderr}, qr/token\@/, "$platform hides raw URL" );
+        }
+    }
+    my $clients = "$REPOSITORY_ROOT/scripts/xerj-clients.bash";
+    my $probe   = write_file( "$root/version-probe", <<'SH' );
+#!/bin/sh
+test "$1" = --version || exit 1
+printf '%s\n' "$XERJ_TEST_BANNER"
+SH
+    chmod oct('755'), $probe or die "cannot chmod version probe: $!";
+    my $invoke = '. "$1"; xerj_config_kind "$2" "$3"';
+    for my $case (
+        [ 'opencode', 'opencode v2.4.1',             0, 'opencode2' ],
+        [ 'opencode', '1.0.0',                       0, 'opencode1' ],
+        [ 'opencode', 'opencode v3.0.0',             2, '' ],
+        [ 'crush',    "logo\ncrush version v0.88.0", 0, 'crush' ],
+        [ 'crush',    'crush version v0.87.0',       2, '' ],
+      )
+    {
+        my ( $agent, $banner, $status, $schema ) = @$case;
+        $result = run_command(
+            cmd => [ 'bash', '-c', $invoke, 'xerj', $clients, $agent, $probe ],
+            env => { %$env, XERJ_TEST_BANNER => $banner },
+        );
+        is( $result->{returncode}, $status, "$banner compatibility status" );
+        is( trim( $result->{stdout} ), $schema,
+            "$banner configuration schema" );
+    }
+    $result = run_command(
+        cmd => [
+            'bash', '-c',
+            '. "$1"; xerj_select --binary-only; xerj_validate_selection',
+            'xerj', $clients
+        ],
+        env => { %$env, XERJ_URL => 'http://user:secret@localhost' },
+    );
+    is( $result->{returncode}, 0,
+        'binary-only ignores irrelevant endpoint env' );
+};
+
+subtest 'xerj Debian package selection and verification' => sub {
+    plan skip_all => 'The Debian updater targets Linux' unless is_linux();
+    my $root   = new_tempdir('xerj-apt-');
+    my $script = "$REPOSITORY_ROOT/debian/update-xerj.bash";
+    my $code   = functions_without_main($script);
+    $code =~ s{readonly XERJ_BIN=/usr/bin/xerj}
+              {readonly XERJ_BIN="\${TEST_ROOT}/xerj"};
+    my $musl   = 'xerj-1.2.3-rc.7-x86_64-unknown-linux-musl';
+    my $native = 'xerj-1.2.3-rc.7-x86_64-unknown-linux-gnu.deb';
+    make_path("$root/bin");
+    my $perl = find_command('perl') // die 'Cannot locate the harness Perl';
+    symlink $perl, "$root/bin/perl" or die "cannot link Perl: $!";
+    write_file( "$root/$native", "fake upstream package\n" );
+    create_tar_gz(
+        "$root/$musl.tar.gz",
+        [
+            map {
+                {
+                    name => "$musl/$_",
+                    data => "fixture $_\n",
+                    kind => 'regular'
+                }
+            } qw(xerj README.md LICENSE)
+        ]
+    );
+    for my $asset ( $native, "$musl.tar.gz" ) {
+        my $digest = sha256_hex( slurp("$root/$asset") );
+        write_file( "$root/$asset.sha256", "$digest  $asset\n" );
+    }
+    my $mock = write_file( "$root/bin/mock", <<'SH' );
+#!/bin/sh
+set -eu
+case ${0##*/} in
+curl)
+	while [ "$#" -gt 0 ]; do
+		case $1 in
+		https://github.com/xerj-org/xerj/releases/download/v1.2.3-rc.7/*) url=$1 ;;
+		--output) shift; output=$1 ;;
+		esac
+		shift
+	done
+	[ "${CURL_OK:-true}" = true ] || exit 22
+	if [ "${BAD_CHECKSUM:-false}" = true ] && [ "${url%.sha256}" != "$url" ]; then
+		printf 'incorrect checksum\n' >"$output"
+	else
+		cp "$TEST_ROOT/${url##*/}" "$output"
+	fi ;;
+dpkg)
+	[ "$1" = --compare-versions ]
+	case $3 in
+	ge) [ "${NATIVE_OK:-true}" = true ] ;;
+	gt) false ;;
+	*) exit 98 ;;
+	esac ;;
+dpkg-deb)
+	case $1 in
+	-f)
+		case $3 in
+		Package) printf '%s\n' "${PACKAGE_NAME:-xerj}" ;;
+		Architecture) printf 'amd64\n' ;;
+		Version) printf '1.2.3~rc.7\n' ;;
+		Depends) printf 'libc6 (>= 2.43), libgcc-s1\n' ;;
+		*) exit 98 ;;
+		esac ;;
+	--root-owner-group)
+		[ "$2" = --build ]
+		grep -qx 'Version: 1.2.3~rc.7' "$3/DEBIAN/control"
+		grep -qx 'fixture xerj' "$3/usr/bin/xerj"
+		grep -qx 'fixture LICENSE' "$3/usr/share/doc/xerj/LICENSE"
+		printf 'static Debian package\n' >"$4" ;;
+	*) exit 98 ;;
+	esac ;;
+dpkg-query)
+	if [ "$1" = -S ]; then
+		printf 'xerj: %s\n' "$2"
+	else
+		case $3 in
+		libc6:amd64) printf 'install ok installed\t2.41\n' ;;
+		perl) printf 'install ok installed\t5.40\n' ;;
+		xerj) [ -f "$TEST_ROOT/version" ]; printf 'install ok installed\t'; cat "$TEST_ROOT/version" ;;
+		*) exit 98 ;;
+		esac
+	fi ;;
+apt-get)
+	printf '%s\n' "$*" >>"$TEST_ROOT/apt.log"
+	case " $* " in
+	*" install "*)
+		[ "${APT_OK:-true}" = true ] || exit 100
+		printf '1.2.3~rc.7\n' >"$TEST_ROOT/version"
+		printf '#!/bin/sh\nprintf "xerj %s\\n"\n' "${TEST_BANNER:-v1.2.3-rc.7}" >"$TEST_ROOT/xerj"
+		chmod 0755 "$TEST_ROOT/xerj" ;;
+	esac ;;
+gh)
+	[ "$1 $2 $3 $4 $5" = 'release verify-asset -R github.com/xerj-org/xerj v1.2.3-rc.7' ]
+	[ -f "$6" ]
+	[ "${ATTEST_OK:-true}" = true ] ;;
+*) exit 99 ;;
+esac
+SH
+    chmod oct('755'), $mock or die "cannot chmod xerj mock: $!";
+    for my $cmd (qw(curl dpkg dpkg-deb dpkg-query apt-get gh)) {
+        link $mock, "$root/bin/$cmd" or die "cannot link $cmd: $!";
+    }
+    my $baseline = env_with( TEST_ROOT => $root, SUDO_USER => 'root' );
+    $code .= <<'SH';
+export PATH="$TEST_ROOT/bin:$PATH"
+VERSION=v1.2.3-rc.7
+VERIFY_ATTESTATION=${ATTEST:-0}
+install_xerj amd64 x86_64
+SH
+    my $run = sub {
+        my (%options) = @_;
+        return run_command(
+            cmd => [ 'bash', '-c', $code, $script ],
+            env => { %$baseline, %options }
+        );
+    };
+    for my $case (
+        [ 'network failure',    CURL_OK      => 'false' ],
+        [ 'wrong package name', PACKAGE_NAME => 'something-else' ],
+        [ 'wrong checksum',     BAD_CHECKSUM => 'true' ],
+        [ 'bad attestation',    ATTEST       => 1, ATTEST_OK => 'false' ],
+      )
+    {
+        my ( $label, %options ) = @$case;
+        isnt( $run->(%options)->{returncode}, 0, "$label is rejected" );
+        ok( !-e "$root/apt.log", "$label leaves APT untouched" );
+    }
+    isnt( $run->( APT_OK => 'false' )->{returncode},
+        0, 'APT failure reaches caller' );
+    ok( !-e "$root/xerj", 'failed APT transaction installs nothing' );
+    my $installed = $run->( NATIVE_OK => 'false', ATTEST => 1 );
+    is( $installed->{returncode}, 0, 'incompatible glibc selects static build' )
+      or diag $installed->{stderr} . $installed->{stdout};
+    like( slurp("$root/apt.log"), qr/xerj-static\.deb/,
+        'APT installs locally packaged static binary' );
+    my $apt_calls = slurp("$root/apt.log");
+    is( $run->()->{returncode}, 0,          'repeat run succeeds' );
+    is( slurp("$root/apt.log"), $apt_calls, 'current binary skips APT' );
+    write_file( "$root/version", "1.2.3~rc.6\n" );
+    my $updated = $run->();
+    is( $updated->{returncode}, 0, 'older release updates via native package' )
+      or diag $updated->{stderr};
+    like( slurp("$root/apt.log"), qr/\Q$native\E\n\z/,
+        'APT receives upstream native Debian package when compatible' );
+    write_file( "$root/version", "1.2.3~rc.6\n" );
+    isnt( $run->( TEST_BANNER => 'v1.2.3-rc.6' )->{returncode},
+        0, 'wrong executable banner makes the update fail' );
 };
 
 done_testing();

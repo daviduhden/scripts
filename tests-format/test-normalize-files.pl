@@ -307,6 +307,38 @@ subtest 'rename cycles preserve data' => sub {
 };
 
 # ------------------------------------------------------- encodings
+
+subtest 'requested rename verification and no-clobber' => sub {
+    my $tmp    = newtmp();
+    my $source = File::Spec->catfile( $tmp, 'source' );
+    my $target = File::Spec->catfile( $tmp, 'target' );
+    write_raw( $source, 'original' );
+    my $cfg = NormalizeFiles::default_config();
+    $cfg->{verify} = 1;
+    my $report = NormalizeFiles::reset_report();
+    my $op     = { is_dir => 0, rel => 'source' };
+    {
+        no warnings qw(redefine once);
+        local *NormalizeFiles::sha256_file = sub { return };
+        is(
+            NormalizeFiles::rename_op(
+                $cfg, $op, $source, $target, $report, 'fixture'
+            ),
+            0,
+            'missing digest stops move'
+        );
+    }
+    is( slurp_raw($source), 'original', 'source survives unavailable digest' );
+    ok( !-e $target, 'nothing published when digest unavailable' );
+    write_raw( $target, 'existing file' );
+    ok(
+        !NormalizeFiles::move_no_replace( $source, $target ),
+        'native no-clobber primitive refuses an existing target'
+    );
+    is( slurp_raw($target), 'existing file', 'existing target is intact' );
+    is( slurp_raw($source), 'original',      'no-clobber keeps original name' );
+};
+
 # Fixtures are written with Encode so the bytes on disk are explicit. Valid
 # UTF-8 must remain byte-identical and BOM-marked UTF-16 is converted; legacy
 # encodings are ambiguous and only change when --assume-encoding decides.

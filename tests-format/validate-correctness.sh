@@ -150,7 +150,7 @@ KEYWORDS='if then else elif fi for while until do done case esac in function sel
 
 COMMON_CMDS='awk bash basename bmake bzip2 cat cc chgrp chmod chown chsh clang cmake cmp comm cp csh cut date dd df diff dirname du expr false fgrep file find fmt ftp getent git gh git-lfs gmake gpg grep gunzip gzip head hostname id install join jq kill ksh ksh93 ldconfig less ln ls make mandoc md5 mkdir mount mv netstat nice nl nohup od openssl passwd paste patch perl pgrep pkill printf ps pwd readlink reboot rm rmdir scp sed seq sh sha1 sha256 sha384 sha512 sleep sort ssh stat su sudo tail tar tee test touch tr true tty uname uniq unzip uptime vi wc wget who xargs xz zip curl rsync mktemp'
 
-OPENBSD_CMDS='doas rcctl sysmerge sysupgrade syspatch dbupdate pkg_add pkg_delete pkg_info acme-client crush lynis signify'
+OPENBSD_CMDS='doas rcctl sysmerge sysupgrade syspatch dbupdate pkg_add pkg_delete pkg_info acme-client cosign crush lynis signify'
 
 DEBIAN_CMDS='apt apt-get apt-cache dpkg dpkg-query lsb_release needrestart runuser lscpu lspci lsusb free uptime ip ss journalctl systemctl update-rc.d chkconfig service sv herd rc-update rc-service s6-rc s6-svc systemd runit runit-init openrc-init shepherd s6-svscan tor torsocks i2pd monerod monero-wallet-cli monero-lws-daemon useradd groupadd logname sha256sum certbot lynis systemcheck nproc sysctl btop fastfetch edit signify go dracut dtc lsinitrd'
 
@@ -647,14 +647,14 @@ scan_one() {
 		ftype=$(file -b "$f" 2>/dev/null || true)
 		case "$ftype" in
 		*script* | *text* | *ASCII* | *Unicode*) lang=data ;;
-		*) return ;;
+		*) return 0 ;;
 		esac
 	fi
 
 	# Static rule engine. The awk program emits tab-separated findings to the
 	# shared file; it never rewrites the source file.
 	awk -v fam="$fam" -v lang="$lang" \
-		-f "$VCSCANAWK" "$f" >>"$FINDINGS"
+		-f "$VCSCANAWK" "$f" >>"$FINDINGS" || return 2
 
 	# Shebang checks.
 	case "$lang" in
@@ -732,40 +732,47 @@ scan_one() {
 	sh | bash | ksh) : ;;
 	*) return ;;
 	esac
-	[ "${VCPROBE:-0}" = "1" ] || return
+	[ "${VCPROBE:-0}" = "1" ] || return 0
 
-	# Candidates are deduplicated first. Functions defined in the same file
-	# are excluded so a wrapper does not look like a missing command; the
-	# probe loop is a pipeline subshell, but note() appends to the shared file.
-	awk -f "$VCEXTAWK" "$f" 2>/dev/null | sort -u |
-		while IFS= read -r c; do
-			[ -n "$c" ] || continue
-			[ "$c" = "QQUOTED" ] && continue
-			case " $KEYWORDS " in
-			*" $c "*) continue ;;
-			esac
-			# Functions defined in this very file are fine.
-			if grep -Eq \
-				"^[[:space:]]*${c}[[:space:]]*\([[:space:]]*\)" \
-				"$f" 2>/dev/null; then
-				continue
-			fi
-			if is_allowed "$fam" "$c"; then
-				continue
-			fi
-			if command -v "$c" >/dev/null 2>&1; then
-				continue
-			fi
-			note ERROR 1 "$f" \
-				"command not found on this system and not in the ${fam} allowlist: $c" \
-				"command -v(1); validator allowlist" \
-				"Fix the typo, install the tool, or add it to the allowlist if it is target-specific"
-		done
+	# These callers source the same installed helper. Inspect its declarations
+	# from the checkout without evaluating the script.
+	function_library=
+	case "$f" in
+	debian/update-xerj.bash | secureblue/update-xerj.bash)
+		[ ! -f scripts/xerj-clients.bash ] || function_library=scripts/xerj-clients.bash
+		;;
+	esac
+	# Candidates are deduplicated first. The probe loop is a pipeline subshell,
+	# but note() appends to the shared file.
+	commands=$(awk -f "$VCEXTAWK" "$f") || return 2
+	commands=$(printf '%s\n' "$commands" | sort -u) || return 2
+	printf '%s\n' "$commands" | while IFS= read -r c; do
+		[ -n "$c" ] || continue
+		[ "$c" = "QQUOTED" ] && continue
+		case " $KEYWORDS " in
+		*" $c "*) continue ;;
+		esac
+		definition="^[[:space:]]*${c}[[:space:]]*\([[:space:]]*\)"
+		if grep -Eq "$definition" "$f" 2>/dev/null ||
+			{ [ -n "$function_library" ] && grep -Eq "$definition" "$function_library"; }; then
+			continue
+		fi
+		if is_allowed "$fam" "$c"; then
+			continue
+		fi
+		if command -v "$c" >/dev/null 2>&1; then
+			continue
+		fi
+		note ERROR 1 "$f" \
+			"command not found on this system and not in the ${fam} allowlist: $c" \
+			"command -v(1); validator allowlist" \
+			"Fix the typo, install the tool, or add it to the allowlist if it is target-specific"
+	done
 }
 
 scan_files() {
 	for f in "$@"; do
-		scan_one "$f"
+		scan_one "$f" || return 2
 	done
 }
 
@@ -982,7 +989,10 @@ main() {
 		VCFAMILY=$family VCPROBE=$probe \
 			find "$dir" \
 			\( -name .git -type d \) -prune -o \
-			-type f -exec "$SELF" --scan-file {} +
+			-type f -exec "$SELF" --scan-file {} + || {
+			printf '[ERROR] Cannot audit %s\n' "$dir" >&2
+			exit 2
+		}
 	}
 
 	case "$TARGET" in
@@ -995,9 +1005,8 @@ main() {
 	all)
 		scan_dir openbsd "openbsd"
 		scan_dir debian "debian"
-		# The secureblue family already scans shell/; scanning it again
-		# would duplicate every finding.
 		scan_dir secureblue "secureblue"
+		scan_dir shell "shell"
 		;;
 	esac
 
@@ -1006,8 +1015,16 @@ main() {
 	# scanned explicitly because it is a file, not a directory.
 	scan_dir generic "tests-format"
 	scan_dir perl "perl"
+	if [ "$TARGET" != openbsd ]; then
+		helper_family=$TARGET
+		[ "$TARGET" != all ] || helper_family=secureblue
+		for helper in scripts/xerj-clients.bash scripts/update-ai-clis-linux.bash; do
+			[ -f "$helper" ] || continue
+			VCFAMILY=$helper_family VCPROBE=0 "$SELF" --scan-file "$helper" || exit 2
+		done
+	fi
 	if [ -f Makefile ]; then
-		VCFAMILY=generic VCPROBE=0 "$SELF" --scan-file Makefile
+		VCFAMILY=generic VCPROBE=0 "$SELF" --scan-file Makefile || exit 2
 	fi
 
 	report
@@ -1015,12 +1032,12 @@ main() {
 
 # Worker entry point invoked by find -exec ... {} + inside scan_dir. The family
 # and probe flag arrive through exported VCFAMILY/VCPROBE variables; scan_files
-# appends findings and always exits 0 so find continues with other batches.
+# appends findings and reports scanner failures to find.
 case "${1:-}" in
 --scan-file)
 	shift
 	scan_files "$@"
-	exit 0
+	exit $?
 	;;
 esac
 

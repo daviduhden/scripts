@@ -940,9 +940,7 @@ sub string_cmp {
 }
 
 # Reserve a unique temporary name by creating it exclusively (O_EXCL), which
-# closes the check-then-use race a plain lstat() would leave open. The caller
-# either renames over the reserved placeholder (Unix) or releases it first
-# (Windows, whose rename() will not replace an existing file).
+# prevents two local operations from reserving the same temporary name.
 sub reserve_temp_name {
     my ( $dir, $prefix ) = @_;
     $prefix = '.norm-tmp-' unless defined $prefix;
@@ -960,25 +958,55 @@ sub reserve_temp_name {
 sub stage_to_temp {
     my ( $src, $dir ) = @_;
     my $tmp = reserve_temp_name($dir);
-    unlink $tmp if is_windows();
-    if ( rename( $src, $tmp ) ) {
+    return unless unlink $tmp;
+    if ( move_no_replace( $src, $tmp ) ) {
         return $tmp;
     }
-    unlink $tmp;
     return;
 }
 
-# Returns 1 when the rename happened and any requested verification passed,
-# -1 when the rename happened but verification failed, and 0 when the rename
-# itself failed. In both the 1 and -1 cases the destination exists, so the
-# caller records an undo entry for a possible group rollback.
+sub move_no_replace {
+    my ( $source, $destination ) = @_;
+    if ( is_windows() ) {
+        require Win32API::File;
+        return Win32API::File::MoveFileEx( $source, $destination, 0 );
+    }
+    if ( -d $source && !-l $source ) {
+
+        # Reserve an empty directory atomically. POSIX rename can only
+        # replace an empty directory with a directory.
+        return 0 unless mkdir $destination, oct('700');
+        if ( rename( $source, $destination ) ) { return 1 }
+        my $failure = $!;
+        rmdir $destination;
+        $! = $failure;
+        return 0;
+    }
+
+    # link fails atomically if another process created the destination.
+    return 0 unless link $source, $destination;
+    if ( unlink $source ) { return 1 }
+    my $failure = $!;
+    unlink $destination;
+    $! = $failure;
+    return 0;
+}
+
+# 1 means renamed and verified, -1 means renamed but verification failed,
+# and 0 means the rename failed. Both successful moves need an undo entry.
 sub rename_op {
     my ( $cfg, $op, $src, $dst, $R, $label ) = @_;
     my $hash_before;
     if ( $cfg->{verify} && $op->{is_dir} == 0 ) {
         $hash_before = sha256_file($src);
+        if ( !defined $hash_before ) {
+            $R->{errors}++;
+            emit_error(
+                'cannot verify source before rename: ' . disp( $op->{rel} ) );
+            return 0;
+        }
     }
-    if ( !rename( $src, $dst ) ) {
+    if ( !move_no_replace( $src, $dst ) ) {
         $R->{errors}++;
         emit_error( "rename failed ($label): " . disp( $op->{rel} ) . " : $!" );
         return 0;
@@ -1027,7 +1055,7 @@ sub unwind_renames {
             emit_error( 'rollback skipped, target exists: ' . disp($to) );
             next;
         }
-        if ( rename( $from, $to ) ) {
+        if ( move_no_replace( $from, $to ) ) {
             $R->{renames_applied}-- if $R->{renames_applied} > 0;
         }
         else {
@@ -1117,15 +1145,23 @@ sub execute_rename_group {
 }
 
 # Hash a file in raw mode for the optional post-rename integrity check.
-# Returns undef if the file cannot be opened.
+# Returns undef if the entire file cannot be read and closed.
 sub sha256_file {
     my ($path) = @_;
     my $fh;
     return unless open( $fh, '<:raw', $path );
     my $sha = Digest::SHA->new(256);
     my $buf;
-    while ( read( $fh, $buf, 1048576 ) ) { $sha->add($buf) }
-    close $fh;
+    while (1) {
+        my $length = read( $fh, $buf, 1048576 );
+        if ( !defined $length ) {
+            close $fh;
+            return;
+        }
+        last unless $length;
+        $sha->add($buf);
+    }
+    return unless close $fh;
     return $sha->hexdigest;
 }
 

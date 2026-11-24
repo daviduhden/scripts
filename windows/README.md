@@ -6,11 +6,11 @@ checkout or an extracted copy; its paths are resolved relative to the installer.
 | Script | Purpose |
 | --- | --- |
 | [install-windows.bat](install-windows.bat) | Installs public Perl programs, the PowerShell scripts in this directory, and `test-format/psfmt.ps1`; creates command launchers and optionally adds their directory to the user PATH. |
-| [update-aiclis.ps1](update-aiclis.ps1) | Installs or updates Codex, OpenCode 2.x, Crush, and Bun for the current user, maintains versioned copies and PATH entries, and optionally adds PowerShell wrappers with `-Wrappers`. |
-| [update-xerj.ps1](update-xerj.ps1) | Installs/updates SHA-256-verified xerj for the current user; `-Codex`, `-Crush`, and `-OpenCode` optionally register its stdio MCP server. |
+| [update-ai-clis.ps1](update-ai-clis.ps1) | Installs or updates OpenCode 2.x, Codex, Crush, GitHub Copilot CLI, and Claude Code for the current user. |
+| [update-xerj.ps1](update-xerj.ps1) | Installs or updates verified xerj and registers its stdio MCP server with selected installed agents. |
 | [ai-purge-history.ps1](ai-purge-history.ps1) | Deletes Codex, Copilot, OpenCode, and project-local Swival history/state. Crush data is preserved unless `-IncludeCrushData` is given; that switch removes the entire `%LOCALAPPDATA%\crush` directory, including any configuration stored there. Use `-DryRun` to preview. |
 | [launcher.cmd](launcher.cmd) | Internal template for installed Perl launchers. Uses the recorded Perl interpreter and forwards arguments and exit status. |
-| [powershell-launcher.cmd](powershell-launcher.cmd) | Internal template for PowerShell launchers. Prefers `pwsh`, falls back to Windows PowerShell, and forwards arguments and exit status. |
+| [powershell-launcher.cmd](powershell-launcher.cmd) | Internal template for PowerShell launchers. Prefers PowerShell 7 in its standard Program Files location, falls back to the system Windows PowerShell, and forwards arguments and exit status. |
 | [test-format/psfmt.ps1](test-format/psfmt.ps1) | Formats and checks PowerShell files with PSScriptAnalyzer; requires PowerShell 7. See [its README](test-format/README.md). |
 
 From the repository root, in Command Prompt:
@@ -27,39 +27,84 @@ Installer options are `--dry-run`, `--no-path`, `--install-dir PATH`, and
 Perl or installs Strawberry Perl with winget. It does not install PowerShell 7;
 install it separately to run `psfmt`. The installer verifies staged files
 before publishing them and restores existing managed files if publication
-fails. The publishing helper runs under the current Windows PowerShell
-execution policy.
+fails. Helpers run under the current Windows PowerShell execution policy.
+Perl discovery inspects absolute paths from the process and registry PATH
+and standard Strawberry Perl locations. A portable Perl can be selected
+from a trusted absolute PATH entry. The launcher requires the recorded
+interpreter at runtime. Dry-run lists eligible paths without executing
+Perl or creating scratch files. Installation, publication and PATH changes
+require a local directory whose ancestors, ownership and write permissions
+pass the installer checks. `--no-path` leaves the registry alone.
 
-From PowerShell, check AI CLI versions without installing updates:
+`ai-purge-history.ps1` checks every selected path and its ancestors before
+removing anything. It needs local absolute history roots and refuses
+reparse points or unexpected file types. Dry-run applies the same checks.
+
+### AI CLI updates
+
+Run the installed command from CMD or PowerShell. Omit the agent names or
+pass `all` to process all five agents.
 
 ```powershell
-.\windows\update-aiclis.ps1 -Check
-.\windows\update-aiclis.ps1 -Target Codex -Check
-.\windows\update-aiclis.ps1 -Target Crush -Check
+update-ai-clis --help
+update-ai-clis
+update-ai-clis codex claude
+update-ai-clis copilot-cli -Check
 ```
 
-Other updater parameters are `-Target All|Codex|OpenCode|Crush|Bun`,
-`-OpenCodeVersion`, `-CodexVersion`, `-CrushVersion`, `-Force`, `-Check`,
-`-RemoveWinget`, and `-Wrappers`. The last option installs optional profile
-functions that add `--yolo`/`--auto`; wrappers are off by default.
-`-RemoveWinget` removes winget copies only for selected OpenCode, Codex, and
-Crush targets with a verified managed executable. Bun winget copies are
-removed automatically after verifying the official binary. Bun uses the
-[official direct downloads](https://bun.com/docs/installation) in BUN_INSTALL
-or %USERPROFILE%\.bun and adds bin to the user and current process PATH.
-Codex, Bun, OpenCode, and Crush use upstream downloads and require the exact SHA-256 digest
-published in GitHub release metadata. OpenCode selects the newest stable 2.x
-release because the repository's `latest` alias still points at the 1.x line.
-Crush is installed if missing and updated on later runs.
+From a checkout, use `./windows/update-ai-clis.ps1` with the same arguments.
+Reinstalling removes the previous `update-aiclis` script and launcher when
+they are managed by the install manifest.
+The supported Windows architectures for all five agents are x64 and ARM64.
+Crush also supports Windows x86.
+The updater uses these native packages, which bundle their language runtimes.
 
-Selecting `All` or `Codex` also runs `codex app-server daemon update`, even
-when the CLI is already current. This official command respects `CODEX_HOME`
-and updates the daemon's separate managed package to the latest stable release,
-independently of `-CodexVersion`. A running daemon may restart and interrupt
-active work; a stopped daemon stays stopped. `-Check` skips this mutation.
-Daemon errors (including unsupported installations) produce a nonzero result
-without preventing the remaining CLI updates. See the
-[upstream daemon lifecycle documentation](https://github.com/openai/codex/blob/main/codex-rs/app-server-daemon/README.md).
+| Agent | Official distribution | Runtime |
+| --- | --- | --- |
+| `opencode` | [OpenCode 2.x ZIP](https://github.com/anomalyco/opencode/releases), baseline build on x64. Selects stable 2.x tags independently of the GitHub latest alias. | Bundled |
+| `codex` | [OpenAI GitHub releases](https://github.com/openai/codex/releases), canonical package archive. | Windows `tar.exe` for extraction. Ripgrep, code-mode host and sandbox resources are bundled. |
+| `crush` | [Charm GitHub releases](https://github.com/charmbracelet/crush/releases), platform ZIP. | Bundled. Project-specific LSP tools are optional. |
+| `copilot-cli` | [GitHub Copilot CLI releases](https://github.com/github/copilot-cli/releases), standalone ZIP. | [Windows PowerShell 5.1 or PowerShell 7](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli#prerequisites) |
+| `claude` | [Anthropic native binary](https://code.claude.com/docs/en/setup), stable channel. | Windows PowerShell. Git for Windows is optional for Bash tools. |
+
+The GitHub paths verify the upstream release asset SHA-256 before publishing.
+Cached release packages record the verified archive digest and packaged file
+hashes. A mismatched cache is bypassed, and pruning applies only to complete
+packages attributable to the updater. Version probes have time and output limits.
+GitHub rate limiting can prevent a release lookup. Claude verifies the manifest
+size and SHA-256 and requires a valid Authenticode signature from
+`Anthropic, PBC`. A selected native distribution has no external requirement
+for Node.js, npm, Bun, Python, or GitHub CLI.
+
+The summary shows the previous version, available stable version, final version,
+and outcome for each selected agent. Version checks resolve executables and
+`.cmd` and `.ps1` wrappers. The updater reports duplicate installation paths,
+verifies the active command and its version, and repeats verification in a
+profile-free shell with the machine and user PATH from the registry. Managed
+paths under the user profile are added to the current and persistent user PATH
+when needed. Existing entries and the registry value type are preserved.
+Resolve duplicate or outdated external installations through their original
+package manager before running an update. Launch a new terminal session
+after PATH changes.
+
+`-Check` reports versions without installing or changing PATH. Exit status is
+`0` for success, `1` when a selected operation or verification fails, and
+`2` for invalid selection or pin. Existing stable versions and prereleases
+with a higher version core are retained unless an explicit pin is provided.
+
+The Windows launcher also accepts legacy `-Target`, explicit `bun` selection,
+pins `-OpenCodeVersion`, `-CodexVersion`, and `-CrushVersion`, and `-Force`.
+Codex pins require a release with the canonical Windows package archive.
+`-Wrappers` adds opt-in PowerShell profile wrappers for OpenCode and Codex.
+`-RemoveWinget` opts in to removing old WinGet copies of selected OpenCode,
+Codex, Crush, or Bun after verifying the managed executable. Bun uses
+[official direct downloads](https://bun.com/docs/installation) under
+`BUN_INSTALL` or `%USERPROFILE%\.bun`.
+
+`-UpdateCodexDaemon` opts in to the
+[Codex daemon lifecycle command](https://github.com/openai/codex/blob/main/codex-rs/app-server-daemon/README.md)
+when selecting managed Codex. The daemon package updates separately and
+respects `CODEX_HOME`. A running daemon may restart. `-Check` skips it.
 
 Run history cleanup in the intended user's session. Crush data is preserved by
 default; pass `-IncludeCrushData` to remove the entire Crush data directory,
@@ -70,63 +115,20 @@ run directly.
 
 ## xerj
 
-Windows x64 and ARM64 are supported. No administrator privileges, PATH edits,
-profile changes, or execution policy changes are required:
+The updater installs xerj in `%LOCALAPPDATA%\Programs\xerj\xerj.exe` for the
+current user. Close a running xerj process before replacing its binary.
 
 ```powershell
-.\windows\update-xerj.ps1
-.\windows\update-xerj.ps1 -Codex -Crush -OpenCode
-.\windows\update-xerj.ps1 -Version v1.0.0-rc.100 -OpenCode
+update-xerj --help
+update-xerj codex claude
+update-xerj --binary-only
 ```
 
-The destination is `%LOCALAPPDATA%\Programs\xerj\xerj.exe`. Without switches,
-only the binary is installed. Each run downloads and verifies the release;
-`-Version TAG` pins it, otherwise the latest GitHub release is resolved through
-the public release redirect, without using the rate-limited GitHub API. `-Url URL`
-sets the ES-compatible node endpoint (default `http://127.0.0.1:9200`). Close a
-running xerj process before replacing its binary on Windows.
+Use `./windows/update-xerj.ps1` from a checkout. With no selectors, the
+updater configures the supported installed agents. See the [xerj configuration
+guide](../docs/update-xerj.md) for authentication and config paths.
 
-Codex must already be installed when selected; the script uses `codex mcp add`
-and respects `CODEX_HOME`. Crush gets a managed block in
-`%USERPROFILE%\.config\crush\crushrc`, using the current Bash config format.
-OpenCode gets `mcp.xerj` in `%USERPROFILE%\.config\opencode\opencode.json`.
-`XDG_CONFIG_HOME` overrides the latter two roots. Existing configurations are
-backed up, other entries are retained, and repeated registration replaces the
-xerj entry/block. JSONC files are refused for manual merging; OpenCode JSON
-must be a valid object. Project configuration and environment overrides may
-take precedence. Clients are not installed by this script.
-
-MCP needs a running engine. Start a local authenticated node in another terminal:
-
-```powershell
-$xerj = Join-Path $env:LOCALAPPDATA 'Programs\xerj\xerj.exe'
-$data = Join-Path $HOME '.xerj\data'
-New-Item -ItemType Directory -Force $data | Out-Null
-& $xerj --bind 127.0.0.1 --data-dir $data
-```
-
-Before launching a configured client, pass the generated key in its environment
-if automatic local key discovery does not locate this data directory:
-
-```powershell
-$env:XERJ_AUTH = 'ApiKey ' + (Get-Content -Raw (Join-Path $HOME '.xerj\data\admin.key')).Trim()
-codex  # or crush / opencode
-```
-
-Restart clients after registration. Remote nodes require `XERJ_AUTH` in the
-client's environment. No service or key is created by the updater. Sources:
-[xerj installation](https://xerj.org/docs/install),
-[xerj MCP](https://xerj.org/docs/cli#mcp),
-[Codex MCP](https://learn.chatgpt.com/docs/extend/mcp),
-[OpenCode MCP](https://opencode.ai/docs/mcp-servers/), and
-[Crush configuration](https://github.com/charmbracelet/crush/blob/main/docs/config/README.md).
-
-Offline regression tests run in temporary directories with mocked downloads
-and Codex, without executing xerj or modifying real client configurations:
-
-```powershell
-pwsh -NoProfile -File windows/tests/test-update-xerj.ps1
-```
+Run the offline regression with `pwsh -NoProfile -File windows/tests/test-update-xerj.ps1`.
 
 ## Verified and recoverable release updates
 
@@ -150,16 +152,14 @@ Offline AI CLI regressions use temporary trees and fixture archives without
 executing downloaded binaries, changing PATH, or updating a real daemon:
 
 ```powershell
-pwsh -NoProfile -File windows/tests/test-update-aiclis.ps1
+pwsh -NoProfile -File windows/tests/test-update-ai-clis.ps1
 ```
 
 xerj verifies the archive's checksum, rejects duplicate executable entries and
-prepares the binary next to its destination. Existing binaries/configurations
-are replaced with `File.Replace` and unique recovery copies; a locked binary
-fails without being overwritten in place. Successful xerj replacements retain
-`.bak.*` files for manual recovery and pruning. AI CLI activation likewise uses
-a verified same-directory pending file and has no overwrite fallback for locked
-targets. These filesystems must support the requested replacement operation.
+checks the staged executable's version before activation. It publishes binaries and
+configuration edits with `File.Replace` without creating recovery copies. A
+locked binary causes the publication to fail. Existing `.bak.*` files remain
+untouched. The destination filesystem must support `File.Replace`.
 
 `test-format/psfmt.ps1` requires PSScriptAnalyzer 1.25.0 and never installs a
 missing module unless `-install-dependency` is explicitly selected. The

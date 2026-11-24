@@ -15,7 +15,8 @@ are installed beside their caller when non-shell logic is needed.
 - `scripts/manage-install.sh`: POSIX install/uninstall/help/format logic used by the Makefile;
 - `tests-format/`: POSIX validators and formatters;
 - `tests/`: isolated regression suites;
-- `scripts/`: the standalone agent-knowledge validator;
+- `scripts/` also contains the standalone agent-knowledge validator and
+  the shared Linux agent delivery and XERJ client-discovery helpers;
 - `shell/`: sourced interactive Bash helpers.
 
 ## Trust boundaries
@@ -27,14 +28,25 @@ execution; tests use temporary trees and mocks, never a live system.
 
 ## Transactions
 
-Release updaters stage beside the destination and activate with `rename` or
-`File.Replace`. Website synchronization supports an opt-in atomic symlink
-release and a compatible in-place mode. Locks fail closed; stale locks require
-an operator decision.
+Release updaters use the transaction offered by their delivery mechanism.
+Direct binary downloads can stage a verified candidate beside the destination.
+APT and Homebrew manage their own transactions. Website synchronization
+supports an opt-in atomic symlink release and a compatible in-place mode.
+Stale locks require inspection before removal.
+
+The Debian, OpenBSD, SecureBlue and Perl make targets preflight their
+destinations and record the files they install. Uninstall preserves files whose
+contents have changed. For a legacy installation from the same source revision,
+`make install-PLATFORM ADOPT_LEGACY=1` records an existing file only if its
+contents match the source and no other target has claimed it. Review or move
+older copies before installing from a newer revision. Use trusted destination
+directories that are writable only by the owning administrator or user.
 
 ## Tests and CI
 
 `make check` is the read-only validation gate. `make test` runs isolated
-regressions after validation. The manual Platform Validation workflow runs
-Linux, Windows, and OpenBSD 8.0 checks; native platform behavior cannot be
-established by a Linux-only run.
+regressions after validation. Static Validation checks shell parsing and
+agent-knowledge references on pull requests and pushes to main. The manual
+Platform Validation workflow runs Ubuntu, Debian 13 in a container, native
+Windows, and an OpenBSD 8.0 VM. SecureBlue delivery logic is exercised with
+Linux fixtures. SecureBlue image and policy behavior require a SecureBlue host.

@@ -2,7 +2,7 @@
 
 # xerj installer and updater for Windows.
 # - Installs a checksum-verified release for the current user without admin.
-# - Optional -Codex, -Crush and -OpenCode register stdio MCP with backups.
+# - Configures stdio MCP for selected or detected clients.
 # - Does not change PATH or profiles, or start the engine.
 #
 # See the LICENSE file at the top of the project tree for copyright
@@ -13,13 +13,14 @@ Installs or updates xerj for the current user and optionally registers MCP.
 .EXAMPLE
 ./update-xerj.ps1 -Codex -Crush -OpenCode
 #>
-[CmdletBinding()]
+[CmdletBinding(PositionalBinding = $false)]
 param(
-    [string]$Version,
+    [Parameter(ValueFromRemainingArguments)]
+    [string[]]$Arguments,
     [switch]$Codex,
     [switch]$Crush,
     [switch]$OpenCode,
-    [string]$Url = 'http://127.0.0.1:9200'
+    [switch]$BinaryOnly
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -47,33 +48,99 @@ function Complete-FileReplacement {
         if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
             throw "Refusing to replace a directory or reparse point: $Path"
         }
-        $backup = "$Path.bak.$([guid]::NewGuid().ToString('N'))"
-        try {
-            [IO.File]::Replace($Pending, $Path, $backup)
-        }
-        catch {
-            if (Test-Path -LiteralPath $backup) { Write-Info "Recovery copy retained at $backup" }
-            throw
-        }
-        # Keep the recovery copy: callers can recover the prior version/config.
-        Write-Info "Previous file retained at $backup"
+        [IO.File]::Replace($Pending, $Path, [NullString]::Value)
     }
     else {
         [IO.File]::Move($Pending, $Path)
     }
 }
 
+function Assert-XerjPrivateDirectory {
+    param([string]$Path)
+
+    if (-not [Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([Runtime.InteropServices.OSPlatform]::Windows)) { return }
+    if ($Path -notmatch '^[A-Za-z]:[\\/]' -or $Path.Substring(2).Contains(':')) {
+        throw 'Xerj requires an absolute local directory.'
+    }
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    try {
+        $trusted = @($identity.User.Value, 'S-1-5-18', 'S-1-5-32-544',
+            'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464')
+    }
+    finally { $identity.Dispose() }
+    $replace = [Security.AccessControl.FileSystemRights]::Delete -bor
+    [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor
+    [Security.AccessControl.FileSystemRights]::ChangePermissions -bor
+    [Security.AccessControl.FileSystemRights]::TakeOwnership
+    $rights = $replace -bor [Security.AccessControl.FileSystemRights]::Write
+    for ($ancestor = [IO.Path]::GetFullPath($Path); $ancestor; $ancestor = [IO.Path]::GetDirectoryName($ancestor)) {
+        $item = Get-Item -LiteralPath $ancestor -Force -ErrorAction SilentlyContinue
+        if (-not $item) { continue }
+        if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw "Refusing a non-directory or reparse path: $ancestor"
+        }
+        $acl = Get-Acl -LiteralPath $ancestor
+        if ($acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -notin $trusted) {
+            throw "Refusing a directory with an untrusted owner: $ancestor"
+        }
+        $untrusted = @($acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) | Where-Object {
+                $_.AccessControlType -eq 'Allow' -and $_.IdentityReference.Value -notin ($trusted + 'S-1-3-0') -and
+                ($_.FileSystemRights -band $rights) -and -not ($_.PropagationFlags -band 'InheritOnly')
+            }).Count
+        if ($untrusted) { throw "Refusing a shared writable directory: $ancestor" }
+        $rights = $replace
+    }
+}
+
 function Save-Config {
-    param([string]$Path, [string]$Text)
-    $null = New-Item -ItemType Directory -Force -Path (Split-Path $Path)
+    param([string]$Path, [string]$Text, [AllowNull()][object]$Original)
+    if ($null -ne $Original -and $Text -ceq $Original) { return }
+    $directory = Split-Path $Path
+    Assert-XerjPrivateDirectory $directory
+    $null = New-Item -ItemType Directory -Force -Path $directory
+    Assert-XerjPrivateDirectory $directory
     $temporary = "$Path.$([guid]::NewGuid().ToString('N')).tmp"
     try {
+        if ($null -ne $Original -and [Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([Runtime.InteropServices.OSPlatform]::Windows)) {
+            $null = New-Item -ItemType File -Path $temporary
+            Set-Acl -LiteralPath $temporary -AclObject (Get-Acl -LiteralPath $Path)
+        }
         [IO.File]::WriteAllText($temporary, $Text, [Text.UTF8Encoding]::new($false))
+        $current = Read-Config $Path
+        if ($current -cne $Original) { throw 'Configuration changed concurrently. Retry after closing the client.' }
         Complete-FileReplacement $temporary $Path
     }
     finally {
         if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary }
     }
+}
+
+function Confirm-StagedXerj {
+    param([string]$Path, [string]$Tag, [string]$Stage)
+
+    $stdout = Join-Path $Stage 'version.out'
+    $stderr = Join-Path $Stage 'version.err'
+    $arguments = @{
+        FilePath               = $Path
+        ArgumentList           = '--version'
+        PassThru               = $true
+        NoNewWindow            = $true
+        WorkingDirectory       = $Stage
+        RedirectStandardOutput = $stdout
+        RedirectStandardError  = $stderr
+    }
+    $process = Start-Process @arguments
+    try {
+        if (-not $process.WaitForExit(15000)) {
+            $process.Kill()
+            throw 'Staged executable timed out during its version check.'
+        }
+        $process.WaitForExit()
+        if ($process.ExitCode -ne 0 -or ([IO.File]::ReadAllText($stdout)).TrimEnd() -cne "xerj $Tag") {
+            throw 'Staged executable failed its version check.'
+        }
+    }
+    finally { $process.Dispose() }
 }
 
 function ConvertTo-BashLiteral {
@@ -83,7 +150,7 @@ function ConvertTo-BashLiteral {
 
 function Get-XerjLatestTag {
     # Follow the public redirect instead of consuming the shared GitHub API quota.
-    $response = Invoke-WebRequest -Uri 'https://github.com/xerj-org/xerj/releases/latest' -Method Head -UseBasicParsing
+    $response = Invoke-WebRequest -Uri 'https://github.com/xerj-org/xerj/releases/latest' -Method Head -TimeoutSec 60 -UseBasicParsing
     $baseResponse = $response.BaseResponse
     # Windows PowerShell uses HttpWebResponse; PowerShell 7 uses HttpResponseMessage.
     $uri = if ($baseResponse.PSObject.Properties['ResponseUri']) {
@@ -100,15 +167,37 @@ function Get-XerjLatestTag {
 # Install and configure
 # ---------------------------------------------------------------------------
 $stage = $null
-function ConvertFrom-OpenCodeConfig {
+function Test-JsonDateCoercion {
+    param($Value)
+
+    if ($Value -is [datetime] -or $Value -is [datetimeoffset]) { return $true }
+    if ($Value -is [array]) {
+        foreach ($item in $Value) {
+            if (Test-JsonDateCoercion $item) { return $true }
+        }
+    }
+    elseif ($Value -is [pscustomobject]) {
+        foreach ($property in $Value.PSObject.Properties) {
+            if (Test-JsonDateCoercion $property.Value) { return $true }
+        }
+    }
+    return $false
+}
+
+function ConvertFrom-StrictConfig {
     param([string]$Text)
 
+    if ($Text -notmatch '^\s*\{') { throw 'Configuration must be a JSON object.' }
     $objects = [Collections.Generic.Stack[hashtable]]::new()
-    $tokens = [regex]::Matches($Text, '(?<string>"(?:[^"\\\x00-\x1f]|\\.)*")(?<property>\s*:)?|(?<open>\{)|(?<close>\})|(?<comment>//|/\*)')
+    $tokens = [regex]::Matches($Text, '(?<string>"(?:[^"\\\x00-\x1f]|\\.)*")(?<property>\s*:)?|(?<open>\{)|(?<close>\})|(?<arrayOpen>\[)|(?<arrayClose>\])|(?<nonstandard>//|/\*|\x27|,\s*[}\]])')
+    $depth = 0
     foreach ($token in $tokens) {
-        if ($token.Groups['comment'].Success) {
-            throw 'OpenCode configuration contains comments. Merge the xerj registration manually.'
+        if ($token.Groups['nonstandard'].Success) {
+            throw 'Configuration contains nonstandard JSON. Merge the xerj registration manually.'
         }
+        if ($token.Groups['open'].Success -or $token.Groups['arrayOpen'].Success) { $depth++ }
+        if ($token.Groups['close'].Success -or $token.Groups['arrayClose'].Success) { $depth-- }
+        if ($depth -gt 96) { throw 'Configuration is too deeply nested for safe rewriting.' }
         if ($token.Groups['open'].Success) { $objects.Push(@{}); continue }
         if ($token.Groups['close'].Success) { $null = $objects.Pop(); continue }
         if (-not $token.Groups['property'].Success) { continue }
@@ -116,16 +205,306 @@ function ConvertFrom-OpenCodeConfig {
         $key = ($decoded.PSObject.Properties | Select-Object -First 1).Name
         $names = $objects.Peek()
         if ($names.ContainsKey($key)) {
-            throw "OpenCode configuration contains a duplicate property: $key"
+            throw 'Configuration contains a duplicate property.'
         }
         $names[$key] = $true
     }
-    return ($Text | ConvertFrom-Json)
+    $json = @{ InputObject = $Text }
+    if ((Get-Command ConvertFrom-Json).Parameters.ContainsKey('DateKind')) { $json.DateKind = 'String' }
+    try { $result = ConvertFrom-Json @json }
+    catch { throw 'Configuration contains invalid JSON.' }
+    if (-not $json.ContainsKey('DateKind') -and (Test-JsonDateCoercion $result)) {
+        throw 'This PowerShell version converted a JSON string to a date. Use a newer PowerShell or merge xerj manually.'
+    }
+    return $result
+}
+
+function Read-Config {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) { return $null }
+    $item = Get-Item -LiteralPath $Path -Force
+    if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw 'Refusing a configuration directory or reparse point.'
+    }
+    return [IO.File]::ReadAllText($Path)
+}
+
+function Get-JsonObject {
+    param($Parent, [string]$Name)
+    $property = $Parent.PSObject.Properties[$Name]
+    if (-not $property) {
+        $Parent | Add-Member -NotePropertyName $Name -NotePropertyValue ([pscustomobject]@{})
+        $property = $Parent.PSObject.Properties[$Name]
+    }
+    if ($property.Value -isnot [pscustomobject]) { throw "The JSON property '$Name' must be an object." }
+    return $property.Value
+}
+
+function Test-ManagedCommand {
+    param($Command, $CommandArgs, [string]$Binary)
+    return ($Command -is [string] -and $Command -ieq $Binary -and $CommandArgs -is [array] -and
+        $CommandArgs.Count -eq 3 -and $CommandArgs[0] -ceq 'mcp' -and $CommandArgs[1] -ceq '--url' -and
+        $CommandArgs[2] -is [string])
+}
+
+function Merge-JsonMcpEntry {
+    param($Table, [string]$Client, [string]$Binary, [string]$Endpoint)
+    $argsList = @('mcp', '--url', $Endpoint)
+    $property = $Table.PSObject.Properties['xerj']
+    if ($property) {
+        $entry = $property.Value
+        if ($entry -isnot [pscustomobject]) { throw 'An unrelated MCP server named xerj already exists.' }
+        $type = $entry.PSObject.Properties['type'].Value
+        switch ($Client) {
+            'opencode' { if ($type -cne 'local') { throw 'An unrelated MCP server named xerj already exists.' } }
+            'copilot-cli' { if ($type -cnotin @('local', 'stdio')) { throw 'An unrelated MCP server named xerj already exists.' } }
+            'claude' { if ($type -cne 'stdio') { throw 'An unrelated MCP server named xerj already exists.' } }
+        }
+        $command = $entry.PSObject.Properties['command'].Value
+        if ($Client -eq 'opencode') {
+            if ($command -isnot [array] -or $command.Count -ne 4 -or -not (Test-ManagedCommand $command[0] $command[1..3] $Binary)) {
+                throw 'An unrelated MCP server named xerj already exists.'
+            }
+            $entry.command = @($Binary) + $argsList
+        }
+        else {
+            $existingArgs = $entry.PSObject.Properties['args'].Value
+            if (-not (Test-ManagedCommand $command $existingArgs $Binary)) { throw 'An unrelated MCP server named xerj already exists.' }
+            $entry.args = $argsList
+        }
+        return
+    }
+
+    $entry = switch ($Client) {
+        'opencode' { [pscustomobject]@{ type = 'local'; command = @($Binary) + $argsList } }
+        'copilot-cli' { [pscustomobject]@{ type = 'local'; command = $Binary; args = $argsList; tools = @('*') } }
+        'claude' { [pscustomobject]@{ type = 'stdio'; command = $Binary; args = $argsList; env = @{} } }
+    }
+    $Table | Add-Member -NotePropertyName xerj -NotePropertyValue $entry
+}
+
+function Register-JsonMcp {
+    param([string]$Client, [string]$Config, [string]$Binary, [string]$Endpoint, [int]$OpenCodeMajor)
+
+    $old = Read-Config $Config
+    $data = if ($null -ne $old) { ConvertFrom-StrictConfig $old } else { [pscustomobject]@{} }
+    if ($Client -eq 'opencode') {
+        $mcp = Get-JsonObject $data 'mcp'
+        $table = $mcp
+        if ($OpenCodeMajor -eq 2) {
+            # OpenCode 2 expects its server definitions under mcp.servers.
+            if (@($mcp.PSObject.Properties | Where-Object {
+                        $_.Name -cnotin @('servers', 'xerj') -and $_.Value -is [pscustomobject] -and
+                        $_.Value.PSObject.Properties['type']
+                    }).Count) {
+                throw 'OpenCode 2 migration would affect unrelated legacy settings. Migrate them in OpenCode first.'
+            }
+            $table = Get-JsonObject $mcp 'servers'
+            $legacy = $mcp.PSObject.Properties['xerj']
+            if ($legacy) {
+                if ($table.PSObject.Properties['xerj']) { throw 'Both OpenCode MCP schemas contain xerj; resolve the conflict manually.' }
+                Merge-JsonMcpEntry $mcp $Client $Binary $Endpoint
+                $entry = $legacy.Value
+                if ($entry.PSObject.Properties['enabled']) {
+                    if ($entry.enabled -isnot [bool] -or $entry.PSObject.Properties['disabled']) { throw 'Ambiguous OpenCode enabled setting.' }
+                    if (-not $entry.enabled) { $entry | Add-Member -NotePropertyName disabled -NotePropertyValue $true }
+                    $entry.PSObject.Properties.Remove('enabled')
+                }
+                $table | Add-Member -NotePropertyName xerj -NotePropertyValue $entry
+                $mcp.PSObject.Properties.Remove('xerj')
+            }
+        }
+        elseif ($mcp.PSObject.Properties['servers']) { throw 'OpenCode 1 cannot use the existing OpenCode 2 MCP configuration.' }
+    }
+    else { $table = Get-JsonObject $data 'mcpServers' }
+    $newEntry = -not $table.PSObject.Properties['xerj']
+    Merge-JsonMcpEntry $table $Client $Binary $Endpoint
+    if ($Client -eq 'opencode' -and $OpenCodeMajor -eq 1 -and $newEntry) {
+        $table.xerj | Add-Member -NotePropertyName enabled -NotePropertyValue $true
+    }
+    Save-Config $Config (($data | ConvertTo-Json -Depth 100 -WarningAction Stop) + "`n") $old
+}
+
+function Register-CodexMcp {
+    param($Command, [string]$Binary, [string]$Endpoint)
+    if ($Command -is [Management.Automation.ApplicationInfo] -and $Command.Path -match '\.(cmd|bat)$' -and
+        "$Binary$Endpoint" -match '[&!^()%]') {
+        throw 'Use the native Codex executable when a path or endpoint contains CMD metacharacters.'
+    }
+    $PSNativeCommandUseErrorActionPreference = $false
+    $previousPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $output = & $Command mcp get xerj --json 2>&1
+    }
+    finally { $ErrorActionPreference = $previousPreference }
+    $status = $LASTEXITCODE
+    if ($status -eq 0) {
+        $payload = ($output | Where-Object { $_ -isnot [Management.Automation.ErrorRecord] }) -join "`n"
+        try { $entry = ConvertFrom-StrictConfig $payload }
+        catch { throw 'Codex returned an invalid MCP description.' }
+        if ($entry.transport.type -cne 'stdio' -or -not (Test-ManagedCommand $entry.transport.command $entry.transport.args $Binary)) {
+            throw 'An unrelated Codex MCP server named xerj already exists.'
+        }
+        if ($entry.transport.args[2] -ceq $Endpoint) { return }
+        # Codex get omits fields such as "required". Adding a server again
+        # replaces its complete table and could discard those settings.
+        throw 'Update the existing Codex xerj endpoint manually in config.toml.'
+    }
+    else {
+        $payload = ($output | ForEach-Object { [string]$_ }) -join "`n"
+        if ($payload -notmatch "(?m)^(?:Error: )?No MCP server named 'xerj' found\.\s*$") {
+            throw 'Could not inspect the Codex MCP configuration.'
+        }
+    }
+    $registration = @('mcp', 'add', 'xerj', '--', $Binary, 'mcp', '--url', $Endpoint)
+    & $Command @registration *> $null
+    if ($LASTEXITCODE -ne 0) { throw 'Codex MCP registration failed.' }
+}
+
+function Test-CrushShellConfig {
+    param($Command)
+    $PSNativeCommandUseErrorActionPreference = $false
+    try { $output = & $Command --version 2>$null }
+    catch { return $false }
+    $banner = $output -join "`n"
+    if ($LASTEXITCODE -ne 0 -or $banner -notmatch '(?m)^\s*(?:crush\s+)?(?:version\s+)?v?(\d+\.\d+\.\d+)([-+][A-Za-z0-9.+-]+)?\s*$') {
+        return $false
+    }
+    $version = $null
+    if (-not [version]::TryParse($Matches[1], [ref]$version)) { return $false }
+    $minimum = [version]'0.88.0'
+    return ($version -gt $minimum -or ($version -eq $minimum -and $Matches[2] -notlike '-*'))
+}
+
+function Register-CrushMcp {
+    param([string]$Config, [string]$Binary, [string]$Endpoint)
+    $legacyText = Read-Config (Join-Path (Split-Path $Config) 'crush.json')
+    if ($null -ne $legacyText) {
+        $legacy = ConvertFrom-StrictConfig $legacyText
+        $legacyMcp = $legacy.PSObject.Properties['mcp']
+        if ($legacyMcp -and ($legacyMcp.Value -isnot [pscustomobject] -or $legacyMcp.Value.PSObject.Properties['xerj'])) {
+            throw 'The legacy Crush configuration contains an MCP conflict. Merge xerj manually.'
+        }
+    }
+    $old = Read-Config $Config
+    $begin = '# BEGIN xerj managed'
+    $end = '# END xerj managed'
+    $body = [string]$old
+    $block = '(?m)^' + [regex]::Escape($begin) + '\r?\n(?<line>[^\r\n]*)\r?\n' + [regex]::Escape($end) + '(?:\r?\n|$)'
+    $markers = [regex]::Matches($body, '(?m)^# (?:BEGIN|END) xerj managed\r?$')
+    $existing = [regex]::Matches($body, $block)
+    $command = ConvertTo-BashLiteral ($Binary.Replace('\', '/'))
+    $prefix = "mcp add xerj --type stdio --command $command --args mcp --args --url --args "
+    if ($markers.Count -ne $existing.Count * 2 -or $existing.Count -gt 1) { throw 'Malformed xerj managed block.' }
+    if ($existing.Count -eq 1) {
+        $line = $existing[0].Groups['line'].Value
+        if (-not $line.StartsWith($prefix, [StringComparison]::Ordinal)) {
+            throw 'The existing Crush MCP block is unrelated to this installation.'
+        }
+        $literal = $line.Substring($prefix.Length)
+        if ($literal.Length -lt 2 -or -not $literal.StartsWith("'") -or -not $literal.EndsWith("'")) {
+            throw 'The managed Crush MCP block has an invalid endpoint argument.'
+        }
+        $value = $literal.Substring(1, $literal.Length - 2).Replace("'\''", "'")
+        if ((ConvertTo-BashLiteral $value) -cne $literal) { throw 'The managed Crush MCP block contains an extra command or argument.' }
+    }
+    $unmanaged = [regex]::Replace($body, $block, '')
+    if ($unmanaged -match '(?:^|[;\n])\s*(?:command\s+)?mcp\s+add\s+["'']?xerj(?:["'']|\s|$)') {
+        throw 'An unrelated Crush MCP server named xerj already exists.'
+    }
+    $endpointLiteral = ConvertTo-BashLiteral $Endpoint
+    $replacement = "$begin`n$prefix$endpointLiteral`n$end`n"
+    $text = if ($existing.Count -eq 1) {
+        $body.Substring(0, $existing[0].Index) + $replacement + $body.Substring($existing[0].Index + $existing[0].Length)
+    }
+    else {
+        $separator = if ($body -and -not $body.EndsWith("`n")) { "`n" } else { '' }
+        $body + $separator + $replacement
+    }
+    Save-Config $Config $text $old
+}
+
+if ($Arguments -and $Arguments.Count -eq 1 -and $Arguments[0] -ceq '--help') {
+    Write-Output @'
+Usage: update-xerj [all | AGENT ... | --binary-only] [--version TAG] [--url URL]
+Agents: codex crush opencode copilot-cli claude
+Without selectors or with all, configure detected clients only.
+Windows also accepts -Version, -Url, -BinaryOnly, -Codex, -Crush and -OpenCode.
+'@
+    exit 0
+}
+
+try {
+    $clients = [ordered]@{ codex = 'codex'; crush = 'crush'; opencode = 'opencode'; 'copilot-cli' = 'copilot'; claude = 'claude' }
+    $selected = @()
+    if ($Codex) { $selected += 'codex' }
+    if ($Crush) { $selected += 'crush' }
+    if ($OpenCode) { $selected += 'opencode' }
+    $selectAll = $false
+    $Version = $null
+    $Url = if ($env:XERJ_URL) { $env:XERJ_URL } else { 'http://127.0.0.1:9200' }
+    $hasVersion = $false
+    $hasUrl = $false
+    for ($i = 0; $Arguments -and $i -lt $Arguments.Count; $i++) {
+        $argument = $Arguments[$i]
+        $option = switch ($argument) {
+            '-Version' { '--version' }
+            '-Url' { '--url' }
+            default { $argument }
+        }
+        switch -CaseSensitive ($option) {
+            '--version' {
+                if ($hasVersion -or ++$i -ge $Arguments.Count) { throw 'Specify a release tag once.' }
+                $Version = $Arguments[$i]
+                $hasVersion = $true
+            }
+            '--url' {
+                if ($hasUrl -or ++$i -ge $Arguments.Count) { throw 'Specify one endpoint URL.' }
+                $Url = $Arguments[$i]
+                $hasUrl = $true
+            }
+            '--binary-only' { $BinaryOnly = $true }
+            'all' { $selectAll = $true }
+            default {
+                if ($argument -cnotin $clients.Keys) { throw 'Invalid selector or option. See update-xerj --help.' }
+                $selected += $argument
+            }
+        }
+    }
+    if (($selectAll -and $selected) -or ($BinaryOnly -and ($selectAll -or $selected))) { throw 'Select all, specific agents or --binary-only.' }
+    if ($hasVersion -and $Version -cnotmatch '^v?[0-9][A-Za-z0-9.+-]*$') { throw 'Invalid release tag.' }
+    $endpoint = $null
+    if (-not $BinaryOnly -or $hasUrl) {
+        if ($Url -match '[\x00-\x20\x7f\\"<>|%?#]' -or
+            -not [uri]::TryCreate($Url, [UriKind]::Absolute, [ref]$endpoint) -or
+            $endpoint.Scheme -notin @('http', 'https') -or -not $endpoint.Host -or $endpoint.UserInfo) {
+            throw 'Use an absolute HTTP(S) endpoint without credentials, query, or fragment.'
+        }
+    }
+}
+catch {
+    Write-Fail $_.Exception.Message
+    exit 2
 }
 
 try {
     if ($env:OS -ne 'Windows_NT') { throw 'This script requires Windows.' }
-    if ($Codex) { $null = Get-Command codex -ErrorAction Stop }
+    $commands = [ordered]@{}
+    if (-not $BinaryOnly) {
+        $requested = if ($selected) { $selected | Select-Object -Unique } else { $clients.Keys }
+        foreach ($client in $requested) {
+            $command = Get-Command $clients[$client] -CommandType Application, ExternalScript -ErrorAction SilentlyContinue
+            if ($client -eq 'crush' -and $command -and -not (Test-CrushShellConfig $command)) {
+                $reason = 'Crush 0.88.0 or newer is required for crushrc MCP registration.'
+                if ($selected) { throw $reason }
+                Write-Info "Skipped crush. $reason"
+            }
+            elseif ($command) { $commands[$client] = $command }
+            elseif ($selected) { throw "Selected client is unavailable: $client" }
+            else { Write-Info "Skipped $client (client unavailable)." }
+        }
+    }
     $architecture = [Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
     switch ($architecture) {
         'X64' { $target = 'x86_64' }
@@ -140,11 +519,14 @@ try {
     if ($tag -cnotmatch '^v[0-9][A-Za-z0-9.+-]*$') { throw 'Invalid release tag.' }
     $asset = "xerj-$($tag.Substring(1))-$target-pc-windows-msvc.zip"
     $base = "https://github.com/xerj-org/xerj/releases/download/$tag"
-    $stage = Join-Path ([IO.Path]::GetTempPath()) ('update-xerj-' + [guid]::NewGuid().ToString('N'))
+    $tempRoot = [IO.Path]::GetTempPath().TrimEnd('\', '/')
+    Assert-XerjPrivateDirectory $tempRoot
+    $stage = Join-Path $tempRoot ('update-xerj-' + [guid]::NewGuid().ToString('N'))
     $null = New-Item -ItemType Directory -Path $stage
+    Assert-XerjPrivateDirectory $stage
     $archive = Join-Path $stage $asset
-    Invoke-WebRequest "$base/$asset" -OutFile $archive -UseBasicParsing
-    Invoke-WebRequest "$base/$asset.sha256" -OutFile "$archive.sha256" -UseBasicParsing
+    Invoke-WebRequest "$base/$asset" -OutFile $archive -TimeoutSec 300 -UseBasicParsing
+    Invoke-WebRequest "$base/$asset.sha256" -OutFile "$archive.sha256" -TimeoutSec 60 -UseBasicParsing
     $digest = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
     $lines = [IO.File]::ReadAllLines("$archive.sha256")
     if ($lines -cnotcontains "$digest  $asset" -and $lines -cnotcontains "$digest *$asset") {
@@ -158,68 +540,88 @@ try {
         $entries = @($zip.Entries | Where-Object { $_.FullName -ceq $expected })
         if ($entries.Count -ne 1) { throw 'Expected exactly one xerj.exe in release.' }
         $entry = $entries[0]
+        $entryType = ($entry.ExternalAttributes -shr 16) -band 0xF000
         if ($entry.Length -le 0 -or $entry.Length -gt 536870912 -or
-            (($entry.ExternalAttributes -shr 16) -band 0xF000) -eq 0xA000) {
+            $entryType -notin @(0, 0x8000) -or
+            ($entry.ExternalAttributes -band ([IO.FileAttributes]::Directory -bor [IO.FileAttributes]::ReparsePoint))) {
             throw 'Invalid executable entry in release.'
         }
         $root = Join-Path $env:LOCALAPPDATA 'Programs/xerj'
+        Assert-XerjPrivateDirectory $root
         $null = New-Item -ItemType Directory -Force -Path $root
+        Assert-XerjPrivateDirectory $root
         $binary = Join-Path $root 'xerj.exe'
-        $pending = Join-Path $root ('.xerj-' + [guid]::NewGuid().ToString('N') + '.tmp')
+        $pending = Join-Path $root ('.xerj-' + [guid]::NewGuid().ToString('N') + '.exe')
         try {
             [IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $pending)
+            Confirm-StagedXerj $pending $tag $stage
             Complete-FileReplacement $pending $binary
         }
         finally {
-            if (Test-Path -LiteralPath $pending) { Remove-Item -LiteralPath $pending }
+            if (Test-Path -LiteralPath $pending) { Remove-Item -LiteralPath $pending -Force }
         }
     }
     finally { $zip.Dispose() }
     Write-Info "Installed $tag at $binary"
-    # MCP uses an absolute executable path; no PATH/profile changes are needed.
-    if ($Codex) {
-        $codexRoot = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $HOME '.codex' }
-        $config = Join-Path $codexRoot 'config.toml'
-        if (Test-Path -LiteralPath $config) {
-            Copy-Item -LiteralPath $config -Destination "$config.bak.$([guid]::NewGuid().ToString('N'))"
+    $registrationFailed = $false
+    $userHome = if ($env:USERPROFILE) { $env:USERPROFILE } else { $HOME }
+    $configRoot = if ($env:XDG_CONFIG_HOME) { $env:XDG_CONFIG_HOME } else { Join-Path $userHome '.config' }
+    foreach ($client in $commands.Keys) {
+        try {
+            switch ($client) {
+                'codex' {
+                    # Inspect user settings from private staging rather than a
+                    # project that may shadow the user MCP registration.
+                    $codexHome = $env:CODEX_HOME
+                    if ($codexHome -and -not [IO.Path]::IsPathRooted($codexHome)) {
+                        $env:CODEX_HOME = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($codexHome)
+                    }
+                    try {
+                        Push-Location -LiteralPath $stage
+                        try { Register-CodexMcp $commands[$client] $binary $Url }
+                        finally { Pop-Location }
+                    }
+                    finally { $env:CODEX_HOME = $codexHome }
+                }
+                'crush' {
+                    $root = if ($env:CRUSH_GLOBAL_CONFIG) { $env:CRUSH_GLOBAL_CONFIG } else { Join-Path $configRoot 'crush' }
+                    Register-CrushMcp (Join-Path $root 'crushrc') $binary $Url
+                }
+                'opencode' {
+                    if ($env:OPENCODE_CONFIG -or $env:OPENCODE_CONFIG_DIR -or $env:OPENCODE_CONFIG_CONTENT) {
+                        throw 'OpenCode has an explicit configuration override. Merge xerj manually into the active configuration.'
+                    }
+                    $config = Join-Path $configRoot 'opencode/opencode.json'
+                    if (Test-Path -LiteralPath ([IO.Path]::ChangeExtension($config, '.jsonc'))) {
+                        throw 'Merge xerj into the existing opencode.jsonc manually.'
+                    }
+                    $PSNativeCommandUseErrorActionPreference = $false
+                    $output = & $commands[$client] --version 2>$null
+                    if ($LASTEXITCODE -ne 0 -or ($output -join "`n") -notmatch '(?m)^\s*(?:opencode\s+)?v?([12])\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?\s*$') {
+                        throw 'Could not determine whether OpenCode uses the v1 or v2 MCP schema.'
+                    }
+                    Register-JsonMcp $client $config $binary $Url ([int]$Matches[1])
+                }
+                'copilot-cli' {
+                    $root = if ($env:COPILOT_HOME) { $env:COPILOT_HOME } else { Join-Path $userHome '.copilot' }
+                    Register-JsonMcp $client (Join-Path $root 'mcp-config.json') $binary $Url
+                }
+                'claude' {
+                    $root = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { $userHome }
+                    Register-JsonMcp $client (Join-Path $root '.claude.json') $binary $Url
+                }
+            }
+            Write-Info "$client MCP configured."
         }
-        & codex mcp add xerj -- $binary mcp --url $Url
-        if ($LASTEXITCODE -ne 0) { throw 'Codex MCP registration failed.' }
+        catch {
+            Write-Fail "${client}: $($_.Exception.Message)"
+            $registrationFailed = $true
+        }
     }
-    $configRoot = if ($env:XDG_CONFIG_HOME) { $env:XDG_CONFIG_HOME } else { Join-Path $HOME '.config' }
-    if ($Crush) {
-        $config = Join-Path $configRoot 'crush/crushrc'
-        $old = if (Test-Path -LiteralPath $config) { [IO.File]::ReadAllText($config) } else { '' }
-        $begin = '# BEGIN xerj managed'
-        $end = '# END xerj managed'
-        $starts = [regex]::Matches($old, [regex]::Escape($begin)).Count
-        $ends = [regex]::Matches($old, [regex]::Escape($end)).Count
-        if ($starts -ne $ends -or $starts -gt 1) { throw 'Malformed xerj managed block.' }
-        $text = [regex]::Replace($old, '(?s)' + [regex]::Escape($begin) + '.*?' + [regex]::Escape($end) + '\r?\n?', '')
-        $command = ConvertTo-BashLiteral ($binary.Replace('\', '/'))
-        $endpoint = ConvertTo-BashLiteral $Url
-        $text = $text.TrimEnd() + "`n$begin`nmcp add xerj --type stdio --command $command --args mcp --args --url --args $endpoint`n$end`n"
-        Save-Config $config $text
+    if ($commands.Count) {
+        Write-Info 'MCP requires a running xerj node. See windows/README.md for startup and authentication.'
     }
-    if ($OpenCode) {
-        $config = Join-Path $configRoot 'opencode/opencode.json'
-        if (Test-Path -LiteralPath ([IO.Path]::ChangeExtension($config, '.jsonc'))) {
-            throw 'Merge xerj into existing opencode.jsonc manually; refusing ambiguous configuration.'
-        }
-        $data = if (Test-Path -LiteralPath $config) {
-            ConvertFrom-OpenCodeConfig -Text ([IO.File]::ReadAllText($config))
-        }
-        else { [pscustomobject]@{} }
-        if (-not ($data -is [pscustomobject])) { throw 'OpenCode config must be a JSON object.' }
-        if (-not $data.PSObject.Properties['mcp']) {
-            $data | Add-Member -NotePropertyName mcp -NotePropertyValue ([pscustomobject]@{})
-        }
-        if (-not ($data.mcp -is [pscustomobject])) { throw 'OpenCode mcp must be a JSON object.' }
-        $entry = [pscustomobject]@{ type = 'local'; command = @($binary, 'mcp', '--url', $Url); enabled = $true }
-        $data.mcp | Add-Member -NotePropertyName xerj -NotePropertyValue $entry -Force
-        Save-Config $config (($data | ConvertTo-Json -Depth 100) + "`n")
-    }
-    Write-Info 'MCP requires a running xerj node. See windows/README.md for startup and authentication.'
+    if ($registrationFailed) { exit 1 }
 }
 catch {
     Write-Fail $_.Exception.Message

@@ -26,6 +26,9 @@ rem =====================================================================
 setlocal EnableExtensions DisableDelayedExpansion
 
 for %%I in ("%~dp0..") do set "REPO=%%~fI\"
+set "SYS_PS=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
+set "PS7=%ProgramFiles%\PowerShell\7\pwsh.exe"
+set "TRUST=%REPO%windows\install-support\trust.ps1"
 set "PROJECT="
 set "VERSION=unknown"
 set "OPT_DRY=0"
@@ -39,7 +42,7 @@ set "MANIFEST_BAD="
 set "INSTALL_FAIL="
 set "VERIFY_FAIL="
 set "WINGET_ID=StrawberryPerl.StrawberryPerl"
-set "PERL_MODULES=-M5.010001 -MEncode -MUnicode::Normalize -MFile::Spec -MFile::Basename -MFile::Temp -MFile::Path -MGetopt::Long -MPod::Usage -MDigest::SHA -MCwd -MWin32"
+set "PERL_MODULES=-M5.010001 -MEncode -MUnicode::Normalize -MFile::Spec -MFile::Basename -MFile::Temp -MFile::Path -MGetopt::Long -MPod::Usage -MDigest::SHA -MCwd -MWin32 -MWin32API::File"
 
 rem --------------------------------------------------------------------
 rem Argument parsing (only a few options on purpose)
@@ -90,7 +93,8 @@ if not defined OPT_INSTALL_DIR set "OPT_INSTALL_DIR=%USERPROFILE%\Programs\%PROJ
 set "INSTALL_DIR=%OPT_INSTALL_DIR%"
 rem Canonicalize so a relative --install-dir is not stored verbatim in PATH.
 for %%I in ("%INSTALL_DIR%") do set "INSTALL_DIR=%%~fI"
-call :warn_if_system_dir "%INSTALL_DIR%"
+"%SYS_PS%" -NoProfile -File "%TRUST%" -Action ValidatePath -Path "%INSTALL_DIR%"
+if errorlevel 1 exit /b 2
 
 rem --------------------------------------------------------------------
 rem Read the single source of truth for public programs
@@ -131,11 +135,10 @@ if "%INSTALL_FAIL%"=="1" (
     echo [ERROR] invalid PowerShell script name; cannot continue.
     exit /b 2
 )
-where pwsh.exe >nul 2>&1
-if errorlevel 1 echo [WARN] PowerShell 7 (pwsh.exe) not found; psfmt requires it.
+if not exist "%PS7%" echo [WARN] PowerShell 7 is not installed in its standard location; psfmt requires it.
 
 rem --------------------------------------------------------------------
-rem Find an already usable Perl before considering winget
+rem Only inspect candidate paths in dry-run mode.
 rem --------------------------------------------------------------------
 call :find_perl
 
@@ -145,7 +148,7 @@ rem --------------------------------------------------------------------
 echo Installing %PROJECT% %VERSION%
 echo.
 echo Perl:
-if defined PERL_EXE echo   found: %PERL_EXE%
+if defined PERL_EXE echo   found: "%PERL_EXE%"
 if not defined PERL_EXE echo   would install via winget: %WINGET_ID%
 echo Install root:
 echo   "%INSTALL_DIR%"
@@ -179,12 +182,9 @@ rem --------------------------------------------------------------------
 rem Create the install tree and copy our files
 rem --------------------------------------------------------------------
 set "FINAL_INSTALL_DIR=%INSTALL_DIR%"
-set "STAGE_ID="
-for /f "delims=" %%G in ('powershell -NoProfile -Command "[guid]::NewGuid().ToString()"') do set "STAGE_ID=%%G"
-if not defined STAGE_ID exit /b 2
-set "INSTALL_STAGE=%TEMP%\scripts-install-%STAGE_ID%"
-mkdir "%INSTALL_STAGE%"
-if errorlevel 1 exit /b 2
+set "INSTALL_STAGE="
+for /f "usebackq delims=" %%G in (`""%SYS_PS%" -NoProfile -File "%TRUST%" -Action Stage"`) do set "INSTALL_STAGE=%%G"
+if not defined INSTALL_STAGE exit /b 2
 set "INSTALL_DIR=%INSTALL_STAGE%"
 mkdir "%INSTALL_DIR%\perl" >nul 2>&1
 mkdir "%INSTALL_DIR%\windows" >nul 2>&1
@@ -232,7 +232,7 @@ if defined VERIFY_FAIL (
     goto install_failed
 )
 set "INSTALL_DIR=%FINAL_INSTALL_DIR%"
-powershell -NoProfile -File "%REPO%windows\install-support\publish.ps1" -Stage "%INSTALL_STAGE%" -Destination "%INSTALL_DIR%"
+"%SYS_PS%" -NoProfile -File "%REPO%windows\install-support\publish.ps1" -Stage "%INSTALL_STAGE%" -Destination "%INSTALL_DIR%"
 if errorlevel 1 goto install_failed
 rmdir /s /q "%INSTALL_STAGE%" >nul 2>&1
 
@@ -240,7 +240,13 @@ rem --------------------------------------------------------------------
 rem User PATH (HKCU\Environment\Path only, idempotent). Do this only after a
 rem successful verification so a broken install is not added to PATH.
 rem --------------------------------------------------------------------
-if "%OPT_PATH%"=="1" call :update_user_path
+if "%OPT_PATH%"=="1" (
+    "%SYS_PS%" -NoProfile -File "%TRUST%" -Action AddPath -Path "%INSTALL_DIR%\bin"
+    if errorlevel 1 (
+        echo [ERROR] Files published but user PATH was not changed.
+        exit /b 2
+    )
+)
 
 rem --------------------------------------------------------------------
 rem Summary
@@ -299,28 +305,13 @@ echo   --install-dir PATH   Install to PATH instead of the per-user default.
 echo   --help               Show this help.
 exit /b 0
 
-rem Ask Windows PowerShell for the OS version without changing anything. The
-rem result is read from a temporary file; if the probe fails, WINVER stays
-rem "unknown" and the platform check rejects the host.
+rem Read the OS version directly without creating scratch files.
 :detect_windows
 set "WIN_OK=0"
 set "WINVER=unknown"
-set "WTMP=%TEMP%\nf_win_%RANDOM%%RANDOM%.txt"
-powershell -NoProfile -Command "[Environment]::OSVersion.Version.Major.ToString() + '.' + [Environment]::OSVersion.Version.Minor.ToString() + '.' + [Environment]::OSVersion.Version.Build.ToString()" >"%WTMP%" 2>nul
-if exist "%WTMP%" (
-    set /p WINVER=<"%WTMP%"
-    del /f /q "%WTMP%" >nul 2>&1
-)
+for /f "usebackq delims=" %%V in (`""%SYS_PS%" -NoProfile -File "%TRUST%" -Action Version"`) do set "WINVER=%%V"
 for /f "tokens=1 delims=." %%A in ("%WINVER%") do set "WINMAJOR=%%A"
 if "%WINMAJOR%"=="10" set "WIN_OK=1"
-exit /b 0
-
-rem Warn, but do not refuse, when the install root needs administrator rights.
-:warn_if_system_dir
-echo "%~1" | find /i "%SystemRoot%" >nul
-if not errorlevel 1 echo [WARN] %SystemRoot% needs administrator rights; prefer the default per-user path.
-echo "%~1" | find /i "Program Files" >nul
-if not errorlevel 1 echo [WARN] Program Files needs administrator rights; prefer the default per-user path.
 exit /b 0
 
 rem Validate one perl\programs.txt line. Entries are bare .pl names; blank lines
@@ -384,36 +375,23 @@ exit /b 0
 
 rem Accept a candidate only when it runs with every required core module.
 :try_perl
+if defined PERL_EXE exit /b 0
 set "CAND=%~1"
 if not exist "%CAND%" exit /b 0
 "%CAND%" %PERL_MODULES% -e exit >nul 2>&1
 if not errorlevel 1 set "PERL_EXE=%CAND%"
 exit /b 0
 
-rem Search PATH, common Strawberry Perl locations, then the persistent registry
-rem PATH in case this process environment is stale.
+rem The helper resolves and validates executable paths without a CMD search.
 :find_perl
 set "PERL_EXE="
-for /f "delims=" %%P in ('where perl 2^>nul') do call :try_perl "%%P"
-if defined PERL_EXE exit /b 0
-call :try_perl "%SystemDrive%\Strawberry\perl\bin\perl.exe"
-if defined PERL_EXE exit /b 0
-call :try_perl "%ProgramFiles%\Strawberry\perl\bin\perl.exe"
-if defined PERL_EXE exit /b 0
-call :try_perl "%LOCALAPPDATA%\Programs\Strawberry\perl\bin\perl.exe"
-if defined PERL_EXE exit /b 0
-set "SAVED_PATH=%PATH%"
-call :load_registry_path
-if defined REGPATH set "PATH=%REGPATH%"
-for /f "delims=" %%P in ('where perl 2^>nul') do call :try_perl "%%P"
-if defined SAVED_PATH set "PATH=%SAVED_PATH%"
-exit /b 0
-
-rem Read the machine and user PATH through Windows PowerShell. The value is
-rem loaded into REGPATH only and is not written back.
-:load_registry_path
-set "REGPATH="
-for /f "usebackq delims=" %%P in (`powershell -NoProfile -Command "[Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')" 2^>nul`) do set "REGPATH=%%P"
+for /f "usebackq delims=" %%P in (`""%SYS_PS%" -NoProfile -File "%TRUST%" -Action FindPerl"`) do (
+    if "%OPT_DRY%"=="1" (
+        if not defined PERL_EXE set "PERL_EXE=%%P"
+    ) else (
+        call :try_perl "%%P"
+    )
+)
 exit /b 0
 
 rem Install Strawberry Perl with winget only after no existing Perl passed the
@@ -421,15 +399,16 @@ rem module check. A nonzero winget status is a warning because Perl may still
 rem have become available, so find_perl is retried.
 :install_perl
 echo [INFO] No suitable Perl found; a Windows Perl distribution is required.
-where winget >nul 2>&1
-if errorlevel 1 (
+set "WINGET_EXE="
+for /f "usebackq delims=" %%P in (`""%SYS_PS%" -NoProfile -File "%TRUST%" -Action Winget"`) do set "WINGET_EXE=%%P"
+if not defined WINGET_EXE (
     echo [ERROR] winget is not available.
     echo         Install or update "App Installer" from the Microsoft Store,
     echo         then run this installer again.
     exit /b 0
 )
 echo [INFO] Installing %WINGET_ID% with winget...
-winget install --id %WINGET_ID% --exact --accept-package-agreements --accept-source-agreements --silent
+"%WINGET_EXE%" install --id %WINGET_ID% --exact --source winget --accept-package-agreements --accept-source-agreements --silent --disable-interactivity
 set "WRC=%ERRORLEVEL%"
 if not "%WRC%"=="0" echo [WARN] winget exited with code %WRC%; checking for Perl anyway.
 call :find_perl
@@ -469,33 +448,14 @@ if errorlevel 1 (
 exit /b 0
 
 
-rem Add INSTALL_DIR\bin to HKCU\Environment\Path only, appending when absent and
-rem changing nothing when present. The inline PowerShell preserves the value
-rem kind, ignores empty entries, and compares existing entries after expansion
-rem so environment-variable forms are recognized. The system PATH is never touched.
-:update_user_path
-set "NF_BIN=%INSTALL_DIR%\bin"
-set "PSOUT=%TEMP%\nf_path_%RANDOM%%RANDOM%.txt"
-set "PATH_RESULT=error"
-powershell -NoProfile -Command "$b=$env:NF_BIN; $k=[Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment',$true); if($null -eq $k){$k=[Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment')}; $cur=$k.GetValue('Path',$null,[Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames); if($null -eq $cur){$cur='';$kind=[Microsoft.Win32.RegistryValueKind]::ExpandString}else{$kind=$k.GetValueKind('Path')}; $t=$b.TrimEnd('\').ToLower(); $found=$false; foreach($e in ($cur -split ';')){ $v=$e.Trim(); if($v -ne '' -and ($v.TrimEnd('\').ToLower() -eq $t -or [Environment]::ExpandEnvironmentVariables($v).TrimEnd('\').ToLower() -eq $t)){$found=$true;break} }; if($found){'present'}else{$list=@(); foreach($e in ($cur -split ';')){if($e.Trim() -ne ''){$list+=$e}}; $list+=$b; $k.SetValue('Path',($list -join ';'),$kind); 'added'}; $k.Close()" >"%PSOUT%" 2>nul
-if exist "%PSOUT%" (
-    set /p PATH_RESULT=<"%PSOUT%"
-    del /f /q "%PSOUT%" >nul 2>&1
-)
-if /i "%PATH_RESULT%"=="added" echo [INFO] Added to user PATH: %NF_BIN%
-if /i "%PATH_RESULT%"=="present" echo [INFO] User PATH already contains: %NF_BIN%
-if /i not "%PATH_RESULT%"=="added" if /i not "%PATH_RESULT%"=="present" echo [WARN] Could not update the user PATH automatically.
-exit /b 0
-
 rem Verify every installed program, plus the normalize-files launcher's argument
 rem forwarding and exit status.
 :verify_all
 call :verify_launcher "normalize-files"
 for %%N in (%PROGRAMS%) do call :verify_script "%%N"
 for %%N in (%PS_PROGRAMS%) do call :verify_ps_script "%%N"
-where pwsh >nul 2>&1
-if not errorlevel 1 (
-    pwsh -NoProfile -File "%INSTALL_DIR%\windows\psfmt.ps1" -version >nul 2>&1
+if exist "%PS7%" (
+    "%PS7%" -NoProfile -File "%INSTALL_DIR%\windows\psfmt.ps1" -version >nul 2>&1
     if errorlevel 1 (
         echo [WARN] psfmt.ps1 did not run under pwsh; check the execution policy.
     ) else (
@@ -509,7 +469,7 @@ exit /b 0
 rem Parse the installed PowerShell script without executing it.
 :verify_ps_script
 set "PS_SCRIPT=%INSTALL_DIR%\windows\%~1"
-powershell -NoProfile -Command "$tokens=$null; $errors=$null; $null=[System.Management.Automation.Language.Parser]::ParseFile($env:PS_SCRIPT,[ref]$tokens,[ref]$errors); if($errors.Count){$errors | Out-String | Write-Host; exit 1}" >nul 2>&1
+"%SYS_PS%" -NoProfile -Command "$tokens=$null; $errors=$null; $null=[System.Management.Automation.Language.Parser]::ParseFile($env:PS_SCRIPT,[ref]$tokens,[ref]$errors); if($errors.Count){$errors | Out-String | Write-Host; exit 1}" >nul 2>&1
 if errorlevel 1 (
     echo [ERROR] PowerShell syntax check failed for %~1
     set "VERIFY_FAIL=1"
@@ -537,7 +497,7 @@ rem sample file must return 1. All output goes to a temporary file.
 :verify_launcher
 set "LNAME=%~1"
 set "LAUNCHER=%INSTALL_DIR%\bin\%LNAME%.cmd"
-set "VOUT=%TEMP%\nf_verify_%RANDOM%%RANDOM%.txt"
+set "VOUT=%INSTALL_STAGE%\verify-output.txt"
 call "%LAUNCHER%" --version >"%VOUT%" 2>&1
 set "VRC=%ERRORLEVEL%"
 if "%VRC%"=="0" (
@@ -562,8 +522,12 @@ if "%VRC%"=="3" (
     echo [ERROR] %LNAME% lost the exit status, got %VRC%
     set "VERIFY_FAIL=1"
 )
-set "VTMP=%TEMP%\nf_vdir_%RANDOM%%RANDOM%"
+set "VTMP=%INSTALL_STAGE%\verify-input"
 mkdir "%VTMP%" >nul 2>&1
+if errorlevel 1 (
+    set "VERIFY_FAIL=1"
+    exit /b 0
+)
 > "%VTMP%\Name With Spaces.txt" echo sample
 call "%LAUNCHER%" --dry-run "%VTMP%" >"%VOUT%" 2>&1
 set "VRC=%ERRORLEVEL%"

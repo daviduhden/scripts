@@ -6,7 +6,7 @@ optional tools that must be installed separately.
 
 | File | Purpose |
 | --- | --- |
-| [aliases.bash](aliases.bash) | Defines navigation, file-operation, editor, networking, and system-information aliases, plus archive extraction and `sysupgrade-all`. Use `codex-yolo`, `copilot-yolo`, or `opencode-auto` to request the corresponding CLI's automatic/full-permission mode explicitly. |
+| [aliases.bash](aliases.bash) | Defines navigation, file-operation, editor, networking, and system-information aliases, plus archive extraction and `sysupgrade-all`. It also provides opt-in approval modes for coding agents. |
 | [vi-mode.bash](vi-mode.bash) | Enables vi editing in interactive Bash sessions and sets `EDITOR=vim` and `VISUAL=kak` only when they are unset. |
 
 To load both files from a checkout:
@@ -22,6 +22,13 @@ SecureBlue, `make install-shell` installs both files into
 uses `chattr` to manage immutable attributes. Override `SECUREBLUE_USER` or
 `BASH_CONF_DST_DIR` to select another destination; your Bash configuration must
 source that directory's files.
+
+Use `codex-yolo`, `copilot-yolo`, `opencode-auto`, `crush-yolo`, or
+`claude-yolo` to opt in to the corresponding CLI's approval mode.
+`crush-yolo` skips approval prompts and retains Crush's dangerous-command
+blocks. `claude-yolo` selects Claude Code's `bypassPermissions` mode.
+[Crush releases](https://github.com/charmbracelet/crush/releases/latest) ·
+[Claude Code CLI reference](https://code.claude.com/docs/en/cli-reference)
 
 `sysupgrade-all` calls the maintenance helpers documented in
 [../secureblue/README.md](../secureblue/README.md), followed by `pipx upgrade-all`.

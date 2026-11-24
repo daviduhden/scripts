@@ -18,6 +18,7 @@ use 5.010_001;
 use strict;
 use warnings;
 use Cwd        qw(abs_path);
+use Fcntl      qw(LOCK_EX O_CREAT O_RDWR);
 use File::Path qw(make_path);
 use File::Spec;
 use File::Temp qw(tempfile);
@@ -65,7 +66,6 @@ my $hashed_count;
 my %freq;
 my $freq_file_exists;
 my %alias;
-my $alias_file_exists;
 my %last_user;
 
 ########################
@@ -271,37 +271,69 @@ sub write_state_file {
     }
     if ( !replace_state_file( $path, $tmp ) ) {
         logw("Could not replace $path: $!");
+        return;
     }
+    return 1;
 }
 
-# Persist aliases as sorted "host:port alias" lines.
-sub write_alias_file {
-    my ($aliases_ref) = @_;
-    my @lines = map { sprintf "%s %s\n", $_, $aliases_ref->{$_} }
-      sort keys %{$aliases_ref};
-    return write_state_file( $alias_file, \@lines );
+# Read the state format used by all preference files. A read failure must
+# abort an edit rather than overwrite entries that could not be loaded.
+sub read_preferences {
+    my ( $path, $counts ) = @_;
+    my %values;
+    return \%values unless -e $path || -l $path;
+    die "refusing a non-regular preference file: $path\n"
+      if -l $path || !-f $path;
+    open my $fh, '<', $path or die "cannot read $path: $!\n";
+    local $! = 0;
+    while ( my $line = <$fh> ) {
+        chomp $line;
+        my ( $key, $value ) = split /\s+/, $line, 2;
+        next unless defined $key && defined $value;
+        next if $counts && $value !~ /\A[0-9]+\z/;
+        $values{$key} = $value;
+    }
+    my $read_error = $!;
+    close $fh or die "cannot close $path: $!\n";
+    die "cannot finish reading $path: $read_error\n" if $read_error;
+    return \%values;
 }
 
-# Persist host usage counts as sorted "host:port count" lines.
-sub write_freq_file {
-    my ($freq_ref) = @_;
-    my @lines = map { sprintf "%s %d\n", $_, $freq_ref->{$_} }
-      sort keys %{$freq_ref};
-    return write_state_file( $freq_file, \@lines );
+# All writers lock the stable sibling, reread current state, and merge a
+# single change before atomically replacing the data file.
+sub edit_preferences {
+    my ( $path, $state, $counts, $edit ) = @_;
+    my $ok = eval {
+        my $dir = parent_dir($path);
+        make_path($dir) if defined $dir && length $dir && $dir ne '.';
+        my $lock_path = "$path.lock";
+        die "refusing a symlink preference lock: $lock_path\n" if -l $lock_path;
+        sysopen my $lock, $lock_path, O_CREAT | O_RDWR, oct('600')
+          or die "cannot open preference lock: $!\n";
+        flock $lock, LOCK_EX or die "cannot lock preferences: $!\n";
+        my $latest = read_preferences( $path, $counts );
+        if ( $edit->($latest) ) {
+            my @lines = map { "$_ $latest->{$_}\n" } sort keys %$latest;
+            die "cannot save preferences: $path\n"
+              unless write_state_file( $path, \@lines );
+        }
+        %$state = %$latest;
+        1;
+    };
+    logw("Could not update preferences: $@") unless $ok;
+    return $ok;
 }
 
-# Persist the last SSH user chosen for each host.
-sub write_last_user_file {
-    my ($last_ref) = @_;
-    return unless defined $last_ref;
-
-    my @lines = map { sprintf "%s %s\n", $_, $last_ref->{$_} }
-      sort keys %{$last_ref};
-    return write_state_file( $last_user_file, \@lines );
+sub load_preferences {
+    my ( $path, $state, $counts ) = @_;
+    my $values = eval { read_preferences( $path, $counts ) };
+    if ( !$values ) {
+        logw("Could not load preferences: $@");
+        return;
+    }
+    %$state = %$values;
 }
 
-# Clear in-memory state and note which optional state files exist.  Loading is
-# separate so callers can refresh after a mutating menu action.
 sub reset_state {
     @entries          = ();
     %seen             = ();
@@ -310,73 +342,14 @@ sub reset_state {
     %alias            = ();
     %last_user        = ();
     $freq_file_exists = -f $freq_file ? 1 : 0;
-    return $alias_file_exists = -f $alias_file ? 1 : 0;
-}
-
-# Load host usage counts, ignoring malformed lines and nonnumeric values.
-sub load_freq_file {
-    return unless $freq_file_exists;
-
-    if ( open my $ffh, '<', $freq_file ) {
-        while ( my $line = <$ffh> ) {
-            chomp $line;
-            next if $line =~ /^\s*$/;
-            my ( $k, $v ) = split /\s+/, $line, 2;
-            next unless defined $k && defined $v;
-            next unless $v =~ /^\d+$/;
-            $freq{$k} = $v;
-        }
-        close $ffh;
-    }
-    else {
-        logw("Could not read frequency file $freq_file: $!");
-    }
-}
-
-# Load custom aliases, ignoring malformed lines.
-sub load_alias_file {
-    return unless $alias_file_exists;
-
-    if ( open my $afh, '<', $alias_file ) {
-        while ( my $line = <$afh> ) {
-            chomp $line;
-            next if $line =~ /^\s*$/;
-            my ( $k, $v ) = split /\s+/, $line, 2;
-            next unless defined $k && defined $v;
-            $alias{$k} = $v;
-        }
-        close $afh;
-    }
-    else {
-        logw("Could not read alias file $alias_file: $!");
-    }
-}
-
-# Load the remembered SSH user for each host.
-sub load_last_user_file {
-    return unless -f $last_user_file;
-
-    if ( open my $ufh, '<', $last_user_file ) {
-        while ( my $line = <$ufh> ) {
-            chomp $line;
-            next if $line =~ /^\s*$/;
-            my ( $k, $v ) = split /\s+/, $line, 2;
-            next unless defined $k && defined $v;
-            $last_user{$k} = $v;
-        }
-        close $ufh;
-    }
-    else {
-        logw("Could not read last user file $last_user_file: $!");
-    }
 }
 
 # Reset and reload every optional state file before rebuilding the host list.
 sub load_state_from_disk {
     reset_state();
-    load_freq_file();
-    load_alias_file();
-    return load_last_user_file();
+    load_preferences( $freq_file,  \%freq,  1 );
+    load_preferences( $alias_file, \%alias, 0 );
+    return load_preferences( $last_user_file, \%last_user, 0 );
 }
 
 ###########################
@@ -412,7 +385,13 @@ sub build_display {
         $display = "$alias_name -> $display";
     }
 
-    return $display;
+    return terminal_text($display);
+}
+
+sub terminal_text {
+    my ($value) = @_;
+    $value =~ s/([\x00-\x1f\x7f])/sprintf '\\x%02X', ord($1)/ge;
+    return $value;
 }
 
 # Parse plain known_hosts entries into connectable hosts.  Comments, hashed
@@ -482,38 +461,32 @@ sub parse_known_hosts {
 # Drop frequency, alias and last-user entries whose host no longer appears in
 # known_hosts, then rewrite only the files that changed.
 sub prune_stale_data {
-
-    # Keep freq/alias data consistent with current host list.
-    my %valid_keys =
-      map { entry_key( $_->{host}, $_->{port} ) => 1 } @entries;
-
-    my $pruned_freq = 0;
-    for my $k ( keys %freq ) {
-        if ( !$valid_keys{$k} ) {
-            delete $freq{$k};
-            $pruned_freq = 1;
-        }
+    my %valid = map { entry_key( $_->{host}, $_->{port} ) => 1 } @entries;
+    for my $preference (
+        [ $freq_file,      \%freq,      1 ],
+        [ $alias_file,     \%alias,     0 ],
+        [ $last_user_file, \%last_user, 0 ]
+      )
+    {
+        my ( $path, $state, $counts ) = @$preference;
+        my @stale = grep { !$valid{$_} } keys %$state;
+        next unless @stale;
+        edit_preferences(
+            $path, $state, $counts,
+            sub {
+                my ($latest) = @_;
+                my $changed = 0;
+                for my $key (@stale) {
+                    next
+                      unless exists $latest->{$key}
+                      && $latest->{$key} eq $state->{$key};
+                    delete $latest->{$key};
+                    $changed = 1;
+                }
+                return $changed;
+            }
+        );
     }
-
-    my $pruned_alias = 0;
-    for my $k ( keys %alias ) {
-        if ( !$valid_keys{$k} ) {
-            delete $alias{$k};
-            $pruned_alias = 1;
-        }
-    }
-
-    my $pruned_last_user = 0;
-    for my $k ( keys %last_user ) {
-        if ( !$valid_keys{$k} ) {
-            delete $last_user{$k};
-            $pruned_last_user = 1;
-        }
-    }
-
-    write_freq_file( \%freq )           if $pruned_freq;
-    write_alias_file( \%alias )         if $pruned_alias;
-    write_last_user_file( \%last_user ) if $pruned_last_user;
 }
 
 # Fail with a specific explanation when known_hosts contains no connectable
@@ -603,9 +576,20 @@ sub add_alias_menu {
         chomp $alias_val;
         return if $alias_val !~ /\S/;
 
-        $alias{$key} = $alias_val;
-        write_alias_file( \%alias );
-        logi('Alias saved. List refreshed.');
+        if (
+            edit_preferences(
+                $alias_file,
+                \%alias,
+                0,
+                sub {
+                    $_[0]{$key} = $alias_val;
+                    return 1;
+                }
+            )
+          )
+        {
+            logi('Alias saved. List refreshed.');
+        }
         return;
     }
 }
@@ -870,7 +854,7 @@ sub question_ssh_user {
     print "SSH user"
       . (
         length $default_user
-        ? " [$default_user]"
+        ? ' [' . terminal_text($default_user) . ']'
         : ''
       ) . ": ";
     my $ssh_user = <STDIN>;
@@ -887,34 +871,29 @@ sub question_ssh_user {
         }
     }
 
-    $last_user{$selected_key} = $ssh_user;
-    write_last_user_file( \%last_user );
-
     return $ssh_user;
 }
 
-# Build the ssh argv for the selected host.  The user name is restricted to a
-# conservative character set so it cannot be interpreted as an ssh option.
+# Keep the login and host in separate SSH arguments.
 sub build_ssh_command {
     my ( $ssh_path, $ssh_user, $selected_host, $selected_port ) = @_;
-    my @cmd;
-
-    # The user name is inserted into the ssh destination; reject anything
-    # that could be parsed as an ssh option (for example "-oProxyCommand=...").
-    if ( !defined $ssh_user || $ssh_user !~ /\A[A-Za-z0-9._-]+\z/ ) {
-        die_tool("Invalid SSH user name: '$ssh_user'.");
-    }
-
-    if ($selected_port) {
-        logi(   "Connecting to $ssh_user\@$selected_host"
-              . " (port $selected_port)..." );
-        @cmd = ( $ssh_path, '-p', $selected_port, "$ssh_user\@$selected_host" );
-    }
-    else {
-        logi("Connecting to $ssh_user\@$selected_host ...");
-        @cmd = ( $ssh_path, "$ssh_user\@$selected_host" );
-    }
-
+    die_tool('Invalid SSH user name.')
+      unless defined $ssh_user
+      && $ssh_user =~ /\A[A-Za-z0-9._][A-Za-z0-9._-]*\z/;
+    die_tool('Invalid SSH host.')
+      unless defined $selected_host
+      && $selected_host =~ /\A[A-Za-z0-9_:][A-Za-z0-9._:%-]*\z/;
+    die_tool('Invalid SSH port.')
+      if length( $selected_port // '' )
+      && ( $selected_port !~ /\A[0-9]{1,5}\z/
+        || $selected_port < 1
+        || $selected_port > 65535 );
+    my @cmd = ( $ssh_path, '-l', $ssh_user );
+    push @cmd, '-p', $selected_port if length( $selected_port // '' );
+    push @cmd, '--', $selected_host;
+    logi(   "Connecting to $ssh_user\@$selected_host"
+          . ( $selected_port ? " (port $selected_port)" : '' )
+          . '...' );
     return @cmd;
 }
 
@@ -922,9 +901,16 @@ sub build_ssh_command {
 # a warning; the connection itself must still proceed.
 sub update_frequency {
     my ($selected_key) = @_;
-    $freq{$selected_key} = ( $freq{$selected_key} // 0 ) + 1;
-    my $write_ok = eval { write_freq_file( \%freq ); 1 };
-    if ( !$write_ok ) { logw("Could not persist frequency file: $@"); }
+    edit_preferences(
+        $freq_file,
+        \%freq,
+        1,
+        sub {
+            my ($latest) = @_;
+            $latest->{$selected_key} = ( $latest->{$selected_key} // 0 ) + 1;
+            return 1;
+        }
+    );
 }
 
 # Replace the launcher with ssh on Unix.  Windows Perl does not wait for exec,
@@ -979,6 +965,15 @@ sub main {
     my @cmd =
       build_ssh_command( $ssh_path, $ssh_user, $selected_host, $selected_port );
 
+    edit_preferences(
+        $last_user_file,
+        \%last_user,
+        0,
+        sub {
+            $_[0]{$selected_key} = $ssh_user;
+            return 1;
+        }
+    );
     update_frequency($selected_key);
     return exec_ssh_command(@cmd);
 }

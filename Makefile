@@ -31,6 +31,7 @@ DEBIAN_SCRIPTS = \
 	debian/install-hardened-malloc.bash \
 	debian/sync-website.bash \
 	debian/sysupgrade.bash \
+	debian/update-ai-clis.bash \
 	debian/update-argon-one-v3.bash \
 	debian/update-btop.bash \
 	debian/update-fastfetch.bash \
@@ -41,9 +42,13 @@ DEBIAN_SCRIPTS = \
 	debian/update-openrsync.bash \
 	debian/update-signify.bash \
 	debian/update-xd-torrent.bash \
+	debian/update-xerj.bash \
 	debian/ai-purge-history.bash \
 	debian/rpi-update-safe.bash \
 	debian/bootargs.pl \
+	secureblue/xerj-config.pl \
+	scripts/xerj-clients.bash \
+	scripts/update-ai-clis-linux.bash \
 	scripts/release-verify.pl
 
 OPENBSD_SCRIPTS = \
@@ -53,7 +58,8 @@ OPENBSD_SCRIPTS = \
 	openbsd/sysupgrade-current.ksh \
 	openbsd/update-crush.ksh \
 	openbsd/ai-purge-history.ksh \
-	openbsd/rename-link.pl
+	openbsd/rename-link.pl \
+	scripts/release-verify.pl
 
 SECUREBLUE_SCRIPTS = \
 	secureblue/arti-config.pl \
@@ -66,6 +72,7 @@ SECUREBLUE_SCRIPTS = \
 	secureblue/sudo-wrapper.bash \
 	secureblue/sync-gh-repos.bash \
 	secureblue/sysupgrade.bash \
+	secureblue/update-ai-clis.bash \
 	secureblue/update-arti-oniux.bash \
 	secureblue/update-krohnkite.bash \
 	secureblue/update-lyrebird.bash \
@@ -74,6 +81,8 @@ SECUREBLUE_SCRIPTS = \
 	secureblue/update-xerj.bash \
 	secureblue/ai-purge-history.bash \
 	secureblue/xerj-config.pl \
+	scripts/xerj-clients.bash \
+	scripts/update-ai-clis-linux.bash \
 	scripts/release-verify.pl
 
 TESTS_FORMAT_SCRIPTS = \
@@ -105,15 +114,15 @@ clean:
 	@echo "${INFO} Nothing to clean"
 
 install-debian:
-	@INFO='${INFO}' DESTBIN='${DESTBIN}' DEBIAN_SCRIPTS='${DEBIAN_SCRIPTS}' \
+	@INFO='${INFO}' DESTBIN='${DESTBIN}' ADOPT_LEGACY='${ADOPT_LEGACY}' DEBIAN_SCRIPTS='${DEBIAN_SCRIPTS}' \
 		$(MANAGE) install-debian
 
 install-openbsd:
-	@INFO='${INFO}' DESTBIN='${DESTBIN}' OPENBSD_SCRIPTS='${OPENBSD_SCRIPTS}' \
+	@INFO='${INFO}' DESTBIN='${DESTBIN}' ADOPT_LEGACY='${ADOPT_LEGACY}' OPENBSD_SCRIPTS='${OPENBSD_SCRIPTS}' \
 		$(MANAGE) install-openbsd
 
 install-secureblue:
-	@INFO='${INFO}' DESTBIN='${DESTBIN}' SECUREBLUE_SCRIPTS='${SECUREBLUE_SCRIPTS}' \
+	@INFO='${INFO}' DESTBIN='${DESTBIN}' ADOPT_LEGACY='${ADOPT_LEGACY}' SECUREBLUE_SCRIPTS='${SECUREBLUE_SCRIPTS}' \
 		DEST_SYSTEMD_USER='${DEST_SYSTEMD_USER}' \
 		$(MANAGE) install-secureblue
 
@@ -137,7 +146,7 @@ install-shell-openbsd:
 	@INFO='${INFO}' $(MANAGE) install-shell-openbsd
 
 install-perl:
-	@INFO='${INFO}' DESTBIN='${DESTBIN}' \
+	@INFO='${INFO}' DESTBIN='${DESTBIN}' ADOPT_LEGACY='${ADOPT_LEGACY}' \
 		PERL_PROGRAMS_MANIFEST='${PERL_PROGRAMS_MANIFEST}' \
 		$(MANAGE) install-perl
 
@@ -152,22 +161,17 @@ install-tests-format:
 	@${TESTS_FORMAT_ENV} $(MANAGE) install-tests-format
 
 uninstall-debian:
-	@INFO='${INFO}' DESTBIN='${DESTBIN}' DEBIAN_SCRIPTS='${DEBIAN_SCRIPTS}' \
-		$(MANAGE) uninstall-debian
+	@INFO='${INFO}' DESTBIN='${DESTBIN}' $(MANAGE) uninstall-debian
 
 uninstall-openbsd:
-	@INFO='${INFO}' DESTBIN='${DESTBIN}' OPENBSD_SCRIPTS='${OPENBSD_SCRIPTS}' \
-		$(MANAGE) uninstall-openbsd
+	@INFO='${INFO}' DESTBIN='${DESTBIN}' $(MANAGE) uninstall-openbsd
 
 uninstall-secureblue:
-	@INFO='${INFO}' DESTBIN='${DESTBIN}' SECUREBLUE_SCRIPTS='${SECUREBLUE_SCRIPTS}' \
-		DEST_SYSTEMD_USER='${DEST_SYSTEMD_USER}' \
+	@INFO='${INFO}' DESTBIN='${DESTBIN}' DEST_SYSTEMD_USER='${DEST_SYSTEMD_USER}' \
 		$(MANAGE) uninstall-secureblue
 
 uninstall-perl:
-	@INFO='${INFO}' DESTBIN='${DESTBIN}' \
-		PERL_PROGRAMS_MANIFEST='${PERL_PROGRAMS_MANIFEST}' \
-		$(MANAGE) uninstall-perl
+	@INFO='${INFO}' DESTBIN='${DESTBIN}' $(MANAGE) uninstall-perl
 
 uninstall-tests-format:
 	@${TESTS_FORMAT_ENV} $(MANAGE) uninstall-tests-format
@@ -187,9 +191,11 @@ check: test-validate test-manpages
 format:
 	@$(MANAGE) format
 
+VALIDATION_FLAGS ?= --check
+
 test-validate: check-agent-knowledge test-agent-knowledge test-python
-	@echo "Running shell script validation..." && /bin/sh tests-format/validate-shell.sh --check .
-	@echo "Running perl script validation..." && /bin/sh tests-format/validate-perl.sh --check .
+	@echo "Running shell script validation..." && /bin/sh tests-format/validate-shell.sh ${VALIDATION_FLAGS} .
+	@echo "Running perl script validation..." && /bin/sh tests-format/validate-perl.sh ${VALIDATION_FLAGS} .
 	@echo "Running make validation..." && /bin/sh tests-format/validate-make.sh --check .
 	@echo "Checking file permissions (read-only)..." && /bin/sh tests-format/fix-permissions.sh --check .
 	@echo "Running correctness audit..." && /bin/sh tests-format/validate-correctness.sh --target all .
@@ -209,7 +215,7 @@ test-regression: test-tooling test-delivery
 	@echo "Running website sync filter tests..." && prove -Itests tests/test_sync_website_filters.pl
 
 test-delivery:
-	@prove -Itests tests/test_delivery_transactions.pl tests/test_release_updates.pl
+	@prove -Itests tests/test_delivery_transactions.pl tests/test_release_updates.pl tests/test_ai_cli_updates.pl
 
 test-tooling:
 	@prove -Itests tests/test_tooling.pl tests/test_bootargs.pl

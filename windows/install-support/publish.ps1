@@ -9,6 +9,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'trust.ps1')
 
 function Get-ManagedPath {
     param([string]$Entry)
@@ -32,9 +33,11 @@ $transaction = $null
 $changes = [Collections.Generic.List[object]]::new()
 $preserveRecovery = $false
 try {
-    $Destination = [IO.Path]::GetFullPath($Destination)
+    $Stage = Assert-InstallPath $Stage -Directory
+    $Destination = Assert-InstallPath $Destination -Directory
     Assert-RegularItem -Path $Destination -Directory
     [IO.Directory]::CreateDirectory($Destination) | Out-Null
+    $null = Assert-InstallPath $Destination -Directory
     $lockPath = Join-Path $Destination '.scripts-install.lock'
     $lock = [IO.FileStream]::new($lockPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None,
         4096, [IO.FileOptions]::DeleteOnClose)
@@ -50,14 +53,17 @@ try {
 
     foreach ($folder in @('bin', 'perl', 'windows')) {
         $path = Join-Path $Destination $folder
+        $null = Assert-InstallPath $path -Directory
         Assert-RegularItem -Path $path -Directory
         [IO.Directory]::CreateDirectory($path) | Out-Null
+        $null = Assert-InstallPath $path -Directory
     }
 
     $transaction = Join-Path $Destination ('.scripts-install-' + [guid]::NewGuid().ToString('N'))
     [IO.Directory]::CreateDirectory($transaction) | Out-Null
     foreach ($entry in @($fresh | Where-Object { $_ -ne $manifest }) + @($manifest)) {
         $target = Join-Path $Destination $entry
+        $null = Assert-InstallPath $target
         Assert-RegularItem -Path $target
         $pending = Join-Path $transaction "new-$($changes.Count)"
         [IO.File]::Copy((Join-Path $Stage $entry), $pending)
@@ -73,6 +79,7 @@ try {
     foreach ($entry in $old) {
         if ($entry -in $fresh) { continue }
         $target = Join-Path $Destination $entry
+        $null = Assert-InstallPath $target
         Assert-RegularItem -Path $target
         if (-not [IO.File]::Exists($target)) { continue }
         if ($entry -like 'bin\*' -and

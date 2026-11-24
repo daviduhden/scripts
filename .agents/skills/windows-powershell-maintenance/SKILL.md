@@ -44,9 +44,15 @@ does not prove Windows runtime behavior or Windows PowerShell 5.1 execution.
    - install only under the per-user root by default;
    - update only `HKCU\Environment\Path`, idempotently;
    - preserve unknown files and update the manifest;
+   - resolve trusted absolute interpreters. Use the built-in Windows
+     PowerShell path and standard protected PowerShell 7 installation path.
+     Keep private portable Perl PATH entries eligible and record the
+     absolute interpreter path for the launcher;
    - keep `PERL_MODULES` aligned with the runtime modules required by the
      installed Perl programs, including Windows-specific bundled modules;
-   - keep the dry-run path free of writes, packaging, and PATH changes.
+   - keep the dry-run path free of writes, Perl candidate execution,
+     packaging, and PATH changes. Allocate verification files inside the
+     private stage created by `windows/install-support/trust.ps1`.
 3. For a new top-level `windows/*.ps1`, the installer picks it up
    automatically and creates `<name>.cmd`. For a new public Perl program,
    add it to `perl/programs.txt`; both the POSIX and Windows installers read
@@ -54,9 +60,15 @@ does not prove Windows runtime behavior or Windows PowerShell 5.1 execution.
    The installer verifies a private staging tree before calling
    `windows/install-support/publish.ps1`. Keep the publishing helper outside
    top-level program discovery and test rollback on a locked managed file.
+   Validate canonical paths, reparse points, owners, ancestors and write
+   grants before publication or adding an installed directory to PATH.
+   Run `pwsh -NoProfile -File windows/tests/test-path-safety.ps1` on Windows.
 4. For `psfmt.ps1`, preserve the four mutually exclusive modes and their exit
    codes: `0` success, `1` error, `2` formatting needed in `-c` mode. Keep
    encoding/BOM/newline preservation and the atomic replace path.
+   Apply restrictive staging permissions before writing bytes and transfer
+   the source ACL or Unix file mode before activation. Apply the same Windows
+   staging and ACL rules to optional CLI profile updates.
 5. For PowerShell scripts, use `[CmdletBinding()]` and typed parameters when
    the script takes options, set `$ErrorActionPreference = 'Stop'`, and return
    explicit exit codes.
@@ -101,58 +113,77 @@ already-installed PSScriptAnalyzer; it does not install it.
   manifest. Avoid awkward names in both places.
 - Bun uses official oven-sh/bun release ZIPs with published SHA-256 digests,
   exact bun-windows-<arch>/bun.exe extraction, and atomic activation under
-  BUN_INSTALL or %USERPROFILE%\.bun. Prefer this binary over winget shims
-  when repairing PATH; check mode must not install or write PATH. Remove the
-  Oven-sh.Bun winget package automatically after verifying the official binary,
-  including when already current. Surface detection and uninstall failures;
-  missing winget or an absent package is harmless.
-- `-RemoveWinget` removes the winget copies of OpenCode, Codex, and Crush, not
-  Bun; keep the documentation aligned with that behavior.
-  Restrict removal to selected targets with a successful installation and a
-  usable managed executable. Verify staged executable versions before
-  replacing live OpenCode, Crush or Bun binaries.
+  BUN_INSTALL or %USERPROFILE%\.bun. Bun is an explicit compatibility target.
+  Its WinGet cleanup requires `-RemoveWinget`, as does cleanup for selected
+  OpenCode, Codex and Crush targets. Verify the managed executable first.
   The dispatch fixture defines its own version probe. Keep progress on the
   information stream so it cannot become part of a function's result.
   Capture the previous Codex directory type before swapping paths, because
   file metadata queried afterward may describe the new junction.
   Validate custom Crush purge paths before deleting any history, including
   in dry-run previews.
-- `update-aiclis.ps1` resolves OpenCode from the stable `v2.*` release tags
+- `update-ai-clis.ps1` resolves OpenCode from the stable `v2.*` release tags
   because the repository's GitHub `latest` alias still points at 1.x. Do not
-  replace that filter with `releases/latest`. Crush is a GitHub release updater
-  with the same versioned-copy layout as OpenCode.
+  replace that filter with `releases/latest`. Use the baseline x64 artifact
+  and the ARM64 artifact, and keep the versioned-copy layout for OpenCode and
+  Crush. Keep the implementation in `update-ai-clis.ps1` so automatic
+  discovery produces one launcher. Reinstalls remove the retired
+  `update-aiclis` files through the existing install manifest. Keep the
+  old profile block markers to update existing opt-in wrappers in place.
 - `ai-purge-history.ps1` preserves Crush data by default. `-IncludeCrushData`
   removes the entire `%LOCALAPPDATA%\crush` directory, which can include
   configuration; do not describe that opt-in path as configuration-safe. Use
   `-DryRun` to preview.
+  Preflight every selected path in both modes. Refuse broad roots, unsafe
+  file types and ancestor or descendant reparse points. Recheck each target
+  immediately before removal.
 - `psfmt.ps1` requires PSScriptAnalyzer 1.25.0. Missing modules fail without
   network access by default; `-install-dependency` explicitly opts in to the
   pinned PSGallery install. Keep the runner and CI version aligned.
-  Release updaters `update-aiclis.ps1` and `update-xerj.ps1` also download
+  Release updaters `update-ai-clis.ps1` and `update-xerj.ps1` also download
   upstream artifacts as their documented purpose. Keep downloads confined
   to those flows rather than adding them to launchers or checks.
-- `update-aiclis.ps1` verifies Codex, OpenCode, and Crush release archives
+- `update-ai-clis.ps1` verifies Codex, OpenCode, Crush and Copilot release archives
   against the GitHub asset digest and reads only the expected executable
-  entries. PowerShell profile wrappers (`codex --yolo`, `opencode --auto`) are
-  opt-in with `-Wrappers`; profile updates use a backup and atomic replacement.
-- Codex release ZIPs contain both root and `codex-resources/` helper copies.
-  Match exact archive paths, prefer resource entries, retain the legacy root
-  fallback, and reject duplicates at the selected path. Require the manifest
-  and all mandatory binaries before reusing a cached version. Successful
-  activation must remain successful if deleting a locked old copy fails.
-- `All` and `Codex` also invoke `codex app-server daemon update`, including
-  when the CLI is already current. The daemon selects latest stable separately
-  from `-CodexVersion`; respect `CODEX_HOME`, skip mutation with `-Check`, and
+  entries. Claude Code uses Anthropic's stable channel, its manifest size and
+  SHA-256, and a valid Authenticode signature from `Anthropic, PBC`. These
+  native distributions avoid installing package-manager language runtimes.
+  PowerShell profile wrappers (`codex --yolo`, `opencode --auto`) are opt-in
+  with `-Wrappers`. Profile updates use a backup and atomic replacement.
+- Probe the command actually resolved from PATH and explicitly recognize
+  executable, CMD and PowerShell script candidates. Report shadowed paths
+  without running every candidate. Parse semantic version tokens across
+  output lines, keep the upstream stable and post-update values separate,
+  and verify the expected path and version in a new profile-free shell
+  using registry-backed PATH. Never count acquisition or activation alone
+  as a successful update. Keep PATH changes per-user and preserve the
+  registry value type and existing entry order.
+- Use the canonical Codex package archive with bundled launchers, ripgrep
+  and sandbox resources. Validate tar member types and paths, check the
+  manifest and required binaries, and verify the staged CLI before switching
+  the visible junction. Keep a working package untouched during same-version
+  repair and report failed activation. Successful activation must remain
+  successful if deleting a locked old copy fails.
+  Associate cached releases with the upstream archive SHA-256 and hashes of
+  every extracted file. Reuse only matching caches and prune only attributable
+  packages. Limit native version probes in duration and output size.
+- `-UpdateCodexDaemon` invokes `codex app-server daemon update` when selected
+  Codex is managed and verified. The daemon selects latest stable separately
+  from `-CodexVersion`. Respect `CODEX_HOME`, skip mutation with `-Check`, and
   propagate nonzero or unsupported results without skipping Crush. Never run
   this lifecycle command during validation: it may restart a running daemon.
-  Use `pwsh -NoProfile -File windows/tests/test-update-aiclis.ps1` for offline
+  Use `pwsh -NoProfile -File windows/tests/test-update-ai-clis.ps1` for offline
   archive, incomplete-cache, activation-lock, daemon, and dispatch regressions.
 - `update-xerj.ps1` is a release-download updater: it verifies the archive's
   SHA-256 against an exact published filename/digest line before reading only
   the expected executable entry. Keep its per-user destination and absolute
-  MCP command paths. Optional registrations use Codex's CLI, a managed Crush
-  `crushrc` block, and OpenCode's `mcp.xerj` JSON object with backups. Refuse
-  ambiguous JSONC configuration rather than discarding comments or settings.
+  MCP command paths. Default registration processes the installed clients.
+  Validate selectors and endpoint syntax before any install or config write.
+  Follow the user scopes and schemas in the
+  [xerj configuration matrix](../../../docs/update-xerj.md). OpenCode V2
+  uses `mcp.servers`. Leave ambiguous JSONC, conflicting unowned
+  registrations and unrelated settings intact. Keep tokens out of
+  arguments, diagnostics and on-disk edits.
   MCP registration does not start a node; document local authenticated startup
   and inherited `XERJ_AUTH` separately. Never run the updater for validation.
   Use `pwsh -NoProfile -File windows/tests/test-update-xerj.ps1` instead:
@@ -164,9 +195,14 @@ already-installed PSScriptAnalyzer; it does not install it.
   `RequestMessage.RequestUri`. Pinned versions must bypass release discovery.
   Offline tests cover API unavailability and both response shapes; simulated
   Windows PowerShell responses do not prove native 5.1 execution.
-- Executable activation uses unique same-directory files and `File.Replace`;
-  never fall back to overwriting a locked target. Retain and report recovery
-  copies after failure. xerj retains successful `.bak.*` copies for operators.
+- xerj activation uses unique same-directory files. Pass
+  `[NullString]::Value` to `File.Replace` to avoid creating a backup. Never
+  fall back to overwriting a locked target. Verify the staged executable's
+  version before activation and clean up its temporary file on failure. Leave
+  existing `.bak.*` files untouched.
+  Check ownership, write permissions and ancestor path types before staging
+  releases in the temporary or installation directory and before writing MCP
+  configuration. Recheck newly created directories before writing.
   OpenCode requires an exact GitHub release asset/digest and one regular root
   executable entry; Crush requires `crush.exe` in the expected versioned archive
   folder. Reject duplicates and checksum failures before activation.

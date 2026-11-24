@@ -45,6 +45,17 @@ Replacement is aborted if original permissions or requested timestamps cannot
 be applied to the temporary output. Report write/close failures count toward
 the exit status. Ownership, ACLs and extended attributes are not preserved.
 
+Name changes reserve their destination without replacing an unrelated file.
+On Windows this uses the bundled `Win32API::File` module. On POSIX, file
+renames use hard links and directories use a reserved empty directory. A
+filesystem that cannot perform the operation leaves the source in place and
+reports an error. Requested SHA-256 verification requires a complete source
+read before final publication.
+
+`ssh-menu` sends the validated login and host as separate SSH arguments.
+A short lock in each preference directory covers rereading and merging each
+edit, so overlapping sessions can update unrelated entries.
+
 On Windows, both programs use unique recovery names when replacement requires
 moving an existing destination aside. A failed restoration leaves the original
 at the recovery path reported in the diagnostic. Do not remove that file until

@@ -56,6 +56,7 @@ export LC_ALL=C.UTF-8
 #   - CLI: --user USERNAME
 #   - Env: SYSUPGRADE_USER=USERNAME
 NONROOT_USER="${SYSUPGRADE_USER:-}"
+LOG_DIR=/var/log/scripts-sysupgrade
 # Full balance and recursive defragmentation are expensive on large disks and
 # snapshots. They are opt-in; scrub remains the default integrity check.
 BTRFS_MAINTENANCE="${BTRFS_MAINTENANCE:-0}"
@@ -814,7 +815,7 @@ run_security_audit() {
 
 	if command -v lynis >/dev/null 2>&1; then
 		umask 077
-		audit_log=$(mktemp "${TMPDIR:-/tmp}/lynis-audit.XXXXXX") || {
+		audit_log=$(mktemp "$LOG_DIR/lynis-audit.XXXXXX") || {
 			warn "Cannot create a private Lynis log."
 			return
 		}
@@ -858,7 +859,7 @@ collect_system_info() {
 
 	local info_log
 	umask 077
-	info_log=$(mktemp "${TMPDIR:-/tmp}/secureblue-info.XXXXXX") || {
+	info_log=$(mktemp "$LOG_DIR/secureblue-info.XXXXXX") || {
 		warn "Cannot create a private SecureBlue information log."
 		return 1
 	}
@@ -1005,6 +1006,11 @@ bootstrap() {
 
 # ---- Main ----
 main() {
+	if [[ -L $LOG_DIR || (-e $LOG_DIR && (! -d $LOG_DIR || ! -O $LOG_DIR)) ]]; then
+		error 'Unsafe maintenance log directory.'
+		return 1
+	fi
+	install -d -o root -g root -m 0700 -- "$LOG_DIR" || return
 	# Serialize maintenance runs. A stale lock is left for the operator after
 	# SIGKILL, matching the website synchronization policy.
 	if command -v flock >/dev/null 2>&1; then

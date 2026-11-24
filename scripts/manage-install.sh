@@ -31,80 +31,167 @@ strip_extension() {
 	printf '%s\n' "$name"
 }
 
+managed_signature() {
+	if [ -L "$1" ]; then
+		target=$(readlink "$1") || return 1
+		printf 'link %s\n' "$target"
+	elif [ -f "$1" ]; then
+		cksum <"$1"
+	else
+		return 1
+	fi
+}
+
+# A record identifies the installation family and exact bytes it installed.
+# cksum is a portable change detector, not an authenticity check.
+managed_entry() (
+	phase=$1
+	mode=$2
+	source=$3
+	destination=$4
+	name=$5
+	file="$destination/$name"
+	if [ "$mode" != link ] && [ ! -f "$source" ]; then
+		die "missing installation source: $source"
+	fi
+	records="$destination/.scripts-install"
+	record="$records/$install_family/$name"
+
+	[ ! -L "$records" ] && [ ! -L "$records/$install_family" ] ||
+		die "invalid install records directory: $records"
+	if [ -e "$file" ] || [ -L "$file" ]; then
+		actual=$(managed_signature "$file") ||
+			die "unexpected destination type: $file"
+		if [ ! -f "$record" ] || [ -L "$record" ] ||
+			[ "$(cat "$record")" != "$actual" ]; then
+			if [ "${ADOPT_LEGACY:-0}" != 1 ] || [ -e "$record" ] ||
+				[ -L "$record" ]; then
+				die "destination is unmanaged or modified: $file"
+			fi
+			if [ "$mode" = link ]; then
+				[ "$actual" = "link $source" ] ||
+					die "destination is not the expected wrapper link: $file"
+			elif [ -L "$file" ] || ! cmp -s "$source" "$file"; then
+				die "destination does not match the source: $file"
+			fi
+		fi
+	fi
+	if [ -L "$record" ] || { [ -e "$record" ] && [ ! -f "$record" ]; }; then
+		die "invalid install record: $record"
+	fi
+	for other_record in "$records"/*/"$name"; do
+		[ "$other_record" != "$record" ] || continue
+		if [ -e "$other_record" ] || [ -L "$other_record" ]; then
+			die "destination belongs to another install target: $file"
+		fi
+	done
+	[ "$phase" = publish ] || return 0
+
+	install -d "$destination" "$records/$install_family" ||
+		die "cannot create installation directories for $file"
+	stage=$(mktemp -d "$destination/.scripts-stage.XXXXXXXX")
+	trap 'rm -f "$stage/program" "$stage/record"; rmdir "$stage"' 0
+	trap 'exit 1' HUP INT TERM
+	log "Installing $source -> $file"
+	if [ "$mode" = link ]; then
+		# Existing wrapper links are left in place after their target was
+		# checked. mv can follow a destination symlink on some platforms.
+		if [ -L "$file" ]; then
+			[ "$(readlink "$file")" = "$source" ] ||
+				die "unexpected wrapper target: $file"
+		else
+			ln -s "$source" "$file" || die "cannot link $file"
+		fi
+		managed_signature "$file" >"$stage/record"
+	else
+		install -m "$mode" "$source" "$stage/program" ||
+			die "cannot prepare $source"
+		managed_signature "$stage/program" >"$stage/record"
+		mv -f "$stage/program" "$file" || die "cannot publish $file"
+	fi
+	if ! mv -f "$stage/record" "$record"; then
+		die "cannot record $file; inspect the destination before retrying"
+	fi
+)
+
 install_list() {
-	list=$1
-	destination=$2
-	[ -n "$list" ] || return 0
-	install -d "$destination" || die "cannot create $destination"
-	# The list is a whitespace-separated Make variable; splitting is intended.
+	# The list is a whitespace-separated Make variable.
 	# shellcheck disable=SC2086
-	for source in $list; do
-		name=$(strip_extension "$source")
-		log "Installing $source -> $destination/$name"
-		install -m 0755 "$source" "$destination/$name" ||
-			die "cannot install $source"
+	for source in $2; do
+		managed_entry "$1" 0755 "$source" "$3" "$(strip_extension "$source")"
 	done
 }
+
+remove_managed_entries() (
+	destination=$1
+	records="$destination/.scripts-install"
+	family_dir="$records/$install_family"
+	[ ! -L "$records" ] && [ ! -L "$family_dir" ] ||
+		die "invalid install records directory: $records"
+	[ -d "$family_dir" ] || return 0
+	status=0
+	for record in "$family_dir"/*; do
+		[ -e "$record" ] || [ -L "$record" ] || continue
+		file="$destination/${record##*/}"
+		actual=
+		if [ -e "$file" ] || [ -L "$file" ]; then
+			actual=$(managed_signature "$file") || actual=invalid
+		fi
+		if [ -L "$record" ] || [ ! -f "$record" ] ||
+			{ [ -n "$actual" ] && [ "$actual" != "$(cat "$record")" ]; }; then
+			printf '%s Preserving modified or unrecognized entry: %s\n' "$INFO" "$file" >&2
+			status=1
+			continue
+		fi
+		rm -f -- "$file" "$record" || status=1
+	done
+	rmdir "$family_dir" "$records" 2>/dev/null || true
+	exit "$status"
+)
 
 install_wrapper_links() {
-	wrapper="$DESTBIN/sudo-wrapper"
-	[ -x "$wrapper" ] || return 0
 	for link in sudo visudo sudoedit; do
-		target="$DESTBIN/$link"
-		if [ -L "$target" ]; then
-			case "$(readlink "$target")" in
-			sudo-wrapper | "$wrapper") continue ;;
+		managed_entry "$1" link sudo-wrapper "$DESTBIN" "$link"
+	done
+}
+
+with_install_lock() (
+	lock_directory=$DESTBIN/.scripts-install.lock
+	if [ ! -d "$DESTBIN" ]; then
+		case "$1" in
+		uninstall_platform)
+			"$@"
+			return
+			;;
+		esac
+		mkdir -p "$DESTBIN" || die "cannot create $DESTBIN"
+	fi
+	mkdir "$lock_directory" ||
+		die "cannot acquire install lock: $lock_directory"
+	trap 'rmdir "$lock_directory"' 0
+	trap 'exit 1' HUP INT TERM
+	"$@"
+)
+
+install_platform() {
+	install_family=$1
+	platform_list=$2
+	for phase in check publish; do
+		install_list "$phase" "$platform_list" "$DESTBIN"
+		if [ "$install_family" = secureblue ]; then
+			for unit in secureblue/systemd/*.service; do
+				[ -f "$unit" ] || continue
+				managed_entry "$phase" 0644 "$unit" \
+					"$DEST_SYSTEMD_USER" "${unit##*/}"
+			done
+		fi
+		if [ "$install_family" != debian ]; then
+			case " $platform_list " in
+			*"/sudo-wrapper."*) install_wrapper_links "$phase" ;;
 			esac
 		fi
-		if [ -e "$target" ] || [ -L "$target" ]; then
-			die "$target exists and is not a managed wrapper link"
-		fi
-		log "Symlinking $target -> sudo-wrapper"
-		ln -s sudo-wrapper "$target" || die "cannot link $target"
 	done
-}
-
-remove_wrapper_links() {
-	for link in sudo visudo sudoedit; do
-		target="$DESTBIN/$link"
-		[ -L "$target" ] || continue
-		case "$(readlink "$target")" in
-		sudo-wrapper | "$DESTBIN/sudo-wrapper") rm -f -- "$target" ;;
-		esac
-	done
-}
-
-install_debian() {
-	log 'Installing Debian helpers'
-	install_list "${DEBIAN_SCRIPTS:?}" "$DESTBIN"
-	log 'Debian helpers installed'
-}
-
-install_openbsd() {
-	log 'Installing OpenBSD helpers'
-	install_list "${OPENBSD_SCRIPTS:?}" "$DESTBIN"
-	install_wrapper_links
-	log 'OpenBSD helpers installed'
-}
-
-install_secureblue_units() {
-	[ -d secureblue/systemd ] || return 0
-	install -d -m 0755 "$DEST_SYSTEMD_USER" ||
-		die "cannot create $DEST_SYSTEMD_USER"
-	for source in secureblue/systemd/*.service; do
-		[ -f "$source" ] || continue
-		log "Installing $source -> $DEST_SYSTEMD_USER/${source##*/}"
-		install -m 0644 "$source" "$DEST_SYSTEMD_USER/${source##*/}" ||
-			die "cannot install $source"
-	done
-}
-
-install_secureblue() {
-	log 'Installing SecureBlue helpers'
-	install_list "${SECUREBLUE_SCRIPTS:?}" "$DESTBIN"
-	install_secureblue_units
-	install_wrapper_links
-	log 'SecureBlue helpers installed'
+	log "$install_family helpers installed"
 }
 
 unlock_shell_dir() {
@@ -142,19 +229,16 @@ install_shell_bash() {
 }
 
 install_perl() {
-	log 'Installing perl helpers'
-	install -d "$DESTBIN" || die "cannot create $DESTBIN"
+	install_family=perl
 	programs=$(grep -Ev '^[[:space:]]*(#|$)' "$PERL_PROGRAMS_MANIFEST") ||
 		die "cannot read $PERL_PROGRAMS_MANIFEST"
-	# shellcheck disable=SC2086
-	for name in $programs; do
-		source="perl/$name"
-		output=${name%.pl}
-		log "Installing $source -> $DESTBIN/$output"
-		install -m 0755 "$source" "$DESTBIN/$output" ||
-			die "cannot install $source"
-		install -m 0644 VERSION "$DESTBIN/$output.version" ||
-			die "cannot install VERSION"
+	for phase in check publish; do
+		# shellcheck disable=SC2086
+		for program in $programs; do
+			output=${program%.pl}
+			managed_entry "$phase" 0755 "perl/$program" "$DESTBIN" "$output"
+			managed_entry "$phase" 0644 VERSION "$DESTBIN" "$output.version"
+		done
 	done
 	log 'Perl helpers installed'
 }
@@ -240,37 +324,15 @@ install_tests_format() {
 	log "Tests/Format helpers installed in $DEST_TESTS_FORMAT"
 }
 
-uninstall_debian() {
-	# shellcheck disable=SC2086
-	for source in ${DEBIAN_SCRIPTS:?}; do
-		name=$(strip_extension "$source")
-		rm -f -- "$DESTBIN/$name"
-	done
-	log "Debian helpers removed from $DESTBIN"
-}
-
-uninstall_openbsd() {
-	# shellcheck disable=SC2086
-	for source in ${OPENBSD_SCRIPTS:?}; do
-		name=$(strip_extension "$source")
-		rm -f -- "$DESTBIN/$name"
-	done
-	remove_wrapper_links
-	log "OpenBSD helpers removed from $DESTBIN"
-}
-
-uninstall_secureblue() {
-	# shellcheck disable=SC2086
-	for source in ${SECUREBLUE_SCRIPTS:?}; do
-		name=$(strip_extension "$source")
-		rm -f -- "$DESTBIN/$name"
-	done
-	for source in secureblue/systemd/*.service; do
-		[ -f "$source" ] || continue
-		rm -f -- "$DEST_SYSTEMD_USER/${source##*/}"
-	done
-	remove_wrapper_links
-	log 'SecureBlue helpers and units removed'
+uninstall_platform() {
+	install_family=$1
+	status=0
+	remove_managed_entries "$DESTBIN" || status=1
+	if [ "$install_family" = secureblue ]; then
+		remove_managed_entries "$DEST_SYSTEMD_USER" || status=1
+	fi
+	[ "$status" -eq 0 ] || return "$status"
+	log "$install_family helpers removed"
 }
 
 uninstall_shell() {
@@ -285,17 +347,6 @@ uninstall_shell() {
 		chattr +i "$BASH_CONF_DST_DIR" 2>/dev/null || true
 	fi
 	log 'Shell helpers removed'
-}
-
-uninstall_perl() {
-	programs=$(grep -Ev '^[[:space:]]*(#|$)' "$PERL_PROGRAMS_MANIFEST") ||
-		die "cannot read $PERL_PROGRAMS_MANIFEST"
-	# shellcheck disable=SC2086
-	for name in $programs; do
-		output=${name%.pl}
-		rm -f -- "$DESTBIN/$output" "$DESTBIN/$output.version"
-	done
-	log "Perl helpers removed from $DESTBIN"
 }
 
 uninstall_tests_format() {
@@ -374,9 +425,9 @@ EOF
 command=${1:-}
 shift || true
 case "$command" in
-install-debian) install_debian ;;
-install-openbsd) install_openbsd ;;
-install-secureblue) install_secureblue ;;
+install-debian) with_install_lock install_platform debian "${DEBIAN_SCRIPTS:?}" ;;
+install-openbsd) with_install_lock install_platform openbsd "${OPENBSD_SCRIPTS:?}" ;;
+install-secureblue) with_install_lock install_platform secureblue "${SECUREBLUE_SCRIPTS:?}" ;;
 install-shell-bash-unlock) unlock_shell_dir ;;
 install-shell-bash-copy) copy_shell_files ;;
 install-shell-bash) install_shell_bash ;;
@@ -385,13 +436,13 @@ install-shell-openbsd)
 	log 'OpenBSD does not support chattr immutable flags like Linux.'
 	log 'Copy shell/aliases.bash manually to your preferred shell profile location.'
 	;;
-install-perl) install_perl ;;
+install-perl) with_install_lock install_perl ;;
 install-tests-format) install_tests_format ;;
-uninstall-debian) uninstall_debian ;;
-uninstall-openbsd) uninstall_openbsd ;;
-uninstall-secureblue) uninstall_secureblue ;;
+uninstall-debian) with_install_lock uninstall_platform debian ;;
+uninstall-openbsd) with_install_lock uninstall_platform openbsd ;;
+uninstall-secureblue) with_install_lock uninstall_platform secureblue ;;
 uninstall-shell) uninstall_shell ;;
-uninstall-perl) uninstall_perl ;;
+uninstall-perl) with_install_lock uninstall_platform perl ;;
 uninstall-tests-format) uninstall_tests_format ;;
 format) format_sources ;;
 help) show_help ;;

@@ -21,7 +21,7 @@ under the same functional interfaces.
 `tests-format/validate-python.sh` and the `test-python` Makefile target have
 been restored from Git history. The validator is installed with the developer
 tools and participates in `make check`, `make test`, and `make format`.
-The manual Linux workflow installs Ruff to support it. Validation regressions
+The manual Linux workflow installs Ruff when it finds tracked Python sources. Validation regressions
 remain in Perl with a mocked Ruff and temporary `.py` fixtures; this does not
 restore the migrated Python programs or Python-based test harnesses.
 

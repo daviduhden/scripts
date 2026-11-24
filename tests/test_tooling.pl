@@ -22,6 +22,7 @@ use TestHarness qw(
   files_under
   find_command
   find_files
+  is_linux
   new_tempdir
   read_line
   repo_root
@@ -44,7 +45,7 @@ sub build_fixture {
     for my $name (
         qw(
         uname find sed grep mktemp rm sort wc tr awk dirname mkdir sh bash
-        cat printf perl
+        cat printf perl cksum cmp mv rmdir readlink
         )
       )
     {
@@ -282,6 +283,110 @@ subtest 'install accepts destination with spaces' => sub {
         'installed name omits the source extension' );
 };
 
+subtest 'POSIX installer preserves unowned and changed entries' => sub {
+    my $make = find_command('make');
+    plan skip_all => 'make is required' unless $make;
+    my $stage = new_tempdir('managed-install-');
+    my $bin   = "$stage/bin";
+    make_path($bin);
+    my @options = (
+        "BINDIR=$bin",
+        'DEBIAN_SCRIPTS=debian/clean-logs.bash debian/sync-website.bash'
+    );
+    my $run = sub {
+        my (@args) = @_;
+        return run_command(
+            cmd     => [ $make, @args, @options ],
+            cwd     => $REPO,
+            timeout => 30
+        )->{returncode};
+    };
+    write_file( "$bin/sync-website", "manual\n" );
+    isnt( $run->('install-debian'), 0, 'collision rejected' );
+    ok( !-e "$bin/clean-logs", 'preflight before first publication' );
+    is( slurp("$bin/sync-website"), "manual\n", 'manual file preserved' );
+    unlink "$bin/sync-website" or die "cannot remove fixture: $!";
+    write_file( "$bin/clean-logs", slurp("$REPO/debian/clean-logs.bash") );
+    isnt( $run->('install-debian'), 0, 'no implicit legacy adoption' );
+    is( $run->( 'install-debian', 'ADOPT_LEGACY=1' ),
+        0, 'exact legacy bytes can be adopted explicitly' );
+    is( $run->('install-debian'), 0, 'managed reinstall succeeds' );
+    write_file( "$bin/sync-website", "operator edit\n" );
+    isnt( $run->('uninstall-debian'), 0, 'reports preserved modifications' );
+    ok( !-e "$bin/clean-logs", 'managed unmodified entry removed' );
+    is(
+        slurp("$bin/sync-website"),
+        "operator edit\n",
+        'locally changed file retained'
+    );
+};
+
+subtest 'shell validator reports find and shfmt errors' => sub {
+    my $fixture = build_fixture();
+    my $root    = "$fixture->{base}/with spaces";
+    make_path($root);
+    write_file( "$root/valid file.sh", "#!/bin/sh\nexit 0\n" );
+    my $formatter = "$fixture->{bin}/shfmt";
+    write_file( $formatter, "#!/bin/sh\nexit 1\n" );
+    chmod 0755, $formatter or die "cannot chmod formatter mock: $!";
+    is( run_validator( $fixture, 'shell', $root )->{returncode},
+        2, 'shfmt failure is an issue' );
+    my $find = "$fixture->{bin}/find";
+    unlink $find or die "cannot unlink find mock: $!";
+    write_file( $find, "#!/bin/sh\nexit 1\n" );
+    chmod 0755, $find or die "cannot chmod find mock: $!";
+    is( run_validator( $fixture, 'shell', $root )->{returncode},
+        2, 'incomplete discovery is a failure' );
+};
+
+subtest 'AI CLI and xerj platform commands install and uninstall' => sub {
+    my $make = find_command('make');
+    my $bash = find_command('bash');
+    plan skip_all => 'make and bash are required' unless $make && $bash;
+    for my $platform (qw(debian secureblue)) {
+        my $stage = new_tempdir("${platform}-install-");
+        my $home  = "$stage/home";
+        make_path($home);
+        my %options = (
+            cwd     => $REPO,
+            env     => env_with( HOME => $home ),
+            timeout => 30,
+        );
+        my @package = ( "DESTDIR=$stage", 'PREFIX=/usr/local' );
+        my $install = run_command( %options,
+            cmd => [ $make, "install-$platform", @package ] );
+        is( $install->{returncode}, 0, "$platform staged install succeeds" )
+          or diag $install->{stdout} . $install->{stderr};
+        my @commands =
+          map { "$stage/usr/local/bin/$_" } qw(update-ai-clis update-xerj);
+        my @helpers =
+          map { "$stage/usr/local/bin/$_" }
+          qw(update-ai-clis-linux release-verify xerj-clients xerj-config);
+        ok( -x $_, "$_ is staged beside its caller" ) for @helpers;
+
+        for my $command (@commands) {
+            ok( -x $command, "$command is executable" );
+            next unless is_linux();
+            my $help =
+              run_command( %options, cmd => [ $bash, $command, '--help' ] );
+            is( $help->{returncode}, 0, "$command accepts --help" )
+              or diag $help->{stdout} . $help->{stderr};
+        }
+        if ( is_linux() ) {
+            my $invalid = run_command( %options,
+                cmd => [ $bash, $commands[1], 'codex', 'invalid-agent' ], );
+            is( $invalid->{returncode},
+                2, "$platform xerj rejects an invalid selection" )
+              or diag $invalid->{stdout} . $invalid->{stderr};
+        }
+        my $uninstall = run_command( %options,
+            cmd => [ $make, "uninstall-$platform", @package ] );
+        is( $uninstall->{returncode}, 0, "$platform staged uninstall succeeds" )
+          or diag $uninstall->{stdout} . $uninstall->{stderr};
+        ok( !-e $_, "$_ was removed" ) for @commands, @helpers;
+    }
+};
+
 subtest 'tests-format manages a staged login profile' => sub {
     my $stage = new_tempdir('tests-format-install-');
     my $make  = find_command('make');
@@ -474,8 +579,10 @@ subtest 'install loop stops at first failure' => sub {
     my $make    = find_command('make');
     ok( defined $make, 'make is installed' ) or return;
     my $root = "$fixture->{base}/installation";
-    make_path($root);
-    write_file( "$root/Makefile", slurp("$REPO/Makefile") );
+    make_path( $root, "$root/with spaces" );
+    write_file( "$root/bad.bash",   "#!/bin/bash\nexit 0\n" );
+    write_file( "$root/later.bash", "#!/bin/bash\nexit 0\n" );
+    write_file( "$root/Makefile",   slurp("$REPO/Makefile") );
     make_path("$root/scripts");
     write_file(
         "$root/scripts/manage-install.sh",
@@ -484,11 +591,9 @@ subtest 'install loop stops at first failure' => sub {
     my $marker = "$fixture->{base}/late-install";
     write_file( "$fixture->{bin}/install",
             "#!/bin/sh\n"
-          . "case \"\$*\" in\n"
-          . "*-d*) exit 0 ;;\n"
-          . "*bad*) exit 1 ;;\n"
-          . "*) : > '$marker' ;;\n"
-          . "esac\n" );
+          . "[ \"\$1\" = -d ] && exit 0\n"
+          . "[ \"\$3\" = bad.bash ] && exit 1\n"
+          . ": > '$marker'\n" );
     chmod 0755, "$fixture->{bin}/install"
       or die "cannot chmod install mock: $!";
 

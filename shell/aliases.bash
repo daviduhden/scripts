@@ -38,16 +38,17 @@ alias chown='chown --preserve-root'
 alias chmod='chmod --preserve-root'
 
 # --------------------------------------------------
-# AI assistants with max privileges
+# AI assistant approval modes
 # --------------------------------------------------
-# These aliases start each agent in its automatic/full-permission mode
-# (--yolo for Codex and Copilot, --auto for OpenCode), which skips approval
-# prompts. The OpenCode alias also sets JavaScriptCoreUseJIT=1 for that
-# invocation and uses `command` to run the real executable instead of any
-# function of the same name.
+# These opt-in aliases request each agent's approval mode. Crush's --yolo
+# still blocks dangerous commands. The OpenCode alias also sets
+# JavaScriptCoreUseJIT=1 for that invocation. Each alias uses `command`
+# to bypass any shell function of the same name as the executable.
 alias codex-yolo='command codex --yolo'
 alias copilot-yolo='command copilot --yolo'
 alias opencode-auto='JavaScriptCoreUseJIT=1 command opencode --auto'
+alias crush-yolo='command crush --yolo'
+alias claude-yolo='command claude --dangerously-skip-permissions'
 
 # --------------------------------------------------
 # Editors
@@ -105,12 +106,14 @@ sysupgrade-all() {
 		update-lyrebird &&
 		update-xd-torrent --skip-service-and-user-setup &&
 		update-perl-modules &&
-		pipx upgrade-all &&
-		echo "[OK] System upgrade completed successfully." ||
+		pipx upgrade-all ||
 		remaining_rc=$?
 
 	if ((sysupgrade_rc != 0)); then
 		return "$sysupgrade_rc"
+	fi
+	if ((remaining_rc == 0)); then
+		echo "[OK] System upgrade completed successfully."
 	fi
 	return "$remaining_rc"
 }

@@ -11,7 +11,8 @@ TMPLOG=$(mktemp "$TMPDIR_BASE/validate-shell-XXXXXX")
 TMP_FAILS=
 UNFMT_SH=
 TMP_SKIPS=
-trap '[ -z "$TMP_FAILS" ] || rm -f "$TMP_FAILS"; [ -z "$UNFMT_SH" ] || rm -f "$UNFMT_SH"; [ -z "$TMP_SKIPS" ] || rm -f "$TMP_SKIPS"' EXIT
+INVENTORY=
+trap '[ -z "$INVENTORY" ] || rm -f "$INVENTORY"; [ -z "$TMP_FAILS" ] || rm -f "$TMP_FAILS"; [ -z "$UNFMT_SH" ] || rm -f "$UNFMT_SH"; [ -z "$TMP_SKIPS" ] || rm -f "$TMP_SKIPS"' 0
 trap 'exit 1' HUP INT TERM
 printf '%s\n' "[INFO] Logging to: $TMPLOG" >&3
 exec >"$TMPLOG" 2>&1
@@ -82,9 +83,13 @@ run_validate_shell() {
 	TMP_FAILS=$(mktemp "$TMPDIR_BASE/validate-shell-fails-XXXXXX")
 	TMP_SKIPS=$(mktemp "$TMPDIR_BASE/validate-shell-skips-XXXXXX")
 
-	# Findings are appended to a file rather than an in-memory counter because
-	# the find pipelines below run their loops in subshells; a variable update
-	# there would be lost when the subshell exits.
+	INVENTORY=$(mktemp "$TMPDIR_BASE/validate-shell-files-XXXXXX")
+	if ! find "$ROOT_DIR" -name .git -type d -prune -o -type f \
+		\( -name '*.sh' -o -name '*.bash' -o -name '*.ksh' \) -print >"$INVENTORY"; then
+		printf '[ERROR] Cannot inventory shell scripts in %s\n' "$ROOT_DIR"
+		exit 2
+	fi
+
 	note_fail() { printf '%s\n' "$1" >>"$TMP_FAILS"; }
 	note_skip() {
 		printf '[SKIP] %s\n' "$1" >&2
@@ -96,18 +101,16 @@ run_validate_shell() {
 	if command -v shfmt >/dev/null 2>&1; then
 		UNFMT_SH=$(mktemp "$TMPDIR_BASE/unformatted-sh-XXXXXX")
 
-		# This pass only lists files that -l reports as unformatted. stdout is
-		# captured, stderr is discarded, and a nonzero status from shfmt does
-		# not abort the validation run.
-		find "$ROOT_DIR" \
-			\( -name .git \) \
-			-prune -o -type f \
-			\( -name '*.sh' -o -name '*.bash' -o -name '*.ksh' \) \
-			-print |
-			while IFS= read -r f; do
-				[ -n "$f" ] || continue
-				shfmt -l -s "$f"
-			done 2>/dev/null >"$UNFMT_SH" || true
+		while IFS= read -r file; do
+			status=0
+			unformatted=$(shfmt -l -s "$file") || status=$?
+			if [ "$unformatted" = "$file" ] && [ "$status" -le 1 ]; then
+				printf '%s\n' "$file" >>"$UNFMT_SH"
+			elif [ "$status" -ne 0 ] || [ -n "$unformatted" ]; then
+				printf '[ERROR] shfmt could not check %s\n' "$file"
+				note_fail "$file"
+			fi
+		done <"$INVENTORY"
 
 		if [ -s "$UNFMT_SH" ]; then
 			printf '%s\n' "[INFO] shfmt will format the following files:"
@@ -122,7 +125,7 @@ run_validate_shell() {
 					note_fail "$file"
 					continue
 				fi
-				if shfmt -w -s "$file" 2>/dev/null; then
+				if shfmt -w -s "$file"; then
 					note_fail "$file"
 				else
 					printf '%s\n' "[WARN] shfmt failed for: $file" 1>&2
@@ -140,121 +143,41 @@ run_validate_shell() {
 
 	printf '%s\n' "[INFO] Running shell syntax checks..."
 
-	# Syntax checks are grouped by extension. A failing file is named on
-	# stderr (logged) and on stdout (captured by the trailing loop, which
-	# records it once in TMP_FAILS). -n parses without executing anything.
-	find "$ROOT_DIR" \
-		\( -name .git \) \
-		-prune -o -type f -name '*.sh' -print |
-		while IFS= read -r f; do
-			[ -n "$f" ] || continue
-			if ! sh -n "$f" 2>/dev/null; then
-				printf '%s\n' "[ERROR] sh syntax error in: $f" 1>&2
-				printf "%s\n" "$f"
+	SYNTAX_BASH=$(command -v bash || true)
+	KSH_CMD=
+	if [ "$OS_NAME" = Linux ] && command -v oksh >/dev/null 2>&1; then
+		KSH_CMD=$(command -v oksh)
+	else
+		KSH_CMD=$(command -v ksh || true)
+	fi
+	CHECKBASHISMS=$(command -v checkbashisms || true)
+	SHELLCHECK=$(command -v shellcheck || true)
+	[ -n "$SYNTAX_BASH" ] || note_skip "bash not found; skipping bash syntax checks"
+	[ -n "$KSH_CMD" ] || note_skip "ksh not found; skipping ksh syntax checks"
+	[ -n "$CHECKBASHISMS" ] || note_skip "checkbashisms not installed; skipping POSIX sh checks"
+	[ -n "$SHELLCHECK" ] || note_skip "shellcheck not installed; skipping shellcheck"
+
+	while IFS= read -r file; do
+		case "$file" in
+		*.sh) interpreter='sh' ;;
+		*.bash) interpreter=$SYNTAX_BASH ;;
+		*.ksh) interpreter=$KSH_CMD ;;
+		esac
+		if [ -n "$interpreter" ] && ! "$interpreter" -n "$file"; then
+			printf '[ERROR] Shell syntax error in %s\n' "$file"
+			note_fail "$file"
+		fi
+		if [ -n "$CHECKBASHISMS" ] && [ "${file##*.}" = sh ]; then
+			if command -v perl >/dev/null 2>&1; then
+				perl -T "$CHECKBASHISMS" "$file" || note_fail "$file"
+			else
+				"$CHECKBASHISMS" "$file" || note_fail "$file"
 			fi
-		done | while IFS= read -r bad; do
-		[ -n "$bad" ] && note_fail "$bad"
-	done
-
-	if command -v bash >/dev/null 2>&1; then
-		printf '%s\n' "[INFO] Running bash syntax checks..."
-		find "$ROOT_DIR" \
-			\( -name .git \) \
-			-prune -o -type f -name '*.bash' -print |
-			while IFS= read -r f; do
-				[ -n "$f" ] || continue
-				if ! bash -n "$f" 2>/dev/null; then
-					printf '%s\n' "[ERROR] bash syntax error in: $f" 1>&2
-					printf "%s\n" "$f"
-				fi
-			done | while IFS= read -r bad; do
-			[ -n "$bad" ] && note_fail "$bad"
-		done
-	else
-		note_skip "bash not found; skipping bash syntax checks"
-	fi
-
-	KSH_CMD=""
-	# Prefer oksh on Linux because it is a portable ksh and often closer to
-	# OpenBSD's shell than a vendor ksh; otherwise accept any ksh.
-	if [ "$OS_NAME" = "Linux" ] &&
-		command -v oksh >/dev/null 2>&1; then
-		KSH_CMD="oksh"
-	elif command -v ksh >/dev/null 2>&1; then
-		KSH_CMD="ksh"
-	fi
-
-	if [ -n "$KSH_CMD" ]; then
-		printf '%s\n' \
-			"[INFO] Running ksh syntax checks" \
-			" (using ${KSH_CMD})..."
-		find "$ROOT_DIR" \
-			\( -name .git \) \
-			-prune -o -type f -name '*.ksh' -print |
-			while IFS= read -r f; do
-				[ -n "$f" ] || continue
-				if ! "$KSH_CMD" -n "$f" 2>/dev/null; then
-					printf '%s\n' \
-						"[ERROR] ksh syntax" \
-						" error in: $f" 1>&2
-					printf "%s\n" "$f"
-				fi
-			done | while IFS= read -r bad; do
-			[ -n "$bad" ] && note_fail "$bad"
-		done
-	else
-		note_skip "ksh not found; skipping ksh syntax checks"
-	fi
-
-	if command -v checkbashisms >/dev/null 2>&1; then
-		CHECKBASHISMS=$(command -v checkbashisms)
-		printf '%s\n' "[INFO] Running checkbashisms on POSIX sh scripts..."
-		# checkbashisms is a Perl program. Run it through perl -T when perl is
-		# present so taint mode is enforced; otherwise rely on its shebang.
-		find "$ROOT_DIR" \
-			\( -name .git \) \
-			-prune -o -type f -name '*.sh' -print |
-			while IFS= read -r f; do
-				[ -n "$f" ] || continue
-				if command -v perl >/dev/null 2>&1; then
-					if ! perl -T "$CHECKBASHISMS" "$f"; then
-						printf '%s\n' \
-							"[ERROR] checkbashisms found issues in: $f" 1>&2
-						printf "%s\n" "$f"
-					fi
-				elif ! "$CHECKBASHISMS" "$f"; then
-					printf '%s\n' \
-						"[ERROR] checkbashisms found issues in: $f" 1>&2
-					printf "%s\n" "$f"
-				fi
-			done | while IFS= read -r bad; do
-			[ -n "$bad" ] && note_fail "$bad"
-		done
-	else
-		note_skip "checkbashisms not installed; skipping POSIX sh checks"
-	fi
-
-	if command -v shellcheck >/dev/null 2>&1; then
-		printf '%s\n' "[INFO] Running shellcheck..."
-		# -x follows source/. directives so included files are analyzed too.
-		# ShellCheck's exit status is nonzero for any warning or error.
-		find "$ROOT_DIR" \
-			\( -name .git \) \
-			-prune -o -type f \
-			\( -name '*.bash' -o -name '*.ksh' -o -name '*.sh' \) \
-			-print |
-			while IFS= read -r f; do
-				[ -n "$f" ] || continue
-				if ! shellcheck -x "$f" >&2; then
-					printf '%s\n' "[ERROR] shellcheck found issues in: $f" 1>&2
-					printf "%s\n" "$f"
-				fi
-			done | while IFS= read -r bad; do
-			[ -n "$bad" ] && note_fail "$bad"
-		done
-	else
-		note_skip "shellcheck not installed; skipping shellcheck"
-	fi
+		fi
+		if [ -n "$SHELLCHECK" ]; then
+			"$SHELLCHECK" -x "$file" || note_fail "$file"
+		fi
+	done <"$INVENTORY"
 
 	printf '[INFO] Skipped checks: %s\n' "$(wc -l <"$TMP_SKIPS" | tr -d ' ')"
 	issues=0

@@ -27,7 +27,7 @@ Each directory documents its scripts, requirements, and usage:
 - [Windows](windows/README.md), [PowerShell formatter](windows/test-format/README.md), and [formatter tests](windows/test-format/tests/README.md)
 - [Interactive Bash helpers](shell/README.md)
 - [Validation and formatting tools](tests-format/README.md)
-- [Architecture](docs/architecture.md), [troubleshooting](docs/troubleshooting.md), [Python-to-Perl migration](docs/python-migration.md), [security policy](SECURITY.md), and [changelog](CHANGELOG.md)
+- [Architecture](docs/architecture.md), [AI CLI updater](docs/update-ai-clis.md), [xerj agent configuration](docs/update-xerj.md), [troubleshooting](docs/troubleshooting.md), [Python-to-Perl migration](docs/python-migration.md), [security policy](SECURITY.md), and [changelog](CHANGELOG.md)
 
 ## Installation
 
@@ -74,6 +74,12 @@ or `${DESTDIR}${TESTS_FORMAT_DIR}`. The Makefile delegates install, uninstall,
 help, and format loops to `scripts/manage-install.sh`, so its recipes stay
 declarative and BSD make compatible. Windows scripts remain in `windows/` and are not installed by the POSIX targets. Developer validators and formatters are installed only with `make install-tests-format`, under `${DESTDIR}${TESTS_FORMAT_DIR}` (default `${PREFIX}/libexec/scripts`); set `TESTS_FORMAT_LINKS=1` to add compatibility symlinks in `BINDIR`. `make all` no longer installs them.
 
+The Debian, OpenBSD, SecureBlue and Perl targets track installed files under
+`.scripts-install`. If an existing file predates tracking, review and move it
+aside before installation, or use `ADOPT_LEGACY=1` to adopt an existing copy
+that is byte-for-byte identical to the source. Uninstall retains locally
+modified files and reports them.
+
 ## Windows installation
 
 On Windows 10 and Windows 11, `windows\install-windows.bat` is a single per-user entry
@@ -111,8 +117,8 @@ What it does:
   5.10.1 or newer with the required core modules). Otherwise it installs
   Strawberry Perl through `winget` (`StrawberryPerl.StrawberryPerl`) with
   `--exact --accept-package-agreements --accept-source-agreements --silent`.
-  `winget` must be present (App Installer); it is only used for external
-  the Perl dependency. The installed `update-aiclis` command also uses winget.
+  `winget` must be present (App Installer) when the installer needs to install
+  Perl.
 - Installs by default under
   `%LOCALAPPDATA%\Programs\<repository-name>\` with `perl\`, `windows\`, `bin\`, a
   `perl-path.txt` recording the interpreter, a `VERSION` file and an
@@ -236,16 +242,17 @@ Use that flag only for trusted Makefiles: parsing a Makefile can execute shell
 commands even with `-n`. Likewise, `perl -c` executes compile-time blocks and
 loads modules; these source validators assume trusted input.
 
-The manually dispatched Platform Validation workflow runs analysis and isolated
-regression tests on Linux, Windows Server 2025, and an OpenBSD 8.0 VM. Linux
-runs the full strict validators and
-`make test`; Windows runs the installer checks, `psfmt -c`, PSScriptAnalyzer,
-and the mocked suites; OpenBSD runs `ksh -n`, the correctness audit, and
-regressions (its port set does not provide every GNU-only validator). It
-installs analysis dependencies only in those disposable runners; it never runs
-the administrative utilities against the host. Actions are pinned to verified
-commit hashes. Windows/OpenBSD jobs need their native environments; a local
-Linux pass does not establish their result.
+Static Validation parses shell sources and validates agent references on
+pull requests and pushes to main. The manually dispatched Platform Validation
+workflow runs isolated checks on Ubuntu, a Debian 13 container, Windows Server
+2025, and an OpenBSD 8.0 VM. Ubuntu runs `make test` with strict shell and
+Perl validation. Windows runs the installer, analyzer and mocked regression
+suites in disposable paths and checks updater entry points with Windows
+PowerShell 5.1. The OpenBSD VM runs native syntax, correctness and regression
+checks. SecureBlue delivery is exercised with Linux fixtures. Full SecureBlue
+system policy and image behavior require testing on that OS.
+Tool installation is confined to disposable runners, and official Actions are
+pinned by commit hash.
 
 
 ## File permissions

@@ -215,6 +215,23 @@ for my $port ( '', '2222' ) {
       || $config !~ /^port $expected_port\r?$/m;
 }
 
+require $script;
+my @args = build_ssh_command( 'ssh', 'testuser', '2001:db8::1', '2222' );
+fail_test('SSH user/host arguments are not separately bounded')
+  if join( '|', @args ) ne 'ssh|-l|testuser|-p|2222|--|2001:db8::1';
+my $merged_state = File::Spec->catfile( $tmp, 'merge-state' );
+my %first_view;
+my %second_view;
+fail_test('first preference edit failed')
+  unless edit_preferences( $merged_state, \%first_view, 0,
+    sub { $_[0]{first} = 'preserved'; return 1; } );
+fail_test('second preference edit failed')
+  unless edit_preferences( $merged_state, \%second_view, 0,
+    sub { $_[0]{second} = 'added'; return 1; } );
+fail_test('preference edit replaced an unrelated entry from disk')
+  unless ( $second_view{first} // '' ) eq 'preserved'
+  && ( $second_view{second} // '' ) eq 'added';
+
 # Simulate only Windows rename failures in a child interpreter. This exercises
 # recovery on every platform; it is not a substitute for native Windows tests.
 my $recovery_driver = File::Spec->catfile( $tmp, 'state-recovery.pl' );

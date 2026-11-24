@@ -6,7 +6,7 @@ set -euo pipefail
 # Builds and installs the latest Lyrebird from source
 # on Debian-based systems.
 # - Requires Go to be installed
-# - Clones or updates the Lyrebird GitLab repository
+# - Checks out the latest tagged Lyrebird source in a private build directory
 # - Builds the project using make
 # - Installs the resulting binary into /usr/local/bin
 #
@@ -14,15 +14,13 @@ set -euo pipefail
 # is not installed by this script.
 #
 # Side effects:
-#  - Clones or updates the repository under $HOME/.local/src/lyrebird
-#  - Checks out the latest tag, or pulls the default branch when the
+#  - Clones the repository into disposable staging as nobody
+#  - Checks out the latest tag, or uses the default branch when the
 #    repository has no tags
 #  - Builds with make and copies the binary to /usr/local/bin
 #
 # The build runs with LD_PRELOAD unset. Source authenticity relies on
-# the Git transport; there is no separate signature check. When HEAD is
-# already at the latest tag, the build and install steps are skipped
-# (the installed binary is not compared against the source).
+# the Git transport; there is no separate signature check.
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
@@ -46,11 +44,10 @@ SCRIPT_ARGS=("$@")
 
 REPO="tpo/anti-censorship/pluggable-transports/lyrebird"
 REPO_URL="https://gitlab.torproject.org/${REPO}.git"
-BUILD_DIR="${HOME}/.local/src"
+BUILD_STAGE=
+BUILD_DIR=
+BUILD_USER=nobody
 BIN_NAME="lyrebird"
-
-# Control: set when the local copy is already on the latest tag
-SKIP_BUILD=0
 
 log() { printf '%s [INFO] %s\n' "$(date '+%F %T')" "$*"; }
 warn() { printf '%s [WARN] %s\n' "$(date '+%F %T')" "$*"; }
@@ -61,8 +58,6 @@ error() {
 
 # Re-exec through sudo when the script was not started as root. SCRIPT_ARGS
 # keeps the original command line across the privilege boundary.
-ROOT_ENV_VARS=()
-
 require_root() {
 	if [[ ${EUID:-$(id -u)} -eq 0 ]]; then
 		return 0
@@ -70,17 +65,7 @@ require_root() {
 	if ! command -v sudo >/dev/null 2>&1; then
 		error "Root privileges are required and sudo was not found."
 	fi
-	local -a env_args=()
-	local name
-	for name in "${ROOT_ENV_VARS[@]}"; do
-		if [[ -v $name ]]; then
-			env_args+=("$name=${!name}")
-		fi
-	done
 	log "Re-executing this script via sudo to gain root privileges..."
-	if ((${#env_args[@]} > 0)); then
-		exec sudo -- env "${env_args[@]}" "$SCRIPT_PATH" "${SCRIPT_ARGS[@]}"
-	fi
 	exec sudo -- "$SCRIPT_PATH" "${SCRIPT_ARGS[@]}"
 }
 
@@ -89,49 +74,32 @@ require_cmd() {
 		error "Required command '$1' not found."
 }
 
+run_build() {
+	runuser -u "$BUILD_USER" -- env -i HOME="$BUILD_DIR" PATH="$PATH" "$@"
+}
+
+prepare_build() {
+	[[ $(id -u "$BUILD_USER") != 0 ]] || error 'An unprivileged build account is required.'
+	BUILD_STAGE=$(mktemp -d /tmp/lyrebird-build.XXXXXX)
+	trap 'rm -rf -- "$BUILD_STAGE"' EXIT
+	chmod 0711 "$BUILD_STAGE"
+	BUILD_DIR=$BUILD_STAGE/work
+	install -d -m 0700 -o "$BUILD_USER" "$BUILD_DIR"
+}
+
 ensure_go() {
 	require_cmd go
 	log "Go version: $(go version)"
 }
 
-# Clone on first use, fetch tags, and compare HEAD with the newest tag.
-# The newest tag is the one attached to the most recent commit in
-# rev-list --tags output, not necessarily the highest version string.
-# Sets SKIP_BUILD when HEAD is exactly that tag.
-clone_or_update_repo() {
-	mkdir -p "$BUILD_DIR"
-	cd "$BUILD_DIR"
-	if [ ! -d "$BIN_NAME" ]; then
-		log "Cloning $BIN_NAME repository..."
-		git clone "$REPO_URL" "$BIN_NAME"
-	fi
-
+clone_source() {
+	run_build git clone "$REPO_URL" "$BUILD_DIR/$BIN_NAME"
 	cd "$BUILD_DIR/$BIN_NAME"
-
-	# Fetch tags and remote refs
-	git fetch --tags --prune origin || git fetch --tags --prune
-
-	# Determine latest tag (by tag creation date)
-	latest_tag=$(git describe --tags \
-		"$(git rev-list --tags --max-count=1)" \
-		2>/dev/null || true)
-
-	if [ -n "$latest_tag" ]; then
-		# Check if local HEAD is exactly at a tag
-		local_tag=$(git describe --tags \
-			--exact-match HEAD 2>/dev/null || true)
-		if [ "$local_tag" = "$latest_tag" ]; then
-			log "Local repository is already at" \
-				"latest tag '$latest_tag'." \
-				"Skipping build."
-			SKIP_BUILD=1
-			return
-		fi
-		log "Checking out latest tag $latest_tag..."
-		git checkout "tags/$latest_tag" -q
-	else
-		log "No tags found; updating to latest commit on default branch..."
-		git pull --ff-only
+	local tagged_commit latest_tag
+	tagged_commit=$(run_build git rev-list --tags --max-count=1)
+	if [[ -n $tagged_commit ]]; then
+		latest_tag=$(run_build git describe --tags "$tagged_commit")
+		run_build git checkout "tags/$latest_tag" -q
 	fi
 }
 
@@ -139,7 +107,7 @@ clone_or_update_repo() {
 # produced.
 build_lyrebird() {
 	log "Building lyrebird..."
-	env -u LD_PRELOAD make build
+	run_build make build
 	if [ ! -x ./lyrebird ]; then
 		error "Build failed: lyrebird binary not found."
 	fi
@@ -150,21 +118,27 @@ build_lyrebird() {
 install_lyrebird() {
 	local staged backup
 	log "Installing lyrebird to /usr/local/bin..."
+	[[ ! -L ./lyrebird && -f ./lyrebird ]] || error 'Expected a regular build output.'
 	# Stage beside the destination and rename atomically. A plain cp over a
 	# running transport fails with ETXTBSY on Linux.
 	staged=$(mktemp /usr/local/bin/.lyrebird.XXXXXX) || {
 		error "Cannot create a staging file for lyrebird."
 	}
-	if ! install -m 0755 ./lyrebird "$staged"; then
+	if ! run_build cat -- ./lyrebird >"$staged" || ! chmod 0755 "$staged"; then
 		rm -f "$staged"
 		error "Cannot stage lyrebird."
+	fi
+	if cmp -s -- "$staged" /usr/local/bin/lyrebird; then
+		rm -f -- "$staged"
+		log 'Lyrebird is already installed.'
+		return
 	fi
 	if [ -e /usr/local/bin/lyrebird ]; then
 		backup="/usr/local/bin/lyrebird.bak.$(date +%Y%m%d%H%M%S)"
 		cp -p /usr/local/bin/lyrebird "$backup" ||
 			warn "Could not back up the previous lyrebird binary."
 	fi
-	if ! mv -f "$staged" /usr/local/bin/lyrebird; then
+	if ! mv -fT -- "$staged" /usr/local/bin/lyrebird; then
 		rm -f "$staged"
 		error "Cannot activate lyrebird."
 	fi
@@ -174,22 +148,14 @@ install_lyrebird() {
 check_prereqs() {
 	require_root
 	require_cmd git
+	require_cmd runuser
+	require_cmd make
 	ensure_go
 }
 
-maybe_skip_build() {
-	if [ "$SKIP_BUILD" -eq 1 ] && [ -x /usr/local/bin/lyrebird ]; then
-		log "No build required. Exiting."
-		return 0
-	fi
-	return 1
-}
-
 run_update() {
-	clone_or_update_repo
-	if maybe_skip_build; then
-		exit 0
-	fi
+	prepare_build
+	clone_source
 	build_lyrebird
 	install_lyrebird
 }

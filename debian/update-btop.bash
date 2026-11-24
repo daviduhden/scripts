@@ -11,19 +11,17 @@ set -euo pipefail
 #
 # Requirements: root privileges, network access, git, make, cmake, and
 # nproc. Build dependencies (git, build-essential, cmake,
-# libncurses-dev) are requested through apt on every run, even when no
-# build is needed.
+# libncurses-dev) are requested through APT when needed.
 #
 # Side effects:
-#  - Clones the source under $HOME/.local/src/btop
-#  - Builds with make and installs under /usr/local
-#  - Removes a previous btop checkout before fetching
+#  - Clones and builds the source in disposable staging as nobody
+#  - Publishes selected files under /usr/local
 #
 # The build runs with LD_PRELOAD unset, so a globally preloaded
 # allocator such as hardened_malloc does not affect the build tools.
 # If the clone fails, a release tarball is downloaded instead. When the
 # installed version already matches the latest tag, the source fetch,
-# build, and install are skipped after the dependency step.
+# build, and install are skipped.
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
@@ -43,9 +41,9 @@ if command -v readlink >/dev/null 2>&1; then
 	SCRIPT_PATH="$(readlink -f "$SCRIPT_PATH")"
 fi
 SCRIPT_ARGS=("$@")
-PERL_CMD="${PERL_CMD:-perl}"
-SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd -P)
-RELEASE_HELPER="${RELEASE_HELPER:-}"
+PERL_CMD=/usr/bin/perl
+SCRIPT_DIR=${SCRIPT_PATH%/*}
+RELEASE_HELPER=""
 if [ -z "$RELEASE_HELPER" ]; then
 	RELEASE_HELPER=""
 	for candidate in "$SCRIPT_DIR/release-verify.pl" "$SCRIPT_DIR/release-verify" "$SCRIPT_DIR/../scripts/release-verify.pl"; do
@@ -56,7 +54,9 @@ if [ -z "$RELEASE_HELPER" ]; then
 	done
 fi
 
-BUILD_DIR="${HOME}/.local/src"
+BUILD_DIR=
+BUILD_STAGE=
+BUILD_USER=nobody
 REPO="aristocratos/btop"
 REPO_URL="https://github.com/${REPO}.git"
 INSTALL_PREFIX="/usr/local"
@@ -70,8 +70,6 @@ error() {
 
 # Re-exec through sudo when the script was not started as root. SCRIPT_ARGS
 # keeps the original command line across the privilege boundary.
-ROOT_ENV_VARS=(PERL_CMD RELEASE_HELPER)
-
 require_root() {
 	if [[ ${EUID:-$(id -u)} -eq 0 ]]; then
 		return 0
@@ -79,23 +77,27 @@ require_root() {
 	if ! command -v sudo >/dev/null 2>&1; then
 		error "Root privileges are required and sudo was not found."
 	fi
-	local -a env_args=()
-	local name
-	for name in "${ROOT_ENV_VARS[@]}"; do
-		if [[ -v $name ]]; then
-			env_args+=("$name=${!name}")
-		fi
-	done
 	log "Re-executing this script via sudo to gain root privileges..."
-	if ((${#env_args[@]} > 0)); then
-		exec sudo -- env "${env_args[@]}" "$SCRIPT_PATH" "${SCRIPT_ARGS[@]}"
-	fi
 	exec sudo -- "$SCRIPT_PATH" "${SCRIPT_ARGS[@]}"
 }
 
 require_cmd() {
 	command -v "$1" >/dev/null 2>&1 ||
 		error "Required command '$1' not found."
+}
+
+run_build() {
+	runuser -u "$BUILD_USER" -- env -i HOME="${BUILD_DIR:-/nonexistent}" PATH="$PATH" "$@"
+}
+
+prepare_build() {
+	[[ $(id -u "$BUILD_USER") != 0 ]] || error 'An unprivileged build account is required.'
+	BUILD_STAGE=$(mktemp -d /tmp/btop-build.XXXXXX)
+	trap 'rm -rf -- "$BUILD_STAGE"' EXIT
+	chmod 0711 "$BUILD_STAGE"
+	BUILD_DIR=$BUILD_STAGE/work
+	install -d -m 0700 -o "$BUILD_USER" "$BUILD_DIR"
+	install -m 0644 "$RELEASE_HELPER" "$BUILD_STAGE/release-verify"
 }
 
 # Resolve the highest release tag with git. --refs drops peeled-tag
@@ -115,8 +117,9 @@ get_latest_tag() {
 # Extract the first semantic version from btop --version and strip a
 # leading "v". Prints nothing when btop is not installed.
 get_current_version() {
-	if command -v btop >/dev/null 2>&1; then
-		btop --version 2>/dev/null | awk \
+	local executable
+	if executable=$(type -P btop); then
+		run_build "$executable" --version 2>/dev/null | awk \
 			'match($0,/v?[0-9]+\.[0-9]+\.[0-9]+/){
 				ver=substr($0,RSTART,RLENGTH);
 				sub(/^v/,"",ver);
@@ -125,8 +128,7 @@ get_current_version() {
 	fi
 }
 
-# Prefer apt-get, falling back to apt. This runs unconditionally, so an
-# up-to-date system still performs an apt update and install check.
+# Prefer apt-get, falling back to apt.
 install_build_deps() {
 	local apt_cmd
 	if command -v apt-get >/dev/null 2>&1; then
@@ -140,24 +142,15 @@ install_build_deps() {
 	log "Installing build dependencies" \
 		"(git build-essential cmake libncurses-dev)..."
 	"$apt_cmd" update
-	"$apt_cmd" install -y git build-essential cmake libncurses-dev
+	"$apt_cmd" install -y --no-remove git build-essential cmake libncurses-dev
 }
 
-# Fetch a tagged source tree into $dest. A previous checkout at
-# $dest/btop is removed first because git clone refuses a non-empty
-# destination and the tarball fallback searches for btop* directories.
-# Prints the source directory on success.
+# Fetch a tagged source tree into the disposable build directory and
+# print the selected source path.
 fetch_source() {
 	local tag="$1" dest="$2" src_dir=""
-	mkdir -p "$dest" || return 1
-
-	# A previous run may have left a checkout behind; git clone refuses an
-	# existing non-empty destination, and a stale tree could otherwise be
-	# picked up by the tarball fallback.
-	rm -rf "$dest/btop" || return 1
-
 	log "Cloning btop tag ${tag} with git..."
-	if git clone --depth 1 --branch "$tag" "$REPO_URL" "$dest/btop"; then
+	if run_build git clone --depth 1 --branch "$tag" "$REPO_URL" "$dest/btop"; then
 		src_dir="$dest/btop"
 		printf '%s\n' "$src_dir"
 		return 0
@@ -168,22 +161,22 @@ fetch_source() {
 	tarball_url="${tarball_url}/archive/refs/tags/${tag}.tar.gz"
 	local tarball="$dest/btop.tar.gz"
 	log "Git clone failed, downloading tarball ${tarball_url}..."
-	curl -fLsS --retry 5 "$tarball_url" -o "$tarball" || return 1
+	run_build curl -q -fLsS --retry 5 --proto '=https' --proto-redir '=https' "$tarball_url" -o "$tarball" || return 1
 	# Extract into a unique tree, with exact root and no archive links/devices.
 	local unpack listing
-	unpack=$(mktemp -d "$dest/btop-source.XXXXXX") || return 1
-	listing=$(tar -tzf "$tarball") || {
+	unpack=$(run_build mktemp -d "$dest/btop-source.XXXXXX") || return 1
+	listing=$(run_build tar -tzf "$tarball") || {
 		rm -rf -- "$unpack"
 		return 1
 	}
 	if printf '%s\n' "$listing" |
 		grep -Eq '(^|/)\.\.(/|$)|^/' ||
 		[ -n "$(printf '%s\n' "$listing" | sort | uniq -d)" ] ||
-		! tar -tvzf "$tarball" | awk '$1 !~ /^[d-]/ { exit 1 }'; then
+		! run_build tar -tvzf "$tarball" | awk '$1 !~ /^[d-]/ { exit 1 }'; then
 		rm -rf -- "$unpack"
 		return 1
 	fi
-	if ! "$PERL_CMD" "$RELEASE_HELPER" tar-extract-all \
+	if ! run_build "$PERL_CMD" "$BUILD_STAGE/release-verify" tar-extract-all \
 		"$tarball" "$unpack" "btop-${tag#v}" 536870912; then
 		rm -rf -- "$unpack"
 		return 1
@@ -208,12 +201,39 @@ build_and_install() {
 	cd "$src_dir"
 
 	log "Building btop..."
-	env -u LD_PRELOAD make -j"$(nproc)"
+	run_build make -j"$(nproc)"
 
 	log "Installing btop..."
-	make PREFIX="$INSTALL_PREFIX" install
+	local image=$BUILD_DIR/image file theme
+	run_build make PREFIX="$INSTALL_PREFIX" DESTDIR="$image" install
+	image+=$INSTALL_PREFIX
+	for theme in "$image"/share/btop/themes/*.theme; do
+		[[ -f $theme && ! -L $theme ]] || continue
+		publish_file "$theme" "$INSTALL_PREFIX/share/btop/themes/${theme##*/}" 0644
+	done
+	for file in share/doc/btop/README.md share/applications/btop.desktop \
+		share/icons/hicolor/48x48/apps/btop.png share/icons/hicolor/scalable/apps/btop.svg \
+		share/man/man1/btop.1; do
+		if [[ $file == share/man/man1/btop.1 && ! -f $image/$file ]]; then
+			continue
+		fi
+		publish_file "$image/$file" "$INSTALL_PREFIX/$file" 0644
+	done
+	publish_file "$image/bin/btop" "$INSTALL_PREFIX/bin/btop" 0755
 
 	log "btop ${tag} installed successfully."
+}
+
+publish_file() {
+	local source=$1 target=$2 mode=$3 stage
+	[[ -f $source && ! -L $source ]] || error "Missing regular build output: $source"
+	install -d -- "${target%/*}"
+	stage=$(mktemp "${target%/*}/.btop.XXXXXX")
+	if ! run_build cat -- "$source" >"$stage" ||
+		! chmod "$mode" "$stage" || ! mv -fT -- "$stage" "$target"; then
+		rm -f -- "$stage"
+		error "Cannot publish $target."
+	fi
 }
 
 check_prereqs() {
@@ -224,6 +244,7 @@ check_prereqs() {
 	require_cmd "$PERL_CMD"
 	require_cmd tar
 	require_cmd mktemp
+	require_cmd runuser
 	[ -f "$RELEASE_HELPER" ] ||
 		error "release-verify helper not found: $RELEASE_HELPER"
 }
@@ -245,7 +266,7 @@ is_up_to_date() {
 	local latest_stripped current
 
 	latest_stripped="${latest_tag#v}"
-	current="$(get_current_version)"
+	current="$(get_current_version || true)"
 	if [[ -n $current ]]; then
 		log "Currently installed btop version: ${current}"
 		if [[ $current == "$latest_stripped" ||
@@ -263,6 +284,7 @@ is_up_to_date() {
 main() {
 	local latest_tag
 	require_root
+	require_cmd runuser
 	# A current installation should not trigger an APT update/install pass.
 	if ! command -v git >/dev/null 2>&1; then
 		install_build_deps
@@ -274,6 +296,7 @@ main() {
 	fi
 	install_build_deps
 	check_prereqs
+	prepare_build
 	build_and_install "$latest_tag"
 }
 

@@ -38,13 +38,18 @@ sub run_shell {
     my ( $root, $path, $body, %extra ) = @_;
     my $environment = env_with(
         TEST_ROOT      => $root,
-        PERL_CMD       => find_command('perl') // 'perl',
-        RELEASE_HELPER => "$ROOT/scripts/release-verify.pl",
+        FIXTURE_PERL   => find_command('perl') // 'perl',
+        FIXTURE_HELPER => "$ROOT/scripts/release-verify.pl",
         %extra,
     );
     return run_command(
         cmd => [
-            'bash', '-c', functions_without_main("$ROOT/$path") . "\n" . $body
+            'bash',
+            '-c',
+            functions_without_main("$ROOT/$path") . "\n"
+              . 'PERL_CMD=$FIXTURE_PERL RELEASE_HELPER=$FIXTURE_HELPER'
+              . "\n"
+              . $body
         ],
         env     => $environment,
         timeout => 20,
@@ -132,6 +137,33 @@ subtest 'release helper handles USTAR paths and enforces byte limits' => sub {
     is( $result->{returncode}, 0, 'full USTAR path is recognized' )
       or diag $result->{stderr};
     is( slurp($file), 'data', 'selected entry is extracted' );
+    $result = run_command( cmd => [ @cmd, 4 ], timeout => 20 );
+    isnt( $result->{returncode}, 0, 'extractor refuses an existing output' );
+    is( slurp($file), 'data', 'existing output remains intact' );
+};
+
+subtest 'release extraction requires a private destination' => sub {
+    my $root = new_tempdir('release-private-');
+    my $archive =
+      archive( $root, [ [ 'release/file', 'data', 'regular' ] ], 1 );
+    my $destination = "$root/extract";
+    mkdir $destination, oct('755') or die "cannot create destination: $!";
+    chmod oct('755'), $destination or die "cannot set destination mode: $!";
+    my @cmd = (
+        $^X, "$ROOT/scripts/release-verify.pl",
+        'tar-extract-all', $archive, $destination, 'release', 1024
+    );
+    my $result = run_command( cmd => \@cmd );
+    isnt( $result->{returncode}, 0, 'public extraction root is rejected' );
+    chmod oct('700'), $destination or die "cannot make destination private: $!";
+    my $external = "$root/external";
+    mkdir $external, oct('700') or die "cannot create fixture directory: $!";
+    symlink $external, "$destination/release"
+      or die "cannot create extractor fixture symlink: $!";
+    $result = run_command( cmd => \@cmd );
+    isnt( $result->{returncode}, 0,
+        'pre-existing linked member parent rejected' );
+    ok( !-e "$external/file", 'extractor never writes through linked parent' );
 };
 
 subtest 'Fastfetch verifies digest and package metadata before APT' => sub {
@@ -153,6 +185,7 @@ subtest 'Fastfetch verifies digest and package metadata before APT' => sub {
     write_file( "$root/metadata", JSON::PP::encode_json($metadata) );
     my $commands = <<'SH';
 RELEASE_HELPER="$HELPER_PATH"
+perl() { "$PERL_CMD" "$@"; }
 get_release_metadata() { cat "$TEST_ROOT/metadata"; }
 detect_pkg_arch() { printf '%s\n' amd64; }
 fastfetch() { printf '%s\n' 'fastfetch 0.0.1'; }
@@ -258,6 +291,9 @@ subtest 'btop fallback requires exact safe source tree' => sub {
                 <<'SH',
 git() { return 1; }
 curl() { cp -- "$FIXTURE" "${@: -1}"; }
+run_build() { "$@"; }
+BUILD_STAGE=$TEST_ROOT
+cp -- "$RELEASE_HELPER" "$BUILD_STAGE/release-verify"
 fetch_source v1.0.0 "$DESTINATION"
 SH
                 FIXTURE     => $fixture,
@@ -309,6 +345,8 @@ curl() {
     cp -- "$FIXTURE" "${@: -1}"
 }
 mktemp() { return 1; }
+run_build() { "$@"; }
+BUILD_STAGE=$TEST_ROOT
 if fetch_source v1.0.0 "$DESTINATION"; then exit 99; fi
 SH
                 FIXTURE     => $fixture,
