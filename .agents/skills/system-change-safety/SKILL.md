@@ -126,6 +126,7 @@ description: >-
   tree also contains auto memory and must never be removed wholesale.
   Reject symbolic links or reparse points on transcript paths and their
   ancestors in both preview and deletion.
+  Apply individual agent selectors before discovering or deleting targets.
   OpenCode 2 stores credentials in the same SQLite database as sessions.
   Preserve the database and its WAL/SHM files. Use the documented session
   commands, validate the complete output batch before deleting any IDs, and

@@ -18,7 +18,10 @@ transcripts under `CLAUDE_CONFIG_DIR` (default `~/.claude`). Settings, login
 credentials, and project auto memory are preserved. See the
 [Claude directory reference](https://code.claude.com/docs/en/claude-directory).
 
-OpenCode session cleanup needs `opencode` on
+Use `-Codex`, `-Copilot`, `-Claude`, `-OpenCode`, or `-Swival` to select
+one or more agents. No selector or `-All` selects the default agents.
+Use `-Crush -IncludeCrushData` to select only Crush and remove its entire
+data directory. Preview with `-DryRun`. OpenCode session cleanup needs `opencode` on
 `PATH`. It uses the CLI to delete sessions in the current project on OpenCode
 2, and clears local prompt recall under `XDG_STATE_HOME/opencode` or
 `~/.local/state/opencode`. Set `OPENCODE_STATE_HOME` for a different prompt

@@ -33,7 +33,10 @@ transcripts under `CLAUDE_CONFIG_DIR` (default `~/.claude`). Settings, login
 credentials, and project auto memory are preserved. See the
 [Claude directory reference](https://code.claude.com/docs/en/claude-directory).
 
-OpenCode session cleanup needs `opencode` and `jq` on
+Use `--codex`, `--copilot-cli`, `--claude`, `--opencode`, or `--swival` to
+select one or more agents. No selector or `--all` selects the default agents.
+Use `--crush --include-crush-data` to select only Crush and remove its entire
+data directory. Preview with `--dry-run`. OpenCode session cleanup needs `opencode` and `jq` on
 `PATH`. It uses the CLI to delete sessions in the current project on OpenCode
 2, and clears local prompt recall. The SQLite database, its companion files,
 and authentication data stay in place. The preview does not launch OpenCode.

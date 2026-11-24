@@ -22,8 +22,8 @@ set -eu
 # and falls back to ~/.local/share, while Swival state is tied to the current
 # project directory unless SWIVAL_PROJECT_HOME points elsewhere.
 CODEX_HOME=${CODEX_HOME:-"$HOME/.codex"}
-CLAUDE_HOME=${CLAUDE_CONFIG_DIR:-"$HOME/.claude"}
 COPILOT_HOME=${COPILOT_HOME:-"$HOME/.copilot"}
+CLAUDE_HOME=${CLAUDE_CONFIG_DIR:-"$HOME/.claude"}
 OPENCODE_STATE_HOME=${OPENCODE_STATE_HOME:-"${XDG_STATE_HOME:-$HOME/.local/state}/opencode"}
 CRUSH_DATA_HOME=${CRUSH_GLOBAL_DATA:-"${XDG_DATA_HOME:-$HOME/.local/share}/crush"}
 SWIVAL_PROJECT_HOME=${SWIVAL_PROJECT_HOME:-"$PWD"}
@@ -38,16 +38,20 @@ case "$DRY_RUN" in
 *) DRY_RUN=0 ;;
 esac
 INCLUDE_CRUSH=0
+SELECTED=''
+SELECT_ALL=0
 
 # Help text. ksh's print builtin is used throughout this tree instead of
 # echo because its escape and option handling is predictable.
 usage() {
 	print "Usage: ai-purge-history.ksh [--dry-run|-n] [--include-crush-data] [--help]"
 	print ""
-	print "Removes Codex, Copilot, Claude Code, Crush, and project-local Swival"
-	print "history/state for the current user. Configuration and"
-	print "credentials are kept."
+	print "Select one or more agents. Without selectors, the default agents are selected."
+	print "OpenCode sessions are scoped to the current project on OpenCode 2."
 	print ""
+	print "  --codex --copilot-cli --claude --opencode --swival"
+	print "  --crush               Select Crush (requires --include-crush-data)"
+	print "  --all                 Select the default agents"
 	print "  --dry-run, -n          Show the paths that would be removed, delete nothing"
 	print "  --include-crush-data   Also remove the whole Crush data directory"
 	print "  --help, -h             Show this help"
@@ -59,6 +63,12 @@ while [ "$#" -gt 0 ]; do
 	case "$1" in
 	--dry-run | -n) DRY_RUN=1 ;;
 	--include-crush-data) INCLUDE_CRUSH=1 ;;
+	--all) SELECT_ALL=1 ;;
+	--codex | --copilot-cli | --copilot | --claude | --opencode | --crush | --swival)
+		agent=${1#--}
+		[ "$agent" != copilot-cli ] || agent=copilot
+		SELECTED="$SELECTED $agent"
+		;;
 	--help | -h)
 		usage
 		exit 0
@@ -71,6 +81,33 @@ while [ "$#" -gt 0 ]; do
 	esac
 	shift
 done
+
+selected() {
+	case " $SELECTED " in
+	*" $1 "*) return 0 ;;
+	*) return 1 ;;
+	esac
+}
+
+if [ "$SELECT_ALL" -eq 1 ] && [ -n "$SELECTED" ]; then
+	printf '%s\n' '[ERROR] --all cannot be combined with agent selectors.' >&2
+	exit 2
+fi
+EXPLICIT_SELECTION=0
+if [ -n "$SELECTED" ]; then
+	EXPLICIT_SELECTION=1
+else
+	SELECTED='codex copilot claude opencode swival'
+	if [ "$INCLUDE_CRUSH" -eq 1 ]; then SELECTED="$SELECTED crush"; fi
+fi
+if selected crush && [ "$INCLUDE_CRUSH" -ne 1 ]; then
+	printf '%s\n' '[ERROR] --crush requires --include-crush-data (removes the entire Crush data directory).' >&2
+	exit 2
+fi
+if [ "$INCLUDE_CRUSH" -eq 1 ] && ! selected crush; then
+	printf '%s\n' '[ERROR] Select --crush to use --include-crush-data with individual selectors.' >&2
+	exit 2
+fi
 
 # Delete every path given as an argument. Missing paths are not an error
 # because each tool creates only the files it uses.
@@ -173,6 +210,7 @@ purge_opencode_history() {
 		printf '%s\n' '[DRY-RUN] would delete OpenCode sessions through the CLI if available.'
 	elif ! command -v opencode >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
 		printf '%s\n' '[WARN] OpenCode session cleanup requires opencode and jq.' >&2
+		[ "$EXPLICIT_SELECTION" -eq 0 ] || return 1
 	else
 		while :; do
 			if ! batch=$(command opencode session list --max-count 100 --format json 2>/dev/null); then
@@ -209,30 +247,25 @@ EOF
 	remove_history_files "$OPENCODE_STATE_HOME/prompt-history.jsonl"
 }
 
-purge_opencode_history
-
-purge_claude_history
-
-# Codex and Copilot: remove session state and logs only. Configuration,
-# credentials, and other files in those home directories are left intact.
-remove_paths "$CODEX_HOME/sessions" "$CODEX_HOME/archived_sessions"
-remove_paths "$COPILOT_HOME/session-state" "$COPILOT_HOME/logs"
-# Crush's data directory may include configuration; require an explicit opt-in.
-if [ "$INCLUDE_CRUSH" -eq 1 ]; then
-	remove_paths "$CRUSH_DATA_HOME"
-else
-	print "[INFO] Preserving Crush data directory (use --include-crush-data to remove it): $CRUSH_DATA_HOME"
+if selected opencode; then purge_opencode_history; fi
+if selected claude; then purge_claude_history; fi
+if selected codex; then
+	remove_paths "$CODEX_HOME/sessions" "$CODEX_HOME/archived_sessions"
 fi
-# Swival stores history and state inside the selected project. Remove the
-# listed files only; the rest of .swival and the project are preserved.
-remove_paths \
-	"$SWIVAL_PROJECT_HOME/.swival/HISTORY.md" \
-	"$SWIVAL_PROJECT_HOME/.swival/HISTORY.md.lock" \
-	"$SWIVAL_PROJECT_HOME/.swival/continue.md" \
-	"$SWIVAL_PROJECT_HOME/.swival/repl_history" \
-	"$SWIVAL_PROJECT_HOME/.swival/memory" \
-	"$SWIVAL_PROJECT_HOME/.swival/cache.db" \
-	"$SWIVAL_PROJECT_HOME/.swival/audit"
+if selected copilot; then
+	remove_paths "$COPILOT_HOME/session-state" "$COPILOT_HOME/logs"
+fi
+if selected crush; then remove_paths "$CRUSH_DATA_HOME"; fi
+if selected swival; then
+	remove_paths \
+		"$SWIVAL_PROJECT_HOME/.swival/HISTORY.md" \
+		"$SWIVAL_PROJECT_HOME/.swival/HISTORY.md.lock" \
+		"$SWIVAL_PROJECT_HOME/.swival/continue.md" \
+		"$SWIVAL_PROJECT_HOME/.swival/repl_history" \
+		"$SWIVAL_PROJECT_HOME/.swival/memory" \
+		"$SWIVAL_PROJECT_HOME/.swival/cache.db" \
+		"$SWIVAL_PROJECT_HOME/.swival/audit"
+fi
 
 if [ "$DRY_RUN" -eq 1 ]; then
 	print "Dry run complete; no files were removed."

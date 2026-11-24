@@ -18,6 +18,14 @@
 [CmdletBinding()]
 param(
     [switch]$DryRun,
+    [switch]$All,
+    [switch]$Codex,
+    [Alias('CopilotCli', 'copilot-cli')]
+    [switch]$Copilot,
+    [switch]$Claude,
+    [switch]$OpenCode,
+    [switch]$Crush,
+    [switch]$Swival,
     [switch]$IncludeCrushData,
     [switch]$Help
 )
@@ -26,13 +34,12 @@ $ErrorActionPreference = 'Stop'
 
 if ($Help) {
     $helpText = @'
-Usage: ai-purge-history.ps1 [-DryRun] [-IncludeCrushData] [-Help]
+Usage: ai-purge-history.ps1 [-Codex] [-Copilot] [-Claude] [-OpenCode] [-Crush] [-Swival]
+                            [-All] [-DryRun] [-IncludeCrushData] [-Help]
 
-Removes Codex, Copilot, Claude Code, OpenCode, and project-local Swival history/state for
-the current user. Codex/Copilot/OpenCode configuration and credentials are
-kept. Crush data is preserved unless -IncludeCrushData is given; that switch
-removes the whole Crush data directory, including any configuration stored
-there.
+Without selectors, the default agents are selected. -All selects the default
+agents and cannot be combined with individual selectors. OpenCode 2 sessions
+are scoped to the current project. -Crush requires -IncludeCrushData.
 
   -DryRun             Show the paths that would be removed, delete nothing
   -IncludeCrushData   Also remove the whole Crush data directory
@@ -40,6 +47,15 @@ there.
 '@
     Write-Output $helpText
     exit 0
+}
+
+$explicitSelection = $Codex -or $Copilot -or $Claude -or $OpenCode -or $Crush -or $Swival
+if ($All -and $explicitSelection) { throw '-All cannot be combined with agent selectors.' }
+if ($Crush -and -not $IncludeCrushData) {
+    throw '-Crush requires -IncludeCrushData (removes the entire Crush data directory).'
+}
+if ($explicitSelection -and $IncludeCrushData -and -not $Crush) {
+    throw 'Select -Crush to use -IncludeCrushData with individual selectors.'
 }
 
 $codexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $HOME '.codex' }
@@ -166,6 +182,7 @@ function Clear-OpenCodeSession {
     $cli = Get-Command opencode -CommandType Application, ExternalScript -ErrorAction SilentlyContinue |
         Select-Object -First 1
     if (-not $cli) {
+        if ($explicitSelection) { throw 'OpenCode session cleanup requires opencode on PATH.' }
         Write-Warning 'OpenCode session cleanup skipped: opencode was not found.'
         return
     }
@@ -205,24 +222,29 @@ function Clear-OpenCodeSession {
 }
 
 $paths = @(
-    Get-ClaudeHistoryTarget $claudeHome
-    Get-HistoryTarget $codexHome -Directories @('sessions', 'archived_sessions')
-    Get-HistoryTarget $copilotHome -Directories @('session-state', 'logs')
-    Get-HistoryTarget $opencodeStateHome -Files @('prompt-history.jsonl')
-    Get-HistoryTarget (Join-Path $swivalProjectHome '.swival') -Files @('HISTORY.md', 'HISTORY.md.lock', 'continue.md',
-        'repl_history', 'cache.db') -Directories @('memory', 'audit')
+    if ($Claude -or -not $explicitSelection) { Get-ClaudeHistoryTarget $claudeHome }
+    if ($Codex -or -not $explicitSelection) {
+        Get-HistoryTarget $codexHome -Directories @('sessions', 'archived_sessions')
+    }
+    if ($Copilot -or -not $explicitSelection) {
+        Get-HistoryTarget $copilotHome -Directories @('session-state', 'logs')
+    }
+    if ($OpenCode -or -not $explicitSelection) {
+        Get-HistoryTarget $opencodeStateHome -Files @('prompt-history.jsonl')
+    }
+    if ($Swival -or -not $explicitSelection) {
+        Get-HistoryTarget (Join-Path $swivalProjectHome '.swival') -Files @('HISTORY.md', 'HISTORY.md.lock', 'continue.md',
+            'repl_history', 'cache.db') -Directories @('memory', 'audit')
+    }
+    if ($IncludeCrushData) {
+        [pscustomobject]@{ Path = Resolve-HistoryRoot $crushDataHome; Directory = $true }
+    }
 )
-if ($IncludeCrushData) {
-    $paths += [pscustomobject]@{ Path = Resolve-HistoryRoot $crushDataHome; Directory = $true }
-}
 
-# Preflight all selected targets before deleting any of them.
+# Preflight all selected file targets before deleting any history.
 foreach ($target in $paths) { Assert-HistoryTarget $target.Path $target.Directory }
-Clear-OpenCodeSession
+if ($OpenCode -or -not $explicitSelection) { Clear-OpenCodeSession }
 foreach ($target in $paths) { Remove-HistoryTarget $target.Path $target.Directory }
-if (-not $IncludeCrushData) {
-    Write-Information "[INFO] Preserving Crush data directory (use -IncludeCrushData to remove it): $crushDataHome" -InformationAction Continue
-}
 
 if ($DryRun) {
     Write-Information '[INFO] Dry run complete; no files were removed.' -InformationAction Continue
