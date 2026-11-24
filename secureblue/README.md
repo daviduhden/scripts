@@ -20,7 +20,7 @@ the target user's session.
 | [sudo-wrapper.bash](sudo-wrapper.bash) | Routes `sudo` and `visudo` through `run0`, and `sudoedit` through `run0edit`; installed symlinks select the matching behavior. |
 | [sync-gh-repos.bash](sync-gh-repos.bash) | Clones or refreshes a GitHub user's repositories over SSH. Retains old Git metadata and working files in a private sibling backup. Uses authenticated `gh`; accepts `OWNER`, `BASE_DIR`, and `--non-interactive`. |
 | [sysupgrade.bash](sysupgrade.bash) | Maintains the rpm-ostree image, firmware, Homebrew, Flatpak, storage, and system diagnostics. Homebrew uplift also unlinks system-shadowing formulae and relinks `ffmpeg-full`/`imagemagick-full` before cleanup. Scrub runs by default; full btrfs balance/defrag is opt-in with `BTRFS_MAINTENANCE=1`, and a lock prevents concurrent runs. |
-| [update-ai-clis.bash](update-ai-clis.bash) | Installs or updates selected coding agents using official Homebrew packages. See the [distribution and PATH details](../docs/update-ai-clis.md). |
+| [update-ai-clis.bash](update-ai-clis.bash) | Installs or updates selected coding agents using official Homebrew packages or Swival's upstream uv distribution. See the [distribution and PATH details](../docs/update-ai-clis.md). |
 | [update-arti-oniux.bash](update-arti-oniux.bash) | Builds and installs Arti and oniux with Rust/Cargo, manages OpenSSL dependencies, and patches binary library paths. |
 | [update-krohnkite.bash](update-krohnkite.bash) | Builds the Krohnkite KWin package and installs or updates it with `kpackagetool6`. |
 | [update-lyrebird.bash](update-lyrebird.bash) | Builds the Lyrebird Go-based Tor transport and installs it into `/usr/local/bin`. |
@@ -69,6 +69,9 @@ Homebrew dispatcher and its authorization policy. It discovers the Homebrew
 prefix and works with the official Homebrew packages and Charm's official
 tap. No base-image changes are required. See the [agent matrix and PATH
 behavior](../docs/update-ai-clis.md).
+
+For Swival, Homebrew provides `uv`, which manages a separate Python 3.14
+runtime and the Swival tool from PyPI.
 
 System maintenance stores its audit and information reports in the private
 root-owned directory `/var/log/scripts-sysupgrade`.

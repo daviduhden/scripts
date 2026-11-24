@@ -12,8 +12,10 @@ readonly VERSION_SUFFIX="(-$PRERELEASE_ID(\.$PRERELEASE_ID)*)?(\+[0-9A-Za-z-]+(\
 readonly CLAUDE_REPO=https://downloads.claude.ai/claude-code/apt/stable
 readonly CLAUDE_SIGNER=31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE
 
-declare -ar AGENTS=(opencode codex crush copilot-cli claude)
-declare -Ar COMMANDS=([opencode]=opencode [codex]=codex [crush]=crush ["copilot-cli"]=copilot [claude]=claude)
+readonly SWIVAL_PYTHON=3.14
+
+declare -ar AGENTS=(opencode codex crush copilot-cli claude swival)
+declare -Ar COMMANDS=([opencode]=opencode [codex]=codex [crush]=crush ["copilot-cli"]=copilot [claude]=claude [swival]=swival)
 declare -Ar BREW_PACKAGES=(
 	[opencode]=homebrew/core/opencode
 	[codex]=homebrew/cask/codex
@@ -53,6 +55,8 @@ DEFAULT_SELECTION=0
 LATEST=""
 TAG=""
 METADATA=""
+SWIVAL_WHEEL=""
+UV=""
 ASSET_DIGEST=""
 MANAGED=""
 PREVIOUS=""
@@ -65,7 +69,7 @@ Usage: update-ai-clis [all | AGENT ...]
        update-ai-clis --help
 
 Install or update the latest stable release of each selected agent.
-Agents: opencode, codex, crush, copilot-cli, claude.
+Agents: opencode, codex, crush, copilot-cli, claude, swival.
 With no agents or with 'all', process every supported agent.
 
 Exit status: 0 success, 1 operation failed, 2 invalid arguments.
@@ -84,7 +88,7 @@ select_agents() {
 	fi
 	for agent in "$@"; do
 		case "$agent" in
-		opencode | codex | crush | copilot-cli | claude)
+		opencode | codex | crush | copilot-cli | claude | swival)
 			if [[ ! ${seen[$agent]+present} ]]; then
 				SELECTED+=("$agent")
 				seen[$agent]=1
@@ -268,7 +272,7 @@ ensure_packages() {
 	local agent=$1 phase=${2:-install} command package candidate current
 	local -a required=(ca-certificates curl) packages=()
 	[[ $PLATFORM == debian ]] || return 0
-	# The native agents do not require Node.js, npm, Bun, Python, or gh.
+	# Swival uses uv-managed Python. The native agents need no language runtime.
 	# APT resolves the package runtime for Claude/Crush. The text/crypto
 	# tools below are needed only by the corresponding delivery adapters.
 	if [[ $agent != claude ]]; then required+=(jq); fi
@@ -277,7 +281,7 @@ ensure_packages() {
 		opencode) required+=(openssl perl) ;;
 		codex) required+=(cosign perl) ;;
 		crush) required+=(cosign) ;;
-		copilot-cli) required+=(perl) ;;
+		copilot-cli | swival) required+=(perl) ;;
 		esac
 	fi
 	local -A pending=()
@@ -317,7 +321,7 @@ ensure_packages() {
 			command -v "$command" >/dev/null || return
 		fi
 	done
-	if [[ $phase == install && ($agent == opencode || $agent == codex || $agent == copilot-cli) ]] &&
+	if [[ $phase == install && ($agent == opencode || $agent == codex || $agent == copilot-cli || $agent == swival) ]] &&
 		{ ! command -v perl >/dev/null || [[ ! -r $RELEASE_HELPER ]]; }; then
 		warn "Perl and the installed release-verify helper are required for archive verification."
 		return 1
@@ -434,6 +438,10 @@ latest_debian() {
 		LATEST=$(jq -er 'select(.name == "@opencode/cli") | .version' <<<"$METADATA") || return
 		;;
 	claude) claude_release || return ;;
+	swival)
+		latest_swival
+		return
+		;;
 	*)
 		repo=${GITHUB_REPOS[$agent]}
 		METADATA=$(fetch "https://api.github.com/repos/$repo/releases/latest") || return
@@ -450,6 +458,30 @@ latest_debian() {
 	is_stable "$LATEST"
 }
 
+latest_swival() {
+	local metadata release filter
+	metadata=$(fetch https://pypi.org/pypi/swival/json) || return
+	filter=$(
+		cat <<'JQ_FILTER'
+		select(.info.name == "swival") |
+		(.releases // {(.info.version): .urls}) | to_entries |
+		map(
+			select(.key | test("^(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$")) |
+			.key as $version | ("swival-" + $version + "-py3-none-any.whl") as $name |
+			[.value[] | select(.filename == $name and .packagetype == "bdist_wheel" and
+				.yanked == false and (.url | test("^https://files[.]pythonhosted[.]org/packages/([a-f0-9]+/)+swival-[0-9]+[.][0-9]+[.][0-9]+-py3-none-any[.]whl$")) and
+				(.url | endswith("/" + $name)) and (.digests.sha256 | test("^[a-f0-9]{64}$")))] |
+			select(length == 1) | .[0] |
+			{version: $version, wheel: (.url + "#sha256=" + .digests.sha256)}
+		) |
+		max_by(.version | split(".") | map([length, .])) |
+		select(. != null) | [.version, .wheel] | @tsv
+JQ_FILTER
+	) || return
+	release=$("$JQ" -er "$filter" <<<"$metadata") || return
+	IFS=$'\t' read -r LATEST SWIVAL_WHEEL <<<"$release"
+}
+
 brew_kind() {
 	case "$1" in
 	opencode | crush) printf '%s\n' --formula ;;
@@ -459,6 +491,10 @@ brew_kind() {
 
 latest_brew() {
 	local agent=$1 kind metadata package taps
+	if [[ $agent == swival ]]; then
+		latest_swival
+		return
+	fi
 	package=${BREW_PACKAGES[$agent]}
 	kind=$(brew_kind "$agent")
 	BREW_DEPENDENCIES=""
@@ -516,6 +552,102 @@ ensure_brew_runtime() {
 
 release_extract() {
 	perl "$RELEASE_HELPER" "$@" 536870912
+}
+
+activate_uv() (
+	local latest=$1 triplet=$2 stage="" links="" digest_file
+	trap 'if [[ -n $stage && -d $stage ]]; then rm -rf -- "$stage"; fi
+		if [[ -n $links && -d $links ]]; then rm -rf -- "$links"; fi' EXIT
+	ensure_user_dir "$USER_BIN" && ensure_user_dir "$STATE_DIR/uv" || return
+	stage=$(mktemp -d "$STATE_DIR/uv/$latest.XXXXXX") || return
+	digest_file=$WORK_DIR/uv.tgz
+	github_asset astral-sh/uv "uv-$triplet.tar.gz" "$digest_file" &&
+		release_extract tar-extract-entry "$digest_file" "$stage/uv" "uv-$triplet/uv" &&
+		chmod 0700 -- "$stage/uv" || return
+	[[ $(version_of "$stage/uv") == "$latest" ]] || return 1
+	links=$(mktemp -d "$USER_BIN/.scripts-ai-clis.XXXXXX") || return
+	ln -s -- "$stage/uv" "$links/uv" && can_replace_launcher uv "$USER_BIN/uv" &&
+		mv -Tf -- "$links/uv" "$USER_BIN/uv" || return
+	stage=""
+)
+
+select_debian_uv() {
+	local TAG METADATA current latest triplet
+	METADATA=$(fetch https://api.github.com/repos/astral-sh/uv/releases/latest) || return
+	TAG=$("$JQ" -er 'select(.draft == false and .prerelease == false) | .tag_name' <<<"$METADATA") || return
+	latest=${TAG#v}
+	is_stable "$latest" || return
+	case "$ARCH" in
+	amd64) triplet=x86_64-unknown-linux-gnu ;;
+	arm64) triplet=aarch64-unknown-linux-gnu ;;
+	*) return 1 ;;
+	esac
+	if [[ -n $UV ]]; then
+		safe_path "$UV" && safe_path "${UV%/*}" && current=$(version_of "$UV") || return
+		[[ $(compare_to_stable "$current" "$latest") == older ]] || return 0
+		if [[ $UV != "$USER_BIN/uv" ]] || ! can_replace_launcher uv "$UV"; then
+			warn "Update uv at $UV through its original installer before updating Swival."
+			return 1
+		fi
+	fi
+	activate_uv "$latest" "$triplet" || return
+	UV=$USER_BIN/uv
+}
+
+run_swival_uv() (
+	local tools_dir=$1 bin_dir=$2 variable
+	shift 2
+	# Retain proxy and TLS settings, but discard package-manager index and
+	# Python overrides so this install cannot be redirected by local config.
+	for variable in "${!UV_@}" "${!PIP_@}" "${!PYTHON@}" "${!CONDA_@}"; do
+		unset "$variable"
+	done
+	unset VIRTUAL_ENV RUST_LOG
+	cd -- "$tools_dir" || return
+	HOME="$HOME_DIR" PATH="$SYSTEM_PATH" LC_ALL=C \
+		UV_CACHE_DIR="$STATE_DIR/swival-cache" UV_PYTHON_INSTALL_DIR="$STATE_DIR/swival-python" \
+		UV_TOOL_DIR="$tools_dir" UV_TOOL_BIN_DIR="$bin_dir" \
+		timeout --kill-after=5s 600s "$UV" --no-config --no-progress "$@"
+)
+
+ensure_swival_runtime() {
+	local FINAL
+	local -a saved_candidates=("${CANDIDATES[@]}")
+	find_candidates uv
+	UV=${CANDIDATES[0]:-}
+	if ((${#CANDIDATES[@]} > 1)); then
+		warn "Multiple installations of uv: ${CANDIDATES[*]}"
+		return 1
+	fi
+	CANDIDATES=("${saved_candidates[@]}")
+	if [[ $PLATFORM == secureblue ]]; then
+		if [[ -n $UV ]] && ! same_executable "$UV" "$BREW_PREFIX/bin/uv"; then
+			warn "Swival expects Homebrew uv. Remove the conflict with $UV before continuing."
+			return 1
+		fi
+		local BREW_DEPENDENCIES=uv
+		refresh_brew && ensure_brew_runtime || return
+		UV=$BREW_PREFIX/bin/uv
+	else
+		ensure_packages swival && select_debian_uv || return
+	fi
+	safe_path "$UV" && FINAL=$(version_of "$UV") && is_stable "$FINAL" &&
+		verify_session uv "$UV" || return
+	ensure_user_dir "$STATE_DIR/swival-cache" &&
+		ensure_user_dir "$STATE_DIR/swival-python" || return
+	run_swival_uv "$WORK_DIR" "$WORK_DIR" python install "$SWIVAL_PYTHON" --upgrade --no-bin >&2 || return
+	local python version
+	python=$(run_swival_uv "$WORK_DIR" "$WORK_DIR" python find "$SWIVAL_PYTHON" --managed-python) || return
+	[[ $python == "$STATE_DIR/swival-python/"* ]] && safe_path "$python" &&
+		version=$(version_of "$python") && is_stable "$version" &&
+		[[ $version == "$SWIVAL_PYTHON."* ]]
+}
+
+swival_install() {
+	local stage=$1
+	mkdir -- "$stage/bin" "$stage/tools" || return
+	run_swival_uv "$stage/tools" "$stage/bin" tool install --python "$SWIVAL_PYTHON" \
+		--managed-python --only-binary :all: --default-index https://pypi.org/simple "swival @ $SWIVAL_WHEEL" >&2
 }
 
 opencode_archive() {
@@ -682,6 +814,10 @@ activate_user_release() (
 		binary=bin/codex
 		;;
 	copilot-cli) copilot_archive "$stage" || return ;;
+	swival)
+		swival_install "$stage" || return
+		binary=bin/swival
+		;;
 	esac
 	verified=$(version_of "$stage/$binary") &&
 		[[ $(compare_to_stable "$verified" "$LATEST") == current ]] || return
@@ -725,7 +861,9 @@ install_brew() {
 
 managed_path() {
 	local agent=$1 binary=${COMMANDS[$1]}
-	if [[ $PLATFORM == secureblue ]]; then
+	if [[ $agent == swival ]]; then
+		MANAGED=$USER_BIN/$binary
+	elif [[ $PLATFORM == secureblue ]]; then
 		MANAGED=$BREW_PREFIX/bin/$binary
 	elif [[ $agent == crush || $agent == claude ]]; then
 		MANAGED=/usr/bin/$binary
@@ -739,6 +877,7 @@ same_executable() { [[ -e $1 && -e $2 && $1 -ef $2 ]]; }
 can_update() {
 	local agent=$1 binary=$2 owner expected
 	case "$PLATFORM:$agent" in
+	*:swival) can_replace_launcher "$agent" "$MANAGED" ;;
 	debian:crush | debian:claude)
 		[[ ! -e $MANAGED && ! -L $MANAGED ]] && return 0
 		expected=$agent
@@ -921,8 +1060,12 @@ process_agent() {
 	if [[ -n $PREVIOUS ]]; then
 		relative=$(compare_to_stable "$PREVIOUS" "$LATEST")
 		if [[ $relative != older ]]; then
-			if [[ $PLATFORM == secureblue ]] && same_executable "$path" "$MANAGED"; then
-				ensure_brew_runtime || return
+			if same_executable "$path" "$MANAGED"; then
+				if [[ $agent == swival ]] && can_update "$agent" "$binary"; then
+					ensure_swival_runtime || return
+				elif [[ $PLATFORM == secureblue && $agent != swival ]]; then
+					ensure_brew_runtime || return
+				fi
 			fi
 			verify_session "$binary" "$path" || return
 			RESULT=$relative
@@ -938,7 +1081,11 @@ process_agent() {
 		return 1
 	}
 	update=0
-	if [[ $PLATFORM == debian ]]; then
+	if [[ $agent == swival ]]; then
+		if ! ensure_swival_runtime || ! activate_user_release "$agent" "$binary"; then
+			update=1
+		fi
+	elif [[ $PLATFORM == debian ]]; then
 		if ! ensure_packages "$agent" || ! install_debian "$agent"; then
 			update=1
 		fi

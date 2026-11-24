@@ -260,4 +260,104 @@ subtest 'Homebrew selects official casks and scopes package operations' => sub {
     );
 };
 
+subtest 'Swival isolated install, update and idempotence on Linux' => sub {
+    my $jq = find_command('jq');
+    plan skip_all => 'jq is required for Swival metadata' unless $jq;
+    for my $platform (qw(debian secureblue)) {
+        subtest $platform => sub {
+            my $root = sandbox();
+            my @args = ( '--test-swival', $jq, $platform, 'swival' );
+            my $run =
+              run_updater( $root, { FIXTURE_SWIVAL_PREVIEW => 1 }, @args );
+            is( $run->{returncode}, 0, 'uses stable wheel if PyPI is preview' )
+              or diag $run->{stdout} . $run->{stderr};
+            like(
+                $run->{stdout},
+                qr/^swival\t-\t1\.2\.3\t1\.2\.3\tinstalled$/m,
+                'reports exact installed stable version'
+            );
+            my $events = slurp("$root/events");
+            like( $events, qr/^tool install 1\.2\.3$/m, 'installs Swival' );
+            like( $events, qr/^session uv$/m,           'verifies uv on PATH' );
+            like( $events, qr/^session swival$/m, 'verifies Swival on PATH' );
+
+            if ( $platform eq 'secureblue' ) {
+                like(
+                    $events,
+qr/^brew install --formula --force-bottle homebrew\/core\/uv$/m,
+                    'installs only the official Homebrew dependency'
+                );
+            }
+            my $before = readlink("$root/bin/swival");
+            ok( $before, 'publishes the managed Swival launcher' );
+
+            write_file( "$root/events", '' );
+            $run = run_updater( $root, {}, @args );
+            is( $run->{returncode}, 0, 'current release succeeds' )
+              or diag $run->{stdout} . $run->{stderr};
+            $events = slurp("$root/events");
+            unlike( $events, qr/^tool install /m, 'does not reinstall Swival' );
+            like( $events, qr/^python update$/m, 'checks latest Python patch' );
+
+            $run = run_updater(
+                $root,
+                {
+                    FIXTURE_SWIVAL_VERSION      => '1.2.4',
+                    FIXTURE_SWIVAL_INSTALL_FAIL => 1
+                },
+                @args
+            );
+            is( $run->{returncode}, 1, 'failed update returns an error' );
+            is( readlink("$root/bin/swival"),
+                $before, 'keeps the old launcher' );
+
+            $run = run_updater( $root, { FIXTURE_SWIVAL_VERSION => '1.2.4' },
+                @args );
+            is( $run->{returncode}, 0, 'updates the isolated tool' )
+              or diag $run->{stdout} . $run->{stderr};
+            like(
+                $run->{stdout},
+                qr/^swival\t1\.2\.3\t1\.2\.4\t1\.2\.4\tupdated$/m,
+                'reports both versions after activation'
+            );
+        };
+    }
+};
+
+subtest 'Swival rejects invalid distribution and path states' => sub {
+    my $jq = find_command('jq');
+    plan skip_all => 'jq is required for Swival metadata' unless $jq;
+    my @args = ( '--test-swival', $jq, 'debian', 'swival' );
+    for my $scenario (
+        [ FIXTURE_OFFLINE           => 'swival' ],
+        [ FIXTURE_DEPENDENCIES_FAIL => 'swival' ],
+        [ FIXTURE_SWIVAL_YANKED     => 'true' ],
+        [ FIXTURE_BAD_UV_DIGEST     => 1 ],
+        [ FIXTURE_PATH_FAIL         => 'uv' ],
+      )
+    {
+        my $root = sandbox();
+        my $run  = run_updater( $root, {@$scenario}, @args );
+        is( $run->{returncode}, 1, "$scenario->[0] fails safely" );
+        ok( !-e "$root/bin/swival", 'does not publish a Swival executable' );
+    }
+    my $root = sandbox();
+    executable( "$root/other", 'uv', 'uv 0.1.0' );
+    my $run = run_updater( $root, {}, @args );
+    is( $run->{returncode}, 1,
+        'does not replace an incompatible unmanaged uv' );
+    like( $run->{stderr}, qr/original installer/, 'reports the uv conflict' );
+
+    for my $directory (qw(bin other)) {
+        executable( "$root/$directory", 'swival', 'swival 1.2.3' );
+    }
+    $run = run_updater( $root, {}, @args );
+    is( $run->{returncode}, 1, 'duplicate Swival installations fail' );
+    like(
+        $run->{stderr},
+        qr/Multiple installations of swival/,
+        'reports duplicates'
+    );
+};
+
 done_testing();

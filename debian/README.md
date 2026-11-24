@@ -85,7 +85,7 @@ System maintenance stores its reports in the private root-owned directory
 
 ## AI CLI updates
 
-Run `update-ai-clis codex claude` as your normal user. The updater uses
+Run `update-ai-clis codex swival` as your normal user. The updater uses
 `sudo` for APT operations. It tracks the Debian candidates for its selected
 download, metadata and verification tools. APT resolves the declared
 dependencies of Crush and Claude Code.
@@ -98,6 +98,10 @@ stable APT index in a temporary directory. Crush and Claude Code install under
 `/usr/bin`. For a version managed by a different package channel, the
 updater reports the existing path. See the [agent matrix and PATH
 behavior](../docs/update-ai-clis.md).
+
+Swival uses uv and an isolated Python 3.14 tool environment. The updater
+checks the official Astral uv release and uses the Swival wheel from PyPI.
+Python packages are installed outside Debian's managed Python environment.
 
 ## xerj
 

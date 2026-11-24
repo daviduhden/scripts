@@ -184,6 +184,11 @@ tool is missing, report the check as skipped rather than passed.
   Use the tests in [test_ai_cli_updates.pl](../../../tests/test_ai_cli_updates.pl)
   for offline selector, version, conflict and failure coverage. The Copilot
   CLI version banner ends its SemVer token with a sentence period.
+  Swival uses uv with a private managed Python. Use Homebrew core uv on
+  SecureBlue and the verified official Astral archive on Debian. Bind the
+  selected Swival wheel to the official PyPI metadata and its hash. Keep
+  system Python, Swival profiles, and optional sandbox installations separate
+  from agent delivery.
 
 - `secureblue/setup-clamav.bash` must not write `ScanOnAccess`: that directive
   only applies to ClamAV <= 0.101. Current releases enable on-access scanning
