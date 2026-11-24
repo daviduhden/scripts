@@ -2,7 +2,7 @@
 
 # AI assistant history cleanup for Windows.
 # - Removes session history for Codex, GitHub Copilot, and Claude Code.
-# - Removes OpenCode prompt history, database files and logs.
+# - Removes OpenCode prompt history and sessions through the OpenCode CLI.
 # - Removes project-local Swival history/state.
 # - Keeps Codex/Copilot/OpenCode configuration and credentials intact.
 # - Preserves the Crush data directory unless -IncludeCrushData is given.
@@ -45,8 +45,9 @@ there.
 $codexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $HOME '.codex' }
 $copilotHome = if ($env:COPILOT_HOME) { $env:COPILOT_HOME } else { Join-Path $HOME '.copilot' }
 $claudeHome = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { Join-Path $HOME '.claude' }
-$opencodeDataHome = if ($env:OPENCODE_DATA_HOME) { $env:OPENCODE_DATA_HOME } else { Join-Path $env:LOCALAPPDATA 'opencode' }
-$opencodeStateHome = if ($env:OPENCODE_STATE_HOME) { $env:OPENCODE_STATE_HOME } else { Join-Path $env:LOCALAPPDATA 'opencode' }
+$opencodeStateHome = if ($env:OPENCODE_STATE_HOME) { $env:OPENCODE_STATE_HOME }
+elseif ($env:XDG_STATE_HOME) { Join-Path $env:XDG_STATE_HOME 'opencode' }
+else { Join-Path $HOME '.local/state/opencode' }
 $crushDataHome = if ($env:CRUSH_GLOBAL_DATA) { $env:CRUSH_GLOBAL_DATA } else { Join-Path $env:LOCALAPPDATA 'crush' }
 $swivalProjectHome = if ($env:SWIVAL_PROJECT_HOME) { $env:SWIVAL_PROJECT_HOME } else { (Get-Location).Path }
 
@@ -156,12 +157,58 @@ function Remove-HistoryTarget {
     }
 }
 
+function Clear-OpenCodeSession {
+    if ($DryRun) {
+        Write-Information '[DRY-RUN] Would delete OpenCode sessions through the CLI if available.' -InformationAction Continue
+        return
+    }
+
+    $cli = Get-Command opencode -CommandType Application, ExternalScript -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if (-not $cli) {
+        Write-Warning 'OpenCode session cleanup skipped: opencode was not found.'
+        return
+    }
+
+    $ErrorActionPreference = 'Continue'
+    $PSNativeCommandUseErrorActionPreference = $false
+    $previous = ''
+    while ($true) {
+        $global:LASTEXITCODE = 0
+        $batch = (& $cli.Source session list --max-count 100 --format json 2>$null) -join "`n"
+        if ($LASTEXITCODE -ne 0) { throw 'OpenCode could not list sessions.' }
+        # OpenCode 1 may produce no output when no sessions remain.
+        $batch = $batch.Trim()
+        if (-not $batch) { return }
+        if (-not $batch.StartsWith('[') -or -not $batch.EndsWith(']')) {
+            throw 'OpenCode returned an invalid session list.'
+        }
+        try { $rows = @(ConvertFrom-Json -InputObject $batch -ErrorAction Stop) }
+        catch { throw 'OpenCode returned an invalid session list.' }
+        $ids = @(foreach ($row in $rows) {
+                if ($row.id -isnot [string] -or $row.id -cnotmatch '\Ases_[a-zA-Z0-9]+\z') {
+                    throw 'OpenCode returned an invalid session ID.'
+                }
+                $row.id
+            })
+        if (-not $ids.Count) { return }
+        $fingerprint = ($ids | Sort-Object -CaseSensitive -Unique) -join ' '
+        if ($fingerprint.Split(' ').Count -ne $ids.Count) { throw 'OpenCode returned duplicate session IDs.' }
+        if ($fingerprint -ceq $previous) { throw 'OpenCode session deletion made no progress.' }
+        $previous = $fingerprint
+        foreach ($id in $ids) {
+            $global:LASTEXITCODE = 0
+            & $cli.Source session delete $id >$null 2>$null
+            if ($LASTEXITCODE -ne 0) { throw 'OpenCode could not delete a session.' }
+        }
+    }
+}
+
 $paths = @(
     Get-ClaudeHistoryTarget $claudeHome
     Get-HistoryTarget $codexHome -Directories @('sessions', 'archived_sessions')
     Get-HistoryTarget $copilotHome -Directories @('session-state', 'logs')
     Get-HistoryTarget $opencodeStateHome -Files @('prompt-history.jsonl')
-    Get-HistoryTarget $opencodeDataHome -Files @('opencode.db', 'opencode.db-wal', 'opencode.db-shm') -Directories @('log')
     Get-HistoryTarget (Join-Path $swivalProjectHome '.swival') -Files @('HISTORY.md', 'HISTORY.md.lock', 'continue.md',
         'repl_history', 'cache.db') -Directories @('memory', 'audit')
 )
@@ -171,6 +218,7 @@ if ($IncludeCrushData) {
 
 # Preflight all selected targets before deleting any of them.
 foreach ($target in $paths) { Assert-HistoryTarget $target.Path $target.Directory }
+Clear-OpenCodeSession
 foreach ($target in $paths) { Remove-HistoryTarget $target.Path $target.Directory }
 if (-not $IncludeCrushData) {
     Write-Information "[INFO] Preserving Crush data directory (use -IncludeCrushData to remove it): $crushDataHome" -InformationAction Continue

@@ -24,9 +24,8 @@ CODEX_HOME=${CODEX_HOME:-"$HOME/.codex"}
 CLAUDE_HOME=${CLAUDE_CONFIG_DIR:-"$HOME/.claude"}
 # OpenCode prompt history is separate from its session and credential database.
 COPILOT_HOME=${COPILOT_HOME:-"$HOME/.copilot"}
-# OpenCode splits prompt history (state) from its database and logs (data).
+# OpenCode prompt history is separate from its session and credential database.
 OPENCODE_STATE_HOME=${OPENCODE_STATE_HOME:-"${XDG_STATE_HOME:-$HOME/.local/state}/opencode"}
-OPENCODE_DATA_HOME=${OPENCODE_DATA_HOME:-"${XDG_DATA_HOME:-$HOME/.local/share}/opencode"}
 # Crush exposes its data directory as CRUSH_GLOBAL_DATA.
 CRUSH_DATA_HOME=${CRUSH_GLOBAL_DATA:-"${XDG_DATA_HOME:-$HOME/.local/share}/crush"}
 # Swival state is project-local; default to the current working directory.
@@ -158,6 +157,50 @@ purge_claude_history() {
 	done
 }
 
+purge_opencode_history() {
+	typeset batch ids previous='' session_id
+	if [ "$DRY_RUN" -eq 1 ]; then
+		printf '%s\n' '[DRY-RUN] would delete OpenCode sessions through the CLI if available.'
+	elif ! command -v opencode >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
+		printf '%s\n' '[WARN] OpenCode session cleanup requires opencode and jq.' >&2
+	else
+		while :; do
+			if ! batch=$(command opencode session list --max-count 100 --format json 2>/dev/null); then
+				printf '%s\n' '[ERROR] OpenCode could not list sessions.' >&2
+				return 1
+			fi
+			# OpenCode 1 may produce no output when no sessions remain.
+			[ -n "$batch" ] || break
+			if ! ids=$(printf '%s\n' "$batch" | jq -sr '
+				if length == 1 and (.[0] | type == "array"
+					and all(.[]; type == "object" and (.id | type == "string" and test("^ses_[a-zA-Z0-9]+$")))
+					and (map(.id) | length == (unique | length)))
+				then .[0] | sort_by(.id) | .[].id else error("invalid session list") end
+			' 2>/dev/null); then
+				printf '%s\n' '[ERROR] OpenCode returned an invalid session list.' >&2
+				return 1
+			fi
+			[ -n "$ids" ] || break
+			if [ "$ids" = "$previous" ]; then
+				printf '%s\n' '[ERROR] OpenCode session deletion made no progress.' >&2
+				return 1
+			fi
+			previous=$ids
+			while IFS= read -r session_id; do
+				if ! command opencode session delete "$session_id" >/dev/null 2>&1; then
+					printf '%s\n' '[ERROR] OpenCode could not delete a session.' >&2
+					return 1
+				fi
+			done <<EOF
+$ids
+EOF
+		done
+	fi
+	remove_history_files "$OPENCODE_STATE_HOME/prompt-history.jsonl"
+}
+
+purge_opencode_history
+
 purge_claude_history
 
 # Remove only history/state paths; configuration or credential files that sit
@@ -166,12 +209,6 @@ remove_paths "$CODEX_HOME/sessions" "$CODEX_HOME/archived_sessions"
 remove_paths "$COPILOT_HOME/session-state" "$COPILOT_HOME/logs"
 # Include the SQLite write-ahead log and shared-memory file so no deleted
 # conversation state can be replayed from them.
-remove_paths \
-	"$OPENCODE_STATE_HOME/prompt-history.jsonl" \
-	"$OPENCODE_DATA_HOME/opencode.db" \
-	"$OPENCODE_DATA_HOME/opencode.db-wal" \
-	"$OPENCODE_DATA_HOME/opencode.db-shm" \
-	"$OPENCODE_DATA_HOME/log"
 # Crush's data directory may include configuration; require an explicit opt-in.
 if [ "$INCLUDE_CRUSH" -eq 1 ]; then
 	remove_paths "$CRUSH_DATA_HOME"

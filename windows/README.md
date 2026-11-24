@@ -18,6 +18,15 @@ transcripts under `CLAUDE_CONFIG_DIR` (default `~/.claude`). Settings, login
 credentials, and project auto memory are preserved. See the
 [Claude directory reference](https://code.claude.com/docs/en/claude-directory).
 
+OpenCode session cleanup needs `opencode` on
+`PATH`. It uses the CLI to delete sessions in the current project on OpenCode
+2, and clears local prompt recall under `XDG_STATE_HOME/opencode` or
+`~/.local/state/opencode`. Set `OPENCODE_STATE_HOME` for a different prompt
+history directory. The SQLite database, its companion files,
+and authentication data stay in place. The preview does not launch OpenCode.
+[OpenCode session commands](https://opencode.ai/docs/cli/commands/#session) ·
+[OpenCode credential storage](https://opencode.ai/docs/cli/providers/#storage)
+
 From the repository root, in Command Prompt:
 
 ```bat

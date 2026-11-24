@@ -126,6 +126,10 @@ description: >-
   tree also contains auto memory and must never be removed wholesale.
   Reject symbolic links or reparse points on transcript paths and their
   ancestors in both preview and deletion.
+  OpenCode 2 stores credentials in the same SQLite database as sessions.
+  Preserve the database and its WAL/SHM files. Use the documented session
+  commands, validate the complete output batch before deleting any IDs, and
+  keep the preview free of CLI calls that could start OpenCode.
 - `debian/install-hardened-malloc.bash` edits `/etc/ld.so.preload` and a
   sysctl file.
 - `debian/enable-tor-transport.bash` rewrites APT sources and keeps a

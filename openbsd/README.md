@@ -10,7 +10,7 @@ and is not user-facing.
 
 | Script | Purpose and usage |
 | --- | --- |
-| [ai-purge-history.ksh](ai-purge-history.ksh) | Deletes Codex, Copilot, and Claude Code sessions and project-local Swival history/state; preserves configuration and credentials. Crush data is preserved unless `--include-crush-data` is given. Supports `--dry-run`/`-n` or `DRY_RUN=1`. OpenCode is not handled on OpenBSD. |
+| [ai-purge-history.ksh](ai-purge-history.ksh) | Deletes Codex, Copilot, and Claude Code sessions and project-local Swival history/state; preserves configuration and credentials. Crush data is preserved unless `--include-crush-data` is given. Supports `--dry-run`/`-n` or `DRY_RUN=1`. OpenCode session cleanup requires an available CLI. |
 | [clean-logs.ksh](clean-logs.ksh) | Removes `.gz` logs under `/var/log` and `.old` files older than 7 days in a bounded set of system directories. Use `--dry-run` to preview; real deletion requires `--force`. |
 | [sudo-wrapper.ksh](sudo-wrapper.ksh) | Routes `sudo` to `doas` and handles `visudo` and `sudoedit`. The install target creates matching symlinks; configure `doas` permissions separately. |
 | [sync-website.ksh](sync-website.ksh) | Synchronizes the configured website from GitHub through `gh`, Git, or a ZIP fallback, fixes permissions, and restarts its service. |
@@ -21,6 +21,13 @@ Claude Code cleanup removes local prompt history and conversation and subagent
 transcripts under `CLAUDE_CONFIG_DIR` (default `~/.claude`). Settings, login
 credentials, and project auto memory are preserved. See the
 [Claude directory reference](https://code.claude.com/docs/en/claude-directory).
+
+OpenCode session cleanup needs `opencode` and `jq` on
+`PATH`. It uses the CLI to delete sessions in the current project on OpenCode
+2, and clears local prompt recall. The SQLite database, its companion files,
+and authentication data stay in place. The preview does not launch OpenCode.
+[OpenCode session commands](https://opencode.ai/docs/cli/commands/#session) ·
+[OpenCode credential storage](https://opencode.ai/docs/cli/providers/#storage)
 
 Example from the repository root:
 

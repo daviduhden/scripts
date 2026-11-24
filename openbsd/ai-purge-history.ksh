@@ -5,7 +5,6 @@ set -eu
 # AI assistant history cleanup for OpenBSD.
 # - Removes session history for Codex, GitHub Copilot, and Claude Code.
 # - Removes Crush data and project-local Swival history/state.
-# - Deliberately does not handle OpenCode on OpenBSD.
 # - Keeps configuration files and credentials intact.
 # - Supports --dry-run/-n or DRY_RUN=1 to preview without deleting.
 #
@@ -25,6 +24,7 @@ set -eu
 CODEX_HOME=${CODEX_HOME:-"$HOME/.codex"}
 CLAUDE_HOME=${CLAUDE_CONFIG_DIR:-"$HOME/.claude"}
 COPILOT_HOME=${COPILOT_HOME:-"$HOME/.copilot"}
+OPENCODE_STATE_HOME=${OPENCODE_STATE_HOME:-"${XDG_STATE_HOME:-$HOME/.local/state}/opencode"}
 CRUSH_DATA_HOME=${CRUSH_GLOBAL_DATA:-"${XDG_DATA_HOME:-$HOME/.local/share}/crush"}
 SWIVAL_PROJECT_HOME=${SWIVAL_PROJECT_HOME:-"$PWD"}
 
@@ -166,6 +166,50 @@ purge_claude_history() {
 		done
 	done
 }
+
+purge_opencode_history() {
+	typeset batch ids previous='' session_id
+	if [ "$DRY_RUN" -eq 1 ]; then
+		printf '%s\n' '[DRY-RUN] would delete OpenCode sessions through the CLI if available.'
+	elif ! command -v opencode >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
+		printf '%s\n' '[WARN] OpenCode session cleanup requires opencode and jq.' >&2
+	else
+		while :; do
+			if ! batch=$(command opencode session list --max-count 100 --format json 2>/dev/null); then
+				printf '%s\n' '[ERROR] OpenCode could not list sessions.' >&2
+				return 1
+			fi
+			# OpenCode 1 may produce no output when no sessions remain.
+			[ -n "$batch" ] || break
+			if ! ids=$(printf '%s\n' "$batch" | jq -sr '
+				if length == 1 and (.[0] | type == "array"
+					and all(.[]; type == "object" and (.id | type == "string" and test("^ses_[a-zA-Z0-9]+$")))
+					and (map(.id) | length == (unique | length)))
+				then .[0] | sort_by(.id) | .[].id else error("invalid session list") end
+			' 2>/dev/null); then
+				printf '%s\n' '[ERROR] OpenCode returned an invalid session list.' >&2
+				return 1
+			fi
+			[ -n "$ids" ] || break
+			if [ "$ids" = "$previous" ]; then
+				printf '%s\n' '[ERROR] OpenCode session deletion made no progress.' >&2
+				return 1
+			fi
+			previous=$ids
+			while IFS= read -r session_id; do
+				if ! command opencode session delete "$session_id" >/dev/null 2>&1; then
+					printf '%s\n' '[ERROR] OpenCode could not delete a session.' >&2
+					return 1
+				fi
+			done <<EOF
+$ids
+EOF
+		done
+	fi
+	remove_history_files "$OPENCODE_STATE_HOME/prompt-history.jsonl"
+}
+
+purge_opencode_history
 
 purge_claude_history
 
