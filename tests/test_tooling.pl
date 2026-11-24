@@ -411,6 +411,8 @@ subtest 'AI CLI and xerj platform commands install and uninstall' => sub {
               run_command( %options, cmd => [ $bash, $command, '--help' ] );
             is( $help->{returncode}, 0, "$command accepts --help" )
               or diag $help->{stdout} . $help->{stderr};
+            like( $help->{stdout}, qr/\bswival\b/,
+                "$command advertises the Swival selector" );
         }
         if ( is_linux() ) {
             my $invalid = run_command( %options,

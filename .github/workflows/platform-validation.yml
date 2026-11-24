@@ -24,7 +24,7 @@ jobs:
       - name: Install analysis tools in the disposable runner
         run: |
           sudo apt-get update
-          sudo apt-get install -y shellcheck shfmt devscripts ksh bmake perltidy libperl-critic-perl mandoc rsync time
+          sudo apt-get install -y shellcheck shfmt devscripts ksh bmake perltidy libperl-critic-perl mandoc rsync time jq
           if git ls-files -- '*.py' | grep -q .; then
             python3 -m pip install 'ruff==0.17.3'
           fi
@@ -154,8 +154,11 @@ jobs:
         run: |
           if ($PSVersionTable.PSVersion.Major -ne 5) { throw 'Expected Windows PowerShell' }
           foreach ($script in @('update-xerj', 'update-ai-clis')) {
-            & powershell.exe -NoProfile -File "windows/$script.ps1" --help
+            $helpText = & powershell.exe -NoProfile -File "windows/$script.ps1" --help
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            if (($helpText -join "`n") -notmatch '\bswival\b') {
+              throw "$script does not advertise the Swival selector"
+            }
             & powershell.exe -NoProfile -File "windows/$script.ps1" invalid-agent
             if ($LASTEXITCODE -ne 2) { throw "Unexpected usage exit status for $script" }
           }
@@ -181,7 +184,7 @@ jobs:
       - name: Install test tools in the disposable container
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends git make curl ca-certificates file perl rsync
+          apt-get install -y --no-install-recommends git make curl ca-certificates file perl rsync jq
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
