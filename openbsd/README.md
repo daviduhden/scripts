@@ -10,12 +10,17 @@ and is not user-facing.
 
 | Script | Purpose and usage |
 | --- | --- |
-| [ai-purge-history.ksh](ai-purge-history.ksh) | Deletes Codex and Copilot sessions and project-local Swival history/state; preserves configuration and credentials. Crush data is preserved unless `--include-crush-data` is given. Supports `--dry-run`/`-n` or `DRY_RUN=1`. OpenCode is not handled on OpenBSD. |
+| [ai-purge-history.ksh](ai-purge-history.ksh) | Deletes Codex, Copilot, and Claude Code sessions and project-local Swival history/state; preserves configuration and credentials. Crush data is preserved unless `--include-crush-data` is given. Supports `--dry-run`/`-n` or `DRY_RUN=1`. OpenCode is not handled on OpenBSD. |
 | [clean-logs.ksh](clean-logs.ksh) | Removes `.gz` logs under `/var/log` and `.old` files older than 7 days in a bounded set of system directories. Use `--dry-run` to preview; real deletion requires `--force`. |
 | [sudo-wrapper.ksh](sudo-wrapper.ksh) | Routes `sudo` to `doas` and handles `visudo` and `sudoedit`. The install target creates matching symlinks; configure `doas` permissions separately. |
 | [sync-website.ksh](sync-website.ksh) | Synchronizes the configured website from GitHub through `gh`, Git, or a ZIP fallback, fixes permissions, and restarts its service. |
 | [sysupgrade-current.ksh](sysupgrade-current.ksh) | Upgrades to an OpenBSD snapshot and schedules post-upgrade tasks through `/upgrade.site` and `/etc/rc.firsttime`, including configuration maintenance, `dbupdate` system databases, package upgrades, Lynis auditing, and system reporting. `--skip-audit` omits the first-boot Lynis audit; `--help` shows usage. |
 | [update-crush.ksh](update-crush.ksh) | Installs the latest OpenBSD Crush binary after Sigstore and checksum verification. Requires the `cosign` package and the installed `release-verify` helper. Keeps a uniquely named copy of the previous binary and updates DeepSeek configuration under the selected account. Usage: `update-crush.ksh [USER]`. The default user is root. |
+
+Claude Code cleanup removes local prompt history and conversation and subagent
+transcripts under `CLAUDE_CONFIG_DIR` (default `~/.claude`). Settings, login
+credentials, and project auto memory are preserved. See the
+[Claude directory reference](https://code.claude.com/docs/en/claude-directory).
 
 Example from the repository root:
 

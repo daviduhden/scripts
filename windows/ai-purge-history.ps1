@@ -1,7 +1,7 @@
 #!/usr/bin/env pwsh
 
 # AI assistant history cleanup for Windows.
-# - Removes session history for Codex and GitHub Copilot.
+# - Removes session history for Codex, GitHub Copilot, and Claude Code.
 # - Removes OpenCode prompt history, database files and logs.
 # - Removes project-local Swival history/state.
 # - Keeps Codex/Copilot/OpenCode configuration and credentials intact.
@@ -28,7 +28,7 @@ if ($Help) {
     $helpText = @'
 Usage: ai-purge-history.ps1 [-DryRun] [-IncludeCrushData] [-Help]
 
-Removes Codex, Copilot, OpenCode, and project-local Swival history/state for
+Removes Codex, Copilot, Claude Code, OpenCode, and project-local Swival history/state for
 the current user. Codex/Copilot/OpenCode configuration and credentials are
 kept. Crush data is preserved unless -IncludeCrushData is given; that switch
 removes the whole Crush data directory, including any configuration stored
@@ -44,6 +44,7 @@ there.
 
 $codexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $HOME '.codex' }
 $copilotHome = if ($env:COPILOT_HOME) { $env:COPILOT_HOME } else { Join-Path $HOME '.copilot' }
+$claudeHome = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { Join-Path $HOME '.claude' }
 $opencodeDataHome = if ($env:OPENCODE_DATA_HOME) { $env:OPENCODE_DATA_HOME } else { Join-Path $env:LOCALAPPDATA 'opencode' }
 $opencodeStateHome = if ($env:OPENCODE_STATE_HOME) { $env:OPENCODE_STATE_HOME } else { Join-Path $env:LOCALAPPDATA 'opencode' }
 $crushDataHome = if ($env:CRUSH_GLOBAL_DATA) { $env:CRUSH_GLOBAL_DATA } else { Join-Path $env:LOCALAPPDATA 'crush' }
@@ -66,7 +67,7 @@ function Resolve-HistoryRoot {
 }
 
 function Assert-HistoryTarget {
-    param([string]$Path, [bool]$Directory)
+    param([string]$Path, [bool]$Directory, [switch]$SkipDescendants)
 
     # Inspect every ancestor and the leaf before recursing. Missing paths
     # are harmless, but a file masquerading as an ancestor is not.
@@ -81,7 +82,7 @@ function Assert-HistoryTarget {
         $isDirectory = $true
         $current = [IO.Path]::GetDirectoryName($current)
     }
-    if (-not $Directory -or -not [IO.Directory]::Exists($Path)) { return }
+    if ($SkipDescendants -or -not $Directory -or -not [IO.Directory]::Exists($Path)) { return }
 
     $pending = [Collections.Generic.Stack[string]]::new()
     $pending.Push($Path)
@@ -109,6 +110,37 @@ function Get-HistoryTarget {
     }
 }
 
+function Get-ClaudeHistoryTarget {
+    param([string]$Root)
+
+    $resolved = Resolve-HistoryRoot $Root
+    $projects = Join-Path $resolved 'projects'
+    Assert-HistoryTarget $projects $true -SkipDescendants
+    Get-HistoryTarget $resolved -Files @('history.jsonl')
+    if (-not [IO.Directory]::Exists($projects)) { return }
+
+    foreach ($project in Get-ChildItem -LiteralPath $projects -Directory -Force) {
+        Assert-HistoryTarget $project.FullName $true -SkipDescendants
+        $children = Get-ChildItem -LiteralPath $project.FullName -Force
+        foreach ($entry in $children) {
+            if (-not $entry.PSIsContainer) {
+                if ($entry.Name -like '*.jsonl' -or $entry.Name -like '*.jsonl.superseded-*') {
+                    [pscustomobject]@{ Path = $entry.FullName; Directory = $false }
+                }
+                continue
+            }
+            if ($entry.Name -ieq 'memory') { continue }
+            Assert-HistoryTarget $entry.FullName $true -SkipDescendants
+            $subagents = Join-Path $entry.FullName 'subagents'
+            Assert-HistoryTarget $subagents $true -SkipDescendants
+            if (-not [IO.Directory]::Exists($subagents)) { continue }
+            foreach ($transcript in Get-ChildItem -LiteralPath $subagents -File -Filter '*.jsonl' -Force) {
+                [pscustomobject]@{ Path = $transcript.FullName; Directory = $false }
+            }
+        }
+    }
+}
+
 function Remove-HistoryTarget {
     [CmdletBinding(SupportsShouldProcess)]
     param([string]$Path, [bool]$Directory)
@@ -125,6 +157,7 @@ function Remove-HistoryTarget {
 }
 
 $paths = @(
+    Get-ClaudeHistoryTarget $claudeHome
     Get-HistoryTarget $codexHome -Directories @('sessions', 'archived_sessions')
     Get-HistoryTarget $copilotHome -Directories @('session-state', 'logs')
     Get-HistoryTarget $opencodeStateHome -Files @('prompt-history.jsonl')

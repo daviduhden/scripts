@@ -121,6 +121,11 @@ description: >-
   `-DryRun` preview. Crush data is preserved by default; removing the whole
   directory requires `--include-crush-data` on POSIX or `-IncludeCrushData` on
   Windows.
+  For Claude Code, use `CLAUDE_CONFIG_DIR` (default `~/.claude`). Remove the
+  prompt history and known transcript files individually. The `projects`
+  tree also contains auto memory and must never be removed wholesale.
+  Reject symbolic links or reparse points on transcript paths and their
+  ancestors in both preview and deletion.
 - `debian/install-hardened-malloc.bash` edits `/etc/ld.so.preload` and a
   sysctl file.
 - `debian/enable-tor-transport.bash` rewrites APT sources and keeps a

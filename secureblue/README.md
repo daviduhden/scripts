@@ -10,7 +10,7 @@ the target user's session.
 
 | Script | Purpose |
 | --- | --- |
-| [ai-purge-history.bash](ai-purge-history.bash) | Deletes Codex, Copilot, OpenCode, and project-local Swival history/state while retaining configuration and credentials. Crush data is preserved unless `--include-crush-data` is given. Supports `--dry-run`/`-n` or `DRY_RUN=1`. |
+| [ai-purge-history.bash](ai-purge-history.bash) | Deletes Codex, Copilot, Claude Code, OpenCode, and project-local Swival history/state while retaining configuration and credentials. Crush data is preserved unless `--include-crush-data` is given. Supports `--dry-run`/`-n` or `DRY_RUN=1`. |
 | [down-music.bash](down-music.bash) | Downloads YouTube audio with `yt-dlp`, converts it to OGG Vorbis with FFmpeg, and normalizes the output filename. Takes a video URL. |
 | [install-arti-service.bash](install-arti-service.bash) | Installs and starts the Arti systemd user service, creates XDG directories and configuration, and optionally enables the socat proxy. |
 | [install-openrsync.bash](install-openrsync.bash) | Builds openrsync from its upstream master branch and installs it to `/usr/local`, using Homebrew build dependencies. |
@@ -27,6 +27,11 @@ the target user's session.
 | [update-perl-modules.bash](update-perl-modules.bash) | Updates the Perl distributions in the user's local::lib (default `$HOME/perl5`) with `cpan-outdated` and `cpanm`, excluding dual-life core modules unless `--include-core` is given. |
 | [update-xd-torrent.bash](update-xd-torrent.bash) | Builds XD and installs its systemd user service and XDG data directory; supports `--skip-service-and-user-setup`. |
 | [update-xerj.bash](update-xerj.bash) | Installs the verified static xerj release in `~/.local/bin` and registers its stdio MCP server with selected installed agents. |
+
+Claude Code cleanup removes local prompt history and conversation and subagent
+transcripts under `CLAUDE_CONFIG_DIR` (default `~/.claude`). Settings, login
+credentials, and project auto memory are preserved. See the
+[Claude directory reference](https://code.claude.com/docs/en/claude-directory).
 
 Examples from the repository root:
 

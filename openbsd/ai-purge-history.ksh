@@ -3,7 +3,7 @@
 set -eu
 
 # AI assistant history cleanup for OpenBSD.
-# - Removes session history for Codex and GitHub Copilot.
+# - Removes session history for Codex, GitHub Copilot, and Claude Code.
 # - Removes Crush data and project-local Swival history/state.
 # - Deliberately does not handle OpenCode on OpenBSD.
 # - Keeps configuration files and credentials intact.
@@ -23,6 +23,7 @@ set -eu
 # and falls back to ~/.local/share, while Swival state is tied to the current
 # project directory unless SWIVAL_PROJECT_HOME points elsewhere.
 CODEX_HOME=${CODEX_HOME:-"$HOME/.codex"}
+CLAUDE_HOME=${CLAUDE_CONFIG_DIR:-"$HOME/.claude"}
 COPILOT_HOME=${COPILOT_HOME:-"$HOME/.copilot"}
 CRUSH_DATA_HOME=${CRUSH_GLOBAL_DATA:-"${XDG_DATA_HOME:-$HOME/.local/share}/crush"}
 SWIVAL_PROJECT_HOME=${SWIVAL_PROJECT_HOME:-"$PWD"}
@@ -43,7 +44,7 @@ INCLUDE_CRUSH=0
 usage() {
 	print "Usage: ai-purge-history.ksh [--dry-run|-n] [--include-crush-data] [--help]"
 	print ""
-	print "Removes Codex, Copilot, Crush, and project-local Swival"
+	print "Removes Codex, Copilot, Claude Code, Crush, and project-local Swival"
 	print "history/state for the current user. Configuration and"
 	print "credentials are kept."
 	print ""
@@ -115,6 +116,58 @@ remove_paths() {
 		fi
 	done
 }
+
+# Claude's projects tree also holds auto memory. Select only transcript files.
+history_no_symlinks() {
+	typeset ancestor="$1"
+	validate_remove_path "$ancestor" || return 1
+	while [ -n "$ancestor" ]; do
+		if [ -L "$ancestor" ]; then
+			printf '[ERROR] refusing a history path through a symbolic link: %s\n' "$ancestor" >&2
+			return 1
+		fi
+		ancestor=${ancestor%/*}
+	done
+}
+
+remove_history_files() {
+	typeset path
+	for path in "$@"; do
+		history_no_symlinks "$path" || return 1
+		[ -f "$path" ] || continue
+		if [ "$DRY_RUN" -eq 1 ]; then
+			printf '[DRY-RUN] would remove: %s\n' "$path"
+		else
+			rm -f -- "$path" || return 1
+		fi
+	done
+}
+
+purge_claude_history() {
+	typeset projects project session subagents
+	while [ "${CLAUDE_HOME%/}" != "$CLAUDE_HOME" ]; do
+		CLAUDE_HOME=${CLAUDE_HOME%/}
+	done
+	history_no_symlinks "$CLAUDE_HOME" || return 1
+	projects="$CLAUDE_HOME/projects"
+	history_no_symlinks "$projects" || return 1
+	remove_history_files "$CLAUDE_HOME/history.jsonl" || return 1
+	for project in "$projects"/*; do
+		[ -L "$project" ] || [ -d "$project" ] || continue
+		history_no_symlinks "$project" || return 1
+		remove_history_files "$project"/*.jsonl "$project"/*.jsonl.superseded-* || return 1
+		for session in "$project"/*; do
+			[ "${session##*/}" != memory ] || continue
+			[ -L "$session" ] || [ -d "$session" ] || continue
+			history_no_symlinks "$session" || return 1
+			subagents="$session/subagents"
+			history_no_symlinks "$subagents" || return 1
+			remove_history_files "$subagents"/*.jsonl || return 1
+		done
+	done
+}
+
+purge_claude_history
 
 # Codex and Copilot: remove session state and logs only. Configuration,
 # credentials, and other files in those home directories are left intact.

@@ -8,10 +8,15 @@ checkout or an extracted copy; its paths are resolved relative to the installer.
 | [install-windows.bat](install-windows.bat) | Installs public Perl programs, the PowerShell scripts in this directory, and `test-format/psfmt.ps1`; creates command launchers and optionally adds their directory to the user PATH. |
 | [update-ai-clis.ps1](update-ai-clis.ps1) | Installs or updates OpenCode 2.x, Codex, Crush, GitHub Copilot CLI, and Claude Code for the current user. |
 | [update-xerj.ps1](update-xerj.ps1) | Installs or updates verified xerj and registers its stdio MCP server with selected installed agents. |
-| [ai-purge-history.ps1](ai-purge-history.ps1) | Deletes Codex, Copilot, OpenCode, and project-local Swival history/state. Crush data is preserved unless `-IncludeCrushData` is given; that switch removes the entire `%LOCALAPPDATA%\crush` directory, including any configuration stored there. Use `-DryRun` to preview. |
+| [ai-purge-history.ps1](ai-purge-history.ps1) | Deletes Codex, Copilot, Claude Code, OpenCode, and project-local Swival history/state. Crush data is preserved unless `-IncludeCrushData` is given; that switch removes the entire `%LOCALAPPDATA%\crush` directory, including any configuration stored there. Use `-DryRun` to preview. |
 | [launcher.cmd](launcher.cmd) | Internal template for installed Perl launchers. Uses the recorded Perl interpreter and forwards arguments and exit status. |
 | [powershell-launcher.cmd](powershell-launcher.cmd) | Internal template for PowerShell launchers. Prefers PowerShell 7 in its standard Program Files location, falls back to the system Windows PowerShell, and forwards arguments and exit status. |
 | [test-format/psfmt.ps1](test-format/psfmt.ps1) | Formats and checks PowerShell files with PSScriptAnalyzer; requires PowerShell 7. See [its README](test-format/README.md). |
+
+Claude Code cleanup removes local prompt history and conversation and subagent
+transcripts under `CLAUDE_CONFIG_DIR` (default `~/.claude`). Settings, login
+credentials, and project auto memory are preserved. See the
+[Claude directory reference](https://code.claude.com/docs/en/claude-directory).
 
 From the repository root, in Command Prompt:
 

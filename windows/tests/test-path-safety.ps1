@@ -11,7 +11,8 @@ if (-not $IsWindows) { throw 'These ACL and junction checks require Windows.' }
 . (Join-Path $PSScriptRoot '../install-support/trust.ps1')
 $root = Initialize-InstallStage
 $purge = Join-Path $PSScriptRoot '../ai-purge-history.ps1'
-$variables = @('CODEX_HOME', 'COPILOT_HOME', 'OPENCODE_DATA_HOME', 'OPENCODE_STATE_HOME', 'SWIVAL_PROJECT_HOME')
+$variables = @('CODEX_HOME', 'COPILOT_HOME', 'OPENCODE_DATA_HOME', 'OPENCODE_STATE_HOME', 'SWIVAL_PROJECT_HOME',
+    'CLAUDE_CONFIG_DIR')
 $previous = @{}
 
 function Assert-RejectedPath {
@@ -33,7 +34,27 @@ try {
     $file = Join-Path $sessions 'fixture.txt'
     [IO.File]::WriteAllText($file, 'keep')
     $null = Assert-InstallPath $codex -Directory
-    & $purge -DryRun
+    $claude = $env:CLAUDE_CONFIG_DIR
+    $project = Join-Path $claude 'projects/example'
+    $memory = Join-Path $project 'memory/subagents'
+    $subagents = Join-Path $project 'session/subagents'
+    $null = New-Item -ItemType Directory -Path $memory, $subagents -Force
+    $selected = @((Join-Path $claude 'history.jsonl'), (Join-Path $project 'session.jsonl'),
+        (Join-Path $project 'session.jsonl.superseded-1'), (Join-Path $subagents 'agent.jsonl'))
+    $preserved = @((Join-Path $claude 'settings.json'), (Join-Path $claude '.credentials.json'),
+        (Join-Path $memory 'notes.jsonl'))
+    foreach ($path in ($selected + $preserved)) { [IO.File]::WriteAllText($path, 'fixture') }
+    $preview = & $purge -DryRun 6>&1 | Out-String
+    foreach ($path in $selected) {
+        if (-not $preview.Contains([IO.Path]::GetFullPath($path)) -or -not [IO.File]::Exists($path)) {
+            throw "Claude dry run missed a transcript or changed it: $path"
+        }
+    }
+    foreach ($path in $preserved) {
+        if ($preview.Contains([IO.Path]::GetFullPath($path)) -or -not [IO.File]::Exists($path)) {
+            throw "Claude dry run selected a preserved file: $path"
+        }
+    }
     if (-not [IO.File]::Exists($file)) { throw 'The dry run modified history.' }
 
     $writable = Join-Path $root 'shared'

@@ -4,7 +4,7 @@ set -euo pipefail
 
 # AI assistant history cleanup for SecureBlue.
 #
-# Removes conversation and session state for Codex, GitHub Copilot, OpenCode,
+# Removes conversation and session state for Codex, GitHub Copilot, Claude Code, OpenCode,
 # Crush, and the Swival project selected by SWIVAL_PROJECT_HOME. Configuration
 # files and credentials are intentionally left in place.
 #
@@ -21,6 +21,8 @@ set -euo pipefail
 
 # Codex and Copilot keep their state in fixed per-user directories.
 CODEX_HOME=${CODEX_HOME:-"$HOME/.codex"}
+CLAUDE_HOME=${CLAUDE_CONFIG_DIR:-"$HOME/.claude"}
+# OpenCode prompt history is separate from its session and credential database.
 COPILOT_HOME=${COPILOT_HOME:-"$HOME/.copilot"}
 # OpenCode splits prompt history (state) from its database and logs (data).
 OPENCODE_STATE_HOME=${OPENCODE_STATE_HOME:-"${XDG_STATE_HOME:-$HOME/.local/state}/opencode"}
@@ -43,7 +45,7 @@ usage() {
 	cat <<'EOF'
 Usage: ai-purge-history.bash [--dry-run|-n] [--include-crush-data] [--help]
 
-Removes Codex, Copilot, OpenCode, Crush, and project-local Swival
+Removes Codex, Copilot, Claude Code, OpenCode, Crush, and project-local Swival
 history/state for the current user. Configuration and credentials are kept.
 
   --dry-run, -n          Show the paths that would be removed, delete nothing
@@ -105,6 +107,58 @@ remove_paths() {
 		fi
 	done
 }
+
+# Claude's projects tree also holds auto memory. Select only transcript files.
+history_no_symlinks() {
+	typeset ancestor="$1"
+	validate_remove_path "$ancestor" || return 1
+	while [ -n "$ancestor" ]; do
+		if [ -L "$ancestor" ]; then
+			printf '[ERROR] refusing a history path through a symbolic link: %s\n' "$ancestor" >&2
+			return 1
+		fi
+		ancestor=${ancestor%/*}
+	done
+}
+
+remove_history_files() {
+	typeset path
+	for path in "$@"; do
+		history_no_symlinks "$path" || return 1
+		[ -f "$path" ] || continue
+		if [ "$DRY_RUN" -eq 1 ]; then
+			printf '[DRY-RUN] would remove: %s\n' "$path"
+		else
+			rm -f -- "$path" || return 1
+		fi
+	done
+}
+
+purge_claude_history() {
+	typeset projects project session subagents
+	while [ "${CLAUDE_HOME%/}" != "$CLAUDE_HOME" ]; do
+		CLAUDE_HOME=${CLAUDE_HOME%/}
+	done
+	history_no_symlinks "$CLAUDE_HOME" || return 1
+	projects="$CLAUDE_HOME/projects"
+	history_no_symlinks "$projects" || return 1
+	remove_history_files "$CLAUDE_HOME/history.jsonl" || return 1
+	for project in "$projects"/*; do
+		[ -L "$project" ] || [ -d "$project" ] || continue
+		history_no_symlinks "$project" || return 1
+		remove_history_files "$project"/*.jsonl "$project"/*.jsonl.superseded-* || return 1
+		for session in "$project"/*; do
+			[ "${session##*/}" != memory ] || continue
+			[ -L "$session" ] || [ -d "$session" ] || continue
+			history_no_symlinks "$session" || return 1
+			subagents="$session/subagents"
+			history_no_symlinks "$subagents" || return 1
+			remove_history_files "$subagents"/*.jsonl || return 1
+		done
+	done
+}
+
+purge_claude_history
 
 # Remove only history/state paths; configuration or credential files that sit
 # beside them (for example Codex auth files) are not listed here.

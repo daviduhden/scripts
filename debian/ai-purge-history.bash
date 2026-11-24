@@ -3,7 +3,7 @@
 set -euo pipefail
 
 # AI assistant history cleanup for Debian.
-# - Removes session history for Codex and GitHub Copilot.
+# - Removes session history for Codex, GitHub Copilot, and Claude Code.
 # - Removes OpenCode prompt history, database files and logs.
 # - Removes Crush data and project-local Swival history/state.
 # - Keeps configuration files and credentials intact.
@@ -14,7 +14,7 @@ set -euo pipefail
 # no prompt, backup, or trash step.
 #
 # The history locations can be overridden with CODEX_HOME,
-# COPILOT_HOME, OPENCODE_STATE_HOME, OPENCODE_DATA_HOME, and
+# COPILOT_HOME, CLAUDE_CONFIG_DIR, OPENCODE_STATE_HOME, OPENCODE_DATA_HOME, and
 # CRUSH_GLOBAL_DATA, plus the standard XDG variables. Set
 # SWIVAL_PROJECT_HOME to select the project whose .swival state is
 # purged; it defaults to the current working directory.
@@ -23,6 +23,7 @@ set -euo pipefail
 # and license details.
 
 CODEX_HOME=${CODEX_HOME:-"$HOME/.codex"}
+CLAUDE_HOME=${CLAUDE_CONFIG_DIR:-"$HOME/.claude"}
 COPILOT_HOME=${COPILOT_HOME:-"$HOME/.copilot"}
 OPENCODE_STATE_HOME=${OPENCODE_STATE_HOME:-"${XDG_STATE_HOME:-$HOME/.local/state}/opencode"}
 OPENCODE_DATA_HOME=${OPENCODE_DATA_HOME:-"${XDG_DATA_HOME:-$HOME/.local/share}/opencode"}
@@ -42,7 +43,7 @@ usage() {
 	cat <<'EOF'
 Usage: ai-purge-history.bash [--dry-run|-n] [--include-crush-data] [--help]
 
-Removes Codex, Copilot, OpenCode, Crush, and project-local Swival
+Removes Codex, Copilot, Claude Code, OpenCode, Crush, and project-local Swival
 history/state for the current user. Configuration and credentials are kept.
 
   --dry-run, -n          Show the paths that would be removed, delete nothing
@@ -104,6 +105,58 @@ remove_paths() {
 		fi
 	done
 }
+
+# Claude's projects tree also holds auto memory. Select only transcript files.
+history_no_symlinks() {
+	typeset ancestor="$1"
+	validate_remove_path "$ancestor" || return 1
+	while [ -n "$ancestor" ]; do
+		if [ -L "$ancestor" ]; then
+			printf '[ERROR] refusing a history path through a symbolic link: %s\n' "$ancestor" >&2
+			return 1
+		fi
+		ancestor=${ancestor%/*}
+	done
+}
+
+remove_history_files() {
+	typeset path
+	for path in "$@"; do
+		history_no_symlinks "$path" || return 1
+		[ -f "$path" ] || continue
+		if [ "$DRY_RUN" -eq 1 ]; then
+			printf '[DRY-RUN] would remove: %s\n' "$path"
+		else
+			rm -f -- "$path" || return 1
+		fi
+	done
+}
+
+purge_claude_history() {
+	typeset projects project session subagents
+	while [ "${CLAUDE_HOME%/}" != "$CLAUDE_HOME" ]; do
+		CLAUDE_HOME=${CLAUDE_HOME%/}
+	done
+	history_no_symlinks "$CLAUDE_HOME" || return 1
+	projects="$CLAUDE_HOME/projects"
+	history_no_symlinks "$projects" || return 1
+	remove_history_files "$CLAUDE_HOME/history.jsonl" || return 1
+	for project in "$projects"/*; do
+		[ -L "$project" ] || [ -d "$project" ] || continue
+		history_no_symlinks "$project" || return 1
+		remove_history_files "$project"/*.jsonl "$project"/*.jsonl.superseded-* || return 1
+		for session in "$project"/*; do
+			[ "${session##*/}" != memory ] || continue
+			[ -L "$session" ] || [ -d "$session" ] || continue
+			history_no_symlinks "$session" || return 1
+			subagents="$session/subagents"
+			history_no_symlinks "$subagents" || return 1
+			remove_history_files "$subagents"/*.jsonl || return 1
+		done
+	done
+}
+
+purge_claude_history
 
 # Only session/state paths are listed here; configuration files and
 # credentials in the same home directories are intentionally omitted.

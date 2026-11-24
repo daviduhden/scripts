@@ -22,7 +22,7 @@ users.
 | [add-i2pd-repo.bash](add-i2pd-repo.bash) | Adds the Purple I2P APT repository with a fingerprint-checked keyring, installs `i2pd`, and starts its service on supported init systems. |
 | [add-lynis-repo.bash](add-lynis-repo.bash) | Adds the CISOfy APT repository with a fingerprint-checked keyring and installs Lynis. |
 | [add-tor-repo.bash](add-tor-repo.bash) | Adds the Tor Project APT repository with a fingerprint-checked keyring, installs Tor, and configures its service. |
-| [ai-purge-history.bash](ai-purge-history.bash) | Deletes Codex, Copilot, OpenCode, and project-local Swival history/state while retaining configuration and credentials. Crush data is preserved unless `--include-crush-data` is given. Supports `--dry-run`/`-n` or `DRY_RUN=1`. |
+| [ai-purge-history.bash](ai-purge-history.bash) | Deletes Codex, Copilot, Claude Code, OpenCode, and project-local Swival history/state while retaining configuration and credentials. Crush data is preserved unless `--include-crush-data` is given. Supports `--dry-run`/`-n` or `DRY_RUN=1`. |
 | [clean-logs.bash](clean-logs.bash) | Deletes compressed logs under `/var/log` and `.old` files older than 7 days in `/var/log`, `/var/tmp`, `/tmp` and `/etc`. Real deletion requires `--force`; `--older-than DAYS` changes the age. |
 | [enable-tor-transport.bash](enable-tor-transport.bash) | Installs Tor transport support and rewrites APT sources to use it, keeping timestamped source backups. |
 | [install-hardened-malloc.bash](install-hardened-malloc.bash) | Builds GrapheneOS hardened_malloc on Debian 13 and configures global preloading; supports amd64 and arm64. |
@@ -41,6 +41,11 @@ users.
 | [update-xd-torrent.bash](update-xd-torrent.bash) | Builds XD as an unprivileged account and installs the system unit defined by this repository. The service runs as `xd`. `--skip-service-and-user-setup` skips service setup. |
 | [update-xerj.bash](update-xerj.bash) | Installs verified upstream xerj assets through APT on Debian 13 or later. |
 | [rpi-update-safe.bash](rpi-update-safe.bash) | Runs `rpi-update` without rebooting on Raspberry Pi 5, then validates and repairs the selected DTB and initramfs with backups. Requires root and can change firmware, modules, and boot files; it does not provide a complete updater rollback. |
+
+Claude Code cleanup removes local prompt history and conversation and subagent
+transcripts under `CLAUDE_CONFIG_DIR` (default `~/.claude`). Settings, login
+credentials, and project auto memory are preserved. See the
+[Claude directory reference](https://code.claude.com/docs/en/claude-directory).
 
 Examples from the repository root:
 
