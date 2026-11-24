@@ -169,8 +169,13 @@ temporary trees and must not touch repository files.
 
 Keep release extraction roots private to their invoking account, reject
 pre-existing linked member parents, and open member outputs exclusively.
+Use an owned mode-0700 work directory in extraction fixtures, as the
+real updaters do. If an outer download directory must be traversable for
+unprivileged attestation or APT, extract into its own private child.
 Measure representative archive scratch space, RSS and elapsed time using
-the synthetic CI profile before replacing the bounded extractor.
+the synthetic CI profile. The bounded gzip reader feeds Archive::Tar via a
+pipe. Drain past the tar end marker so gzip trailer integrity and expansion
+limits are checked, and reap the worker before accepting extracted output.
 
 For portable rename groups, use no-replace operations for forward moves
 and rollback. On Windows, use bundled `Win32API::File::MoveFileEx` without

@@ -57,9 +57,13 @@ managed_entry() (
 	records="$destination/.scripts-install"
 	record="$records/$install_family/$name"
 
-	[ ! -L "$records" ] && [ ! -L "$records/$install_family" ] ||
+	if [ -L "$records" ] || [ -L "$records/$install_family" ]; then
 		die "invalid install records directory: $records"
+	fi
 	if [ -e "$file" ] || [ -L "$file" ]; then
+		if [ -L "$file" ] && [ "$mode" != link ]; then
+			die "unexpected destination type: $file"
+		fi
 		actual=$(managed_signature "$file") ||
 			die "unexpected destination type: $file"
 		if [ ! -f "$record" ] || [ -L "$record" ] ||
@@ -69,8 +73,10 @@ managed_entry() (
 				die "destination is unmanaged or modified: $file"
 			fi
 			if [ "$mode" = link ]; then
-				[ "$actual" = "link $source" ] ||
-					die "destination is not the expected wrapper link: $file"
+				case "$actual" in
+				"link $source" | "link $destination/$source") : ;;
+				*) die "destination is not the expected wrapper link: $file" ;;
+				esac
 			elif [ -L "$file" ] || ! cmp -s "$source" "$file"; then
 				die "destination does not match the source: $file"
 			fi
@@ -90,27 +96,41 @@ managed_entry() (
 	install -d "$destination" "$records/$install_family" ||
 		die "cannot create installation directories for $file"
 	stage=$(mktemp -d "$destination/.scripts-stage.XXXXXXXX")
-	trap 'rm -f "$stage/program" "$stage/record"; rmdir "$stage"' 0
+	trap 'rm -f "$stage/program" "$stage/record" "$stage/previous"; rmdir "$stage"' 0
 	trap 'exit 1' HUP INT TERM
 	log "Installing $source -> $file"
+	created_link=0
 	if [ "$mode" = link ]; then
 		# Existing wrapper links are left in place after their target was
 		# checked. mv can follow a destination symlink on some platforms.
 		if [ -L "$file" ]; then
-			[ "$(readlink "$file")" = "$source" ] ||
-				die "unexpected wrapper target: $file"
+			case "$(readlink "$file")" in
+			"$source" | "$destination/$source") : ;;
+			*) die "unexpected wrapper target: $file" ;;
+			esac
 		else
 			ln -s "$source" "$file" || die "cannot link $file"
+			created_link=1
 		fi
 		managed_signature "$file" >"$stage/record"
 	else
 		install -m "$mode" "$source" "$stage/program" ||
 			die "cannot prepare $source"
 		managed_signature "$stage/program" >"$stage/record"
+		if [ -f "$file" ]; then
+			ln "$file" "$stage/previous" || die "cannot prepare rollback for $file"
+		fi
 		mv -f "$stage/program" "$file" || die "cannot publish $file"
 	fi
 	if ! mv -f "$stage/record" "$record"; then
-		die "cannot record $file; inspect the destination before retrying"
+		if [ -f "$stage/previous" ]; then
+			mv -f "$stage/previous" "$file" ||
+				die "cannot record or restore $file; inspect the destination before retrying"
+		elif [ "$mode" != link ] || [ "$created_link" -eq 1 ]; then
+			rm -f "$file" ||
+				die "cannot record or remove $file; inspect the destination before retrying"
+		fi
+		die "cannot record $file; publication was rolled back"
 	fi
 )
 
@@ -126,8 +146,9 @@ remove_managed_entries() (
 	destination=$1
 	records="$destination/.scripts-install"
 	family_dir="$records/$install_family"
-	[ ! -L "$records" ] && [ ! -L "$family_dir" ] ||
+	if [ -L "$records" ] || [ -L "$family_dir" ]; then
 		die "invalid install records directory: $records"
+	fi
 	[ -d "$family_dir" ] || return 0
 	status=0
 	for record in "$family_dir"/*; do
@@ -156,16 +177,17 @@ install_wrapper_links() {
 }
 
 with_install_lock() (
-	lock_directory=$DESTBIN/.scripts-install.lock
-	if [ ! -d "$DESTBIN" ]; then
-		case "$1" in
-		uninstall_platform)
+	destination=$1
+	operation=$2
+	shift 2
+	if [ ! -d "$destination" ]; then
+		if [ "$operation" = remove ]; then
 			"$@"
 			return
-			;;
-		esac
-		mkdir -p "$DESTBIN" || die "cannot create $DESTBIN"
+		fi
+		mkdir -p "$destination" || die "cannot create $destination"
 	fi
+	lock_directory="$destination/.scripts-install.lock"
 	mkdir "$lock_directory" ||
 		die "cannot acquire install lock: $lock_directory"
 	trap 'rmdir "$lock_directory"' 0
@@ -173,9 +195,21 @@ with_install_lock() (
 	"$@"
 )
 
+with_platform_install_locks() {
+	operation=$1
+	family=$2
+	shift 2
+	if [ "$family" = secureblue ] && [ "$DESTBIN" != "$DEST_SYSTEMD_USER" ]; then
+		# Keep the bin/unit lock order consistent across install and removal.
+		with_install_lock "$DESTBIN" "$operation" \
+			with_install_lock "$DEST_SYSTEMD_USER" "$operation" "$@" "$family"
+	else
+		with_install_lock "$DESTBIN" "$operation" "$@" "$family"
+	fi
+}
+
 install_platform() {
 	install_family=$1
-	platform_list=$2
 	for phase in check publish; do
 		install_list "$phase" "$platform_list" "$DESTBIN"
 		if [ "$install_family" = secureblue ]; then
@@ -425,9 +459,18 @@ EOF
 command=${1:-}
 shift || true
 case "$command" in
-install-debian) with_install_lock install_platform debian "${DEBIAN_SCRIPTS:?}" ;;
-install-openbsd) with_install_lock install_platform openbsd "${OPENBSD_SCRIPTS:?}" ;;
-install-secureblue) with_install_lock install_platform secureblue "${SECUREBLUE_SCRIPTS:?}" ;;
+install-debian)
+	platform_list=${DEBIAN_SCRIPTS:?}
+	with_platform_install_locks install debian install_platform
+	;;
+install-openbsd)
+	platform_list=${OPENBSD_SCRIPTS:?}
+	with_platform_install_locks install openbsd install_platform
+	;;
+install-secureblue)
+	platform_list=${SECUREBLUE_SCRIPTS:?}
+	with_platform_install_locks install secureblue install_platform
+	;;
 install-shell-bash-unlock) unlock_shell_dir ;;
 install-shell-bash-copy) copy_shell_files ;;
 install-shell-bash) install_shell_bash ;;
@@ -436,13 +479,13 @@ install-shell-openbsd)
 	log 'OpenBSD does not support chattr immutable flags like Linux.'
 	log 'Copy shell/aliases.bash manually to your preferred shell profile location.'
 	;;
-install-perl) with_install_lock install_perl ;;
+install-perl) with_install_lock "$DESTBIN" install install_perl ;;
 install-tests-format) install_tests_format ;;
-uninstall-debian) with_install_lock uninstall_platform debian ;;
-uninstall-openbsd) with_install_lock uninstall_platform openbsd ;;
-uninstall-secureblue) with_install_lock uninstall_platform secureblue ;;
+uninstall-debian) with_platform_install_locks remove debian uninstall_platform ;;
+uninstall-openbsd) with_platform_install_locks remove openbsd uninstall_platform ;;
+uninstall-secureblue) with_platform_install_locks remove secureblue uninstall_platform ;;
 uninstall-shell) uninstall_shell ;;
-uninstall-perl) with_install_lock uninstall_platform perl ;;
+uninstall-perl) with_platform_install_locks remove perl uninstall_platform ;;
 uninstall-tests-format) uninstall_tests_format ;;
 format) format_sources ;;
 help) show_help ;;

@@ -22,9 +22,9 @@ use warnings;
 use Archive::Tar;
 use Fcntl                  qw(O_CREAT O_EXCL O_WRONLY);
 use File::Basename         qw(dirname);
-use File::Temp             qw(tempfile);
 use IO::Uncompress::Gunzip qw($GunzipError);
 use JSON::PP               ();
+use POSIX                  qw(_exit);
 
 my $command = shift @ARGV // '';
 
@@ -98,21 +98,15 @@ sub json_validate {
     read_json();
 }
 
-sub archive_iterator {
-    my ( $archive, $limit ) = @_;
-    my $max_entries = 200_000;
-    my $max_tar     = $limit + $max_entries * 1024 + 1024;
-    my $compressed  = -s $archive;
-    die "invalid compressed archive size\n"
-      unless defined $compressed && $compressed > 0 && $compressed <= $max_tar;
+sub stream_gzip_child {
+    my ( $archive, $max_tar ) = @_;
     my $gzip = IO::Uncompress::Gunzip->new(
         $archive,
         MultiStream => 1,
         Strict      => 1,
         Transparent => 0,
     ) or die "cannot decode archive: $GunzipError\n";
-    my ( $temporary, $path ) = tempfile( UNLINK => 1 );
-    binmode $temporary or die "cannot set archive mode: $!\n";
+    binmode STDOUT or die "cannot set archive stream mode: $!\n";
     my $unpacked = 0;
 
     while (1) {
@@ -121,22 +115,65 @@ sub archive_iterator {
         last unless $read;
         $unpacked += $read;
         die "archive exceeds expansion limit\n" if $unpacked > $max_tar;
-        print {$temporary} $buffer or die "cannot stage archive: $!\n";
+        print STDOUT $buffer or die "cannot stream archive: $!\n";
     }
-    close $temporary or die "cannot finish staging archive: $!\n";
-    my $next = Archive::Tar->iter($path)
-      or die "cannot read staged archive\n";
-    my $count = 0;
-    return sub {
-        local $Archive::Tar::error         = '';
-        local $Archive::Tar::MAX_FILE_SIZE = $limit;
-        my $entry = $next->();
-        die "cannot read staged archive: " . Archive::Tar->error . "\n"
-          if Archive::Tar->error;
-        die "archive exceeds entry limit\n"
-          if $entry && ++$count > $max_entries;
-        return $entry;
+    close STDOUT or die "cannot finish streaming archive: $!\n";
+    return 1;
+}
+
+sub process_archive {
+    my ( $archive, $limit, $consume ) = @_;
+    my $max_entries = 200_000;
+    my $max_tar     = $limit + $max_entries * 1024 + 1024;
+    my $compressed  = -s $archive;
+    die "invalid compressed archive size\n"
+      unless defined $compressed && $compressed > 0 && $compressed <= $max_tar;
+    my $child = open my $stream, '-|';
+    die "cannot start archive reader: $!\n" unless defined $child;
+    if ( !$child ) {
+        my $ok = eval { stream_gzip_child( $archive, $max_tar ) };
+        print STDERR $@ unless $ok;
+        _exit( $ok ? 0 : 1 );
+    }
+    my $ok = eval {
+        binmode $stream or die "cannot set archive read mode: $!\n";
+        my $next = Archive::Tar->iter($stream) or die "cannot read archive\n";
+        my $count   = 0;
+        my $checked = sub {
+            local $Archive::Tar::error = '';
+
+            # Newer versions enforce this before reading member data. Retain
+            # any stricter upstream cap. Older versions rely on the stream
+            # expansion and extraction limits.
+            my $default_limit = $Archive::Tar::MAX_FILE_SIZE;
+            local $Archive::Tar::MAX_FILE_SIZE = $default_limit
+              && $default_limit < $limit ? $default_limit : $limit;
+            my $entry = $next->();
+            die "cannot read archive: " . Archive::Tar->error . "\n"
+              if Archive::Tar->error;
+            die "archive exceeds entry limit\n"
+              if $entry && ++$count > $max_entries;
+            return $entry;
+        };
+        $consume->($checked);
+
+        # Archive::Tar can stop at the end marker before the gzip trailer.
+        # Consume the rest so decompression checks its CRC and total bound.
+        while (1) {
+            my $size = read $stream, my $discard, 65536;
+            die "cannot drain archive stream: $!\n" unless defined $size;
+            last                                    unless $size;
+        }
+        1;
     };
+    my $error = $@;
+
+    # Closing the pipe reaps the child on both successful and failed parse
+    # paths. An early close also stops a producer blocked on the pipe.
+    my $finished = close $stream;
+    die $error                           unless $ok;
+    die "archive decompression failed\n" unless $finished;
+    return 1;
 }
 
 sub validate_member {
@@ -202,20 +239,26 @@ sub extract_all {
     my ( $archive, $destination, $root, $limit ) = @_;
     usage() unless defined $limit && $limit =~ /\A[0-9]+\z/ && $limit > 0;
     private_directory($destination);
-    my $next = archive_iterator( $archive, $limit );
     my %seen;
     my $total = 0;
-    while ( my $entry = $next->() ) {
-        my $name  = validate_member( $entry, $root, \%seen, \$total, $limit );
-        my @parts = split m{/}, $name;
-        if ( $entry->is_dir ) {
-            ensure_member_directory( $destination, @parts );
-            next;
+    process_archive(
+        $archive, $limit,
+        sub {
+            my ($next) = @_;
+            while ( my $entry = $next->() ) {
+                my $name =
+                  validate_member( $entry, $root, \%seen, \$total, $limit );
+                my @parts = split m{/}, $name;
+                if ( $entry->is_dir ) {
+                    ensure_member_directory( $destination, @parts );
+                    next;
+                }
+                my $leaf      = pop @parts;
+                my $directory = ensure_member_directory( $destination, @parts );
+                write_entry( $entry, "$directory/$leaf" );
+            }
         }
-        my $leaf      = pop @parts;
-        my $directory = ensure_member_directory( $destination, @parts );
-        write_entry( $entry, "$directory/$leaf" );
-    }
+    );
     die "archive does not contain any entries\n" unless keys %seen;
     return 1;
 }
@@ -225,16 +268,21 @@ sub extract_entry {
     usage() unless defined $entry_name && length $entry_name;
     usage() unless defined $limit && $limit =~ /\A[0-9]+\z/ && $limit > 0;
     private_directory( dirname($destination) );
-    my $next = archive_iterator( $archive, $limit );
     my $match;
-    while ( my $entry = $next->() ) {
-        next unless $entry->full_path eq $entry_name;
-        die "expected exactly one regular $entry_name\n"
-          if $match || !$entry->is_file;
-        die "invalid entry size\n"
-          unless $entry->size > 0 && $entry->size <= $limit;
-        $match = $entry;
-    }
+    process_archive(
+        $archive, $limit,
+        sub {
+            my ($next) = @_;
+            while ( my $entry = $next->() ) {
+                next unless $entry->full_path eq $entry_name;
+                die "expected exactly one regular $entry_name\n"
+                  if $match || !$entry->is_file;
+                die "invalid entry size\n"
+                  unless $entry->size > 0 && $entry->size <= $limit;
+                $match = $entry;
+            }
+        }
+    );
     die "expected exactly one regular $entry_name\n" unless $match;
     write_entry( $match, $destination );
     return 1;

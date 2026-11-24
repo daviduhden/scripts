@@ -317,11 +317,10 @@ ensure_packages() {
 			command -v "$command" >/dev/null || return
 		fi
 	done
-	if [[ $phase == install && ($agent == opencode || $agent == codex || $agent == copilot-cli) ]]; then
-		command -v perl >/dev/null && [[ -r $RELEASE_HELPER ]] || {
-			warn "Perl and the installed release-verify helper are required for archive verification."
-			return 1
-		}
+	if [[ $phase == install && ($agent == opencode || $agent == codex || $agent == copilot-cli) ]] &&
+		{ ! command -v perl >/dev/null || [[ ! -r $RELEASE_HELPER ]]; }; then
+		warn "Perl and the installed release-verify helper are required for archive verification."
+		return 1
 	fi
 }
 
@@ -853,12 +852,12 @@ verify_session() {
 		warn "A fresh ${SHELL_BIN##*/} login resolves $binary to ${path:-nothing}, expected $expected."
 		return 1
 	}
-	session_version=$(sed '1,/^__scripts_ai_cli_version__$/d' <<<"$output") &&
-		session_version=$(parse_version "$session_version") &&
-		[[ ${session_version%%+*} == "${FINAL%%+*}" ]] || {
+	if ! session_version=$(sed '1,/^__scripts_ai_cli_version__$/d' <<<"$output") ||
+		! session_version=$(parse_version "$session_version") ||
+		[[ ${session_version%%+*} != "${FINAL%%+*}" ]]; then
 		warn "$binary did not report version $FINAL in a fresh login."
 		return 1
-	}
+	fi
 	# Also make newly discovered executables available to later probes.
 	case ":$ORIGINAL_PATH:" in
 	*":${expected%/*}:"*) ;;
@@ -1025,7 +1024,7 @@ setup_runtime() {
 			break
 		fi
 	done
-	if ((! supported)); then
+	if ((supported == 0)); then
 		return 0
 	fi
 	ensure_user_dir "$HOME_DIR/.local" && ensure_user_dir "$HOME_DIR/.local/share" &&

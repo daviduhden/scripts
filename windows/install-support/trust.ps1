@@ -10,8 +10,21 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 
+function Get-InstallPathAcl {
+    param([string]$ItemPath, [bool]$Directory)
+
+    # The batch installer may start Windows PowerShell from pwsh, whose
+    # inherited module search path differs. Use the engine's filesystem API.
+    if ($PSVersionTable.PSEdition -eq 'Desktop') {
+        if ($Directory) { return [IO.Directory]::GetAccessControl($ItemPath) }
+        return [IO.File]::GetAccessControl($ItemPath)
+    }
+    if ($Directory) { return [IO.FileSystemAclExtensions]::GetAccessControl([IO.DirectoryInfo]::new($ItemPath)) }
+    return [IO.FileSystemAclExtensions]::GetAccessControl([IO.FileInfo]::new($ItemPath))
+}
+
 function Assert-InstallPath {
-    param([string]$Candidate, [switch]$Directory, [switch]$AppAlias)
+    param([string]$Candidate, [switch]$Directory)
     if ($Candidate -notmatch '^[A-Za-z]:[\\/]' -or $Candidate.Substring(2) -match '[:;%!^"'']') {
         throw 'Install paths must be absolute local filesystem paths representable by CMD.'
     }
@@ -37,12 +50,10 @@ function Assert-InstallPath {
     while ($current) {
         $item = Get-Item -LiteralPath $current -Force -ErrorAction SilentlyContinue
         if ($item) {
-            if ([bool]$item.PSIsContainer -ne $expectDirectory -or
-                (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -and
-                (-not $AppAlias -or $current -ne $full))) {
+            if ([bool]$item.PSIsContainer -ne $expectDirectory -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
                 throw "Unexpected file type or reparse point: $current"
             }
-            $acl = Get-Acl -LiteralPath $current
+            $acl = Get-InstallPathAcl $current $expectDirectory
             if ($acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -notin $trusted) {
                 throw "Untrusted filesystem owner: $current"
             }
@@ -103,11 +114,14 @@ switch ($Action) {
     'Version' { [Environment]::OSVersion.Version.ToString() }
     'FindPerl' { Get-TrustedPerl }
     'Winget' {
+        # Resolve the executable through the Microsoft package registration.
+        # An arbitrary App Execution Alias is not a trusted executable path.
+        Import-Module (Join-Path $PSHOME 'Modules\Appx\Appx.psd1')
         $registered = Get-AppxPackage -Name Microsoft.DesktopAppInstaller |
             Where-Object { $_.PublisherId -ceq '8wekyb3d8bbwe' } | Select-Object -First 1
-        $aliasPath = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\winget.exe'
-        if ($registered -and (Test-Path -LiteralPath $aliasPath -PathType Leaf)) {
-            Assert-InstallPath $aliasPath -AppAlias
+        if ($registered -and $registered.InstallLocation) {
+            $executable = Join-Path $registered.InstallLocation 'winget.exe'
+            if ([IO.File]::Exists($executable)) { Assert-InstallPath $executable }
         }
     }
     'ValidatePath' { $null = Assert-InstallPath $Path -Directory }

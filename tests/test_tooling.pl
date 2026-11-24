@@ -321,6 +321,46 @@ subtest 'POSIX installer preserves unowned and changed entries' => sub {
     );
 };
 
+subtest 'failed install record publication restores the previous command' =>
+  sub {
+    my $make = find_command('make');
+    my $mv   = find_command('mv');
+    plan skip_all => 'make and mv are required' unless $make && $mv;
+    my $stage  = new_tempdir('install-record-failure-');
+    my $source = "$stage/sample.bash";
+    my $bin    = "$stage/bin";
+    my $mock   = "$stage/mock";
+    make_path($mock);
+    my @install =
+      ( $make, 'install-debian', "DEBIAN_SCRIPTS=$source", "BINDIR=$bin" );
+    write_file( $source, "#!/bin/bash\nprintf old\n" );
+    my $baseline = run_command( cmd => \@install, cwd => $REPO, timeout => 30 );
+    is( $baseline->{returncode}, 0, 'baseline command is installed' )
+      or return;
+    write_file( $source, "#!/bin/bash\nprintf new\n" );
+    my $real_mv = $mv;
+    $real_mv =~ s/'/'"'"'/g;
+    write_file( "$mock/mv",
+            "#!/bin/sh\n"
+          . "case \$3 in */.scripts-install/debian/sample) exit 1 ;; esac\n"
+          . "exec '$real_mv' \"\$@\"\n" );
+    chmod 0755, "$mock/mv" or die "cannot chmod mv mock: $!";
+    my $failure = run_command(
+        cmd     => \@install,
+        cwd     => $REPO,
+        env     => env_with( PATH => "$mock:$ENV{PATH}" ),
+        timeout => 30
+    );
+    isnt( $failure->{returncode}, 0, 'record write failure is reported' );
+    is(
+        slurp("$bin/sample"),
+        "#!/bin/bash\nprintf old\n",
+        'previous command bytes survive the failed install'
+    );
+    my $retry = run_command( cmd => \@install, cwd => $REPO, timeout => 30 );
+    is( $retry->{returncode}, 0, 'the install can be retried safely' );
+  };
+
 subtest 'shell validator reports find and shfmt errors' => sub {
     my $fixture = build_fixture();
     my $root    = "$fixture->{base}/with spaces";

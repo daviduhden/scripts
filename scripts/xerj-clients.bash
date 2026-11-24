@@ -48,7 +48,7 @@ xerj_validate_selection() {
 		printf 'update-xerj: select all, --binary-only, or named agents\n' >&2
 		return 2
 	fi
-	if ((XERJ_BINARY_ONLY && ! XERJ_URL_SELECTED)); then
+	if ((XERJ_BINARY_ONLY && XERJ_URL_SELECTED == 0)); then
 		return 0
 	fi
 	if [[ ! $NODE_URL =~ $endpoint ]]; then
@@ -204,7 +204,7 @@ xerj_configure_clients() {
 				status=$?
 			fi
 			if ((status)); then
-				if ((status == 2 && ! XERJ_EXPLICIT)); then
+				if ((status == 2 && XERJ_EXPLICIT == 0)); then
 					printf 'xerj MCP %-12s skipped (unsupported client version)\n' "$client"
 				else
 					printf 'xerj MCP %-12s failed (unsupported or unknown client version)\n' "$client" >&2

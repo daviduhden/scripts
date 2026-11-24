@@ -288,7 +288,7 @@ install_systemd_service() {
 
 	local unit_tmp
 	unit_tmp=$(mktemp /etc/systemd/system/.xd.service.XXXXXX)
-	if ! cat >"$unit_tmp" <<'UNIT'
+	cat >"$unit_tmp" <<'UNIT' || {
 [Unit]
 Description=Standalone I2P BitTorrent Client
 
@@ -308,10 +308,9 @@ RestrictSUIDSGID=true
 [Install]
 WantedBy=multi-user.target
 UNIT
-	then
 		rm -f -- "$unit_tmp"
 		error 'Cannot stage xd.service'
-	fi
+	}
 	if ! chmod 0644 "$unit_tmp" || ! mv -fT -- "$unit_tmp" "$SYSTEMD_UNIT_FILE"; then
 		rm -f -- "$unit_tmp"
 		error 'Cannot publish xd.service'

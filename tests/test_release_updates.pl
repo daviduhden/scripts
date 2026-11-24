@@ -9,9 +9,10 @@ use strict;
 use warnings;
 
 use Archive::Tar;
-use Digest::SHA qw(sha256_hex);
-use File::Path  qw(make_path);
-use FindBin     qw($Bin);
+use Digest::SHA        qw(sha256_hex);
+use File::Path         qw(make_path);
+use FindBin            qw($Bin);
+use IO::Compress::Gzip ();
 use JSON::PP;
 use lib $Bin;
 use Test::More;
@@ -166,6 +167,47 @@ subtest 'release extraction requires a private destination' => sub {
     ok( !-e "$external/file", 'extractor never writes through linked parent' );
 };
 
+subtest 'release extraction checks gzip integrity beyond tar end' => sub {
+    for my $kind (qw(corrupt oversized-trailer)) {
+        my $root    = new_tempdir('release-stream-');
+        my $archive = archive( $root, [ [ 'tool', 'data', 'regular' ] ], 1 );
+        if ( $kind eq 'corrupt' ) {
+            open my $file, '+<:raw', $archive or die "cannot open fixture: $!";
+            seek $file, -8, 2 or die "cannot seek to gzip CRC: $!";
+            read( $file, my $crc, 1 ) == 1 or die "cannot read gzip CRC: $!";
+            seek $file, -8, 2 or die "cannot return to gzip CRC: $!";
+            print {$file} chr( ord($crc) ^ 1 )
+              or die "cannot alter fixture: $!";
+            close $file or die "cannot close fixture: $!";
+        }
+        else {
+            open my $file, '>>:raw', $archive
+              or die "cannot append fixture: $!";
+            my $gzip = IO::Compress::Gzip->new($file)
+              or die "cannot create trailing gzip member";
+            my $chunk = 'x' x ( 1024 * 1024 );
+
+            # The extra stream begins after the first tar end marker.
+            for ( 1 .. 196 ) {
+                $gzip->print($chunk) or die "cannot write trailing gzip member";
+            }
+            $gzip->close or die "cannot close trailing gzip member";
+            close $file  or die "cannot close appended fixture: $!";
+        }
+        my $target = "$root/tool";
+        my $result = run_command(
+            cmd => [
+                $^X, "$ROOT/scripts/release-verify.pl",
+                'tar-extract-entry', $archive, $target, 'tool', 4
+            ],
+            timeout => 30,
+        );
+        isnt( $result->{returncode}, 0,
+            "$kind gzip stream fails verification" );
+        ok( !-e $target, "$kind stream publishes no output" );
+    }
+};
+
 subtest 'Fastfetch verifies digest and package metadata before APT' => sub {
     my $root    = new_tempdir('fastfetch-release-');
     my $asset   = 'fastfetch-linux-amd64.deb';
@@ -224,8 +266,7 @@ subtest 'msedit checks digest and exact entry' => sub {
         subtest $kind => sub {
             my $root = new_tempdir('release-msedit-');
             my $work = "$root/work";
-            make_path($work);
-            unlink "$work/edit" if -e "$work/edit";
+            mkdir $work, oct('700') or die "cannot create private work dir: $!";
             my $binary = "$root/bin/edit";
             write_file( $binary, 'previous' );
 

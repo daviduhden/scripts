@@ -843,14 +843,18 @@ gh)
 	[ "$1 $2 $3 $4 $5" = 'release verify-asset -R github.com/xerj-org/xerj v1.2.3-rc.7' ]
 	[ -f "$6" ]
 	[ "${ATTEST_OK:-true}" = true ] ;;
+sudo)
+	[ "$1 $2 $3 $4" = '-H -u fixture-user --' ]
+	shift 4
+	exec "$@" ;;
 *) exit 99 ;;
 esac
 SH
     chmod oct('755'), $mock or die "cannot chmod xerj mock: $!";
-    for my $cmd (qw(curl dpkg dpkg-deb dpkg-query apt-get gh)) {
+    for my $cmd (qw(curl dpkg dpkg-deb dpkg-query apt-get gh sudo)) {
         link $mock, "$root/bin/$cmd" or die "cannot link $cmd: $!";
     }
-    my $baseline = env_with( TEST_ROOT => $root, SUDO_USER => 'root' );
+    my $baseline = env_with( TEST_ROOT => $root, SUDO_USER => 'fixture-user' );
     $code .= <<'SH';
 export PATH="$TEST_ROOT/bin:$PATH"
 VERSION=v1.2.3-rc.7

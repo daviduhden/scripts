@@ -60,10 +60,21 @@ jobs:
       - name: Dry-run the installer
         shell: cmd  # zizmor: ignore[misfeature] required to execute the repository batch installer and launchers
         run: windows\install-windows.bat --dry-run
+      - name: Stage the runner Perl in a private directory
+        shell: pwsh
+        run: |
+          $fixture = Join-Path $env:LOCALAPPDATA ('scripts-ci-' + [guid]::NewGuid())
+          $null = New-Item -ItemType Directory -Path $fixture
+          Copy-Item -LiteralPath 'C:\Strawberry\perl' -Destination $fixture -Recurse
+          $perlBin = Join-Path $fixture 'perl\bin'
+          & (Join-Path $perlBin 'perl.exe') -MWin32 -MWin32API::File -e 'exit 0'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value $perlBin
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "SCRIPTS_CI_PRIVATE=$fixture"
       - name: Install and verify in a disposable directory
         shell: pwsh
         run: |
-          $destination = Join-Path $env:RUNNER_TEMP 'scripts-install-test'
+          $destination = Join-Path $env:SCRIPTS_CI_PRIVATE 'scripts-install-test'
           & windows/install-windows.bat --no-path --install-dir $destination
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & (Join-Path $destination 'bin/update-ai-clis.cmd') --help

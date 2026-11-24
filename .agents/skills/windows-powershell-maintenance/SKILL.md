@@ -48,6 +48,11 @@ does not prove Windows runtime behavior or Windows PowerShell 5.1 execution.
      PowerShell path and standard protected PowerShell 7 installation path.
      Keep private portable Perl PATH entries eligible and record the
      absolute interpreter path for the launcher;
+   - use the engine-specific .NET filesystem ACL API in the installer
+     trust helper. Windows PowerShell started by PowerShell 7 can inherit a
+     module path that breaks Security cmdlet autoload. Resolve WinGet from the
+     registered Microsoft App Installer executable and validate the physical
+     path without an exception for application aliases;
    - keep `PERL_MODULES` aligned with the runtime modules required by the
      installed Perl programs, including Windows-specific bundled modules;
    - keep the dry-run path free of writes, Perl candidate execution,

@@ -192,10 +192,12 @@ build_musl_package() {
 	local package=$1 tag=$2 arch=$3 target=$4 version=$5 helper=$6
 	local root="$STAGE/package"
 	local member basename="xerj-${tag#v}-$target-unknown-linux-musl"
-	local archive="$STAGE/$basename.tar.gz" unpacked="$STAGE/$basename"
+	local archive="$STAGE/$basename.tar.gz" extraction="$STAGE/extract"
+	local unpacked="$extraction/$basename"
 	ensure_archive_tools
 	download_asset "$archive" "$tag"
-	perl "$helper" tar-extract-all "$archive" "$STAGE" "$basename" 536870912 ||
+	mkdir -m 0700 "$extraction"
+	perl "$helper" tar-extract-all "$archive" "$extraction" "$basename" 536870912 ||
 		error 'Invalid static xerj release archive'
 	mkdir -p -- "$root/DEBIAN" "$root/usr/bin" "$root/usr/share/doc/xerj"
 	[[ -f $unpacked/xerj && -s $unpacked/xerj ]] || error 'Missing static xerj executable in release archive'
@@ -244,7 +246,7 @@ install_xerj() {
 	if [[ -n $installed ]] && dpkg --compare-versions "$installed" gt "$version"; then
 		error "Installed xerj $installed is newer than $version"
 	fi
-	if ((! VERIFY_ATTESTATION)) && verify_install "$version" "$tag"; then
+	if ((!VERIFY_ATTESTATION)) && verify_install "$version" "$tag"; then
 		log "$tag already installed: $XERJ_BIN"
 		return
 	fi
@@ -300,7 +302,7 @@ main() {
 		xerj_configure_clients "$XERJ_BIN"
 		return
 	fi
-	if ((! XERJ_BINARY_ONLY)); then
+	if ((!XERJ_BINARY_ONLY)); then
 		error 'Invoke update-xerj as the desktop user for MCP registration or pass --binary-only'
 	fi
 	require_cmd dpkg

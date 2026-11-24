@@ -54,7 +54,7 @@ if /i "%~1"=="-h" goto opt_help
 if /i "%~1"=="--dry-run" goto opt_dry
 if /i "%~1"=="--no-path" goto opt_nopath
 if /i "%~1"=="--install-dir" goto opt_installdir
-echo [ERROR] unknown option: %~1
+echo [ERROR] unknown option
 call :usage
 exit /b 3
 
@@ -100,11 +100,11 @@ rem --------------------------------------------------------------------
 rem Read the single source of truth for public programs
 rem --------------------------------------------------------------------
 if not exist "%REPO%perl\programs.txt" (
-    echo [ERROR] missing program manifest: %REPO%perl\programs.txt
+    echo [ERROR] missing program manifest: "%REPO%perl\programs.txt"
     exit /b 2
 )
 if not exist "%REPO%windows\launcher.cmd" (
-    echo [ERROR] missing launcher template: %REPO%windows\launcher.cmd
+    echo [ERROR] missing launcher template: "%REPO%windows\launcher.cmd"
     exit /b 2
 )
 for /f "usebackq tokens=1 delims=" %%L in ("%REPO%perl\programs.txt") do call :collect_program "%%L"
@@ -145,7 +145,7 @@ call :find_perl
 rem --------------------------------------------------------------------
 rem Show the plan
 rem --------------------------------------------------------------------
-echo Installing %PROJECT% %VERSION%
+echo Installing "%PROJECT%" "%VERSION%"
 echo.
 echo Perl:
 if defined PERL_EXE echo   found: "%PERL_EXE%"
@@ -175,7 +175,7 @@ if not defined PERL_EXE (
     echo [ERROR] no suitable Perl is available; cannot continue.
     exit /b 2
 )
-echo [INFO] Using Perl: %PERL_EXE%
+echo [INFO] Using Perl: "%PERL_EXE%"
 echo.
 
 rem --------------------------------------------------------------------
@@ -190,7 +190,7 @@ mkdir "%INSTALL_DIR%\perl" >nul 2>&1
 mkdir "%INSTALL_DIR%\windows" >nul 2>&1
 mkdir "%INSTALL_DIR%\bin" >nul 2>&1
 if not exist "%INSTALL_DIR%\bin" (
-    echo [ERROR] cannot create %INSTALL_DIR%\bin
+    echo [ERROR] cannot create "%INSTALL_DIR%\bin"
     goto install_failed
 )
 
@@ -252,7 +252,7 @@ rem --------------------------------------------------------------------
 rem Summary
 rem --------------------------------------------------------------------
 echo.
-echo [INFO] %PROJECT% %VERSION% installed to "%INSTALL_DIR%"
+echo [INFO] "%PROJECT%" "%VERSION%" installed to "%INSTALL_DIR%"
 echo [INFO] Programs installed: %PROGRAMS% %PS_PROGRAMS%
 if "%OPT_PATH%"=="0" echo [INFO] PATH not modified. Add "%INSTALL_DIR%\bin" manually if wanted.
 echo.
@@ -322,7 +322,7 @@ set "NAME=%~1"
 if "%NAME%"=="" exit /b 0
 if "%NAME:~0,1%"=="#" exit /b 0
 if not "%NAME:~-3%"==".pl" (
-    echo [ERROR] manifest entry is not a .pl program: %NAME%
+    echo [ERROR] manifest entry is not a .pl program: "%NAME%"
     set "MANIFEST_BAD=1"
     exit /b 0
 )
@@ -352,13 +352,13 @@ rem launcher name is derived from the script name. Failures set INSTALL_FAIL.
 set "NAME=%~1"
 if "%NAME%"=="" exit /b 0
 if not "%NAME:~-4%"==".ps1" (
-    echo [ERROR] PowerShell entry is not a .ps1 script: %NAME%
+    echo [ERROR] PowerShell entry is not a .ps1 script: "%NAME%"
     set "INSTALL_FAIL=1"
     exit /b 0
 )
 set "CHK=%NAME: =%"
 if not "%CHK%"=="%NAME%" (
-    echo [ERROR] PowerShell script name contains a space: %NAME%
+    echo [ERROR] PowerShell script name contains a space: "%NAME%"
     set "INSTALL_FAIL=1"
     exit /b 0
 )
@@ -412,7 +412,7 @@ echo [INFO] Installing %WINGET_ID% with winget...
 set "WRC=%ERRORLEVEL%"
 if not "%WRC%"=="0" echo [WARN] winget exited with code %WRC%; checking for Perl anyway.
 call :find_perl
-if defined PERL_EXE echo [INFO] Perl available at: %PERL_EXE%
+if defined PERL_EXE echo [INFO] Perl available at: "%PERL_EXE%"
 exit /b 0
 
 rem Copy one program (or psfmt.ps1) and create its launcher. Launcher names must

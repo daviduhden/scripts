@@ -529,7 +529,10 @@ in_array == 1 {
     gsub(/"[^"]*"/, "QQUOTED", line)
     gsub(/'[^']*'/, "QQUOTED", line)
     nq = gsub(/'/, "'", line)
-    if (nq % 2 == 1) in_sq = 1
+    if (nq % 2 == 1) {
+        in_sq = 1
+        sub(/'.*$/, "QQUOTED", line)
+    }
 
     # Case labels ("pat | pat) command") contain '|' alternatives
     # that would otherwise be split as pipeline separators, so drop
@@ -584,7 +587,7 @@ in_array == 1 {
         if (seg ~ /^[A-Za-z_][A-Za-z0-9_]*\[[^]]*\][[:space:]]*\+?=[^[:space:]]*[[:space:]]*$/)
             continue
         # env-prefix chains: consume VAR=val pairs
-        while (sub(/^[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]+[[:space:]]+/, "", seg)) {
+        while (sub(/^[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+/, "", seg)) {
             ;
         }
         sub(/^[[:space:]]+/, "", seg)

@@ -76,7 +76,9 @@ GNU options, paths, privilege tools, and service commands. Do not add `sudo`,
    before replacement or removal. Keep staged links valid after relocation.
    The Debian, OpenBSD, SecureBlue, and Perl installers track exact installed
    file contents in `.scripts-install` under each destination. Keep preflight
-   checks ahead of publication. Uninstall must leave modified and unmanaged
+   checks ahead of publication. Acquire the bin lock before the SecureBlue
+   unit lock. Restore the prior file if record publication fails.
+   Uninstall must leave modified and unmanaged
    files in place. Legacy adoption is explicit with `ADOPT_LEGACY=1` and
    requires byte-for-byte matching source files.
 8. For privileged or destructive code, follow `system-change-safety` before

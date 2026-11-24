@@ -102,6 +102,17 @@ cat >"$T/shell/wrong-shebang.bash" <<'EOF'
 exit 0
 EOF
 
+# POSIX prefixes may have empty values. The first line of a
+# multi-line quoted AWK program contributes no shell commands.
+cat >"$T/openbsd/quoted-probe.ksh" <<'EOF'
+#!/bin/ksh
+IFS= read -r line
+value=$(awk \
+	'$1 == "ok" || $1 == "yes" { count++ }
+	 END { print count }')
+print -r -- "$value"
+EOF
+
 # ---- OpenBSD fixture: GNU-only find -printf ----
 cat >"$T/openbsd/gnu-only.ksh" <<'EOF'
 #!/bin/ksh
@@ -323,6 +334,8 @@ assert_no_error 'debian/gnu-ok.bash' "$out" \
 	"GNU find -printf not an ERROR in Debian fixture"
 assert_error 'shell/wrong-shebang.bash' "$out" \
 	"--target all includes interactive shell helpers"
+assert_no_error 'openbsd/quoted-probe.ksh' "$out" \
+	"command probe ignores empty assignments and quoted AWK tokens"
 assert_error 'debian/wrong-shebang.bash' "$out" \
 	"wrong shebang detected"
 if [ -n "$HOST_FAMILY" ]; then
