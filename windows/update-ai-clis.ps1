@@ -35,7 +35,7 @@ $ProgressPreference = 'SilentlyContinue'
 $script:Force = $Force
 $script:RemoveWinget = $RemoveWinget
 $script:Wrappers = $Wrappers
-$script:StableAgents = @('opencode', 'codex', 'crush', 'copilot-cli', 'claude')
+$script:StableAgents = @('opencode', 'codex', 'crush', 'copilot-cli', 'claude', 'swival')
 $script:SemVerCore = '(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)'
 $script:SemVerPre = '(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)'
 $script:SemVer = "$script:SemVerCore(?:-$script:SemVerPre(?:\.$script:SemVerPre)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
@@ -66,6 +66,9 @@ $script:CopilotExe = Join-Path $script:CopilotBin 'copilot.exe'
 $script:ClaudeBin = Join-Path (Join-Path (Join-Path $env:LOCALAPPDATA 'Programs') 'Claude Code') 'bin'
 $script:ClaudeExe = Join-Path $script:ClaudeBin 'claude.exe'
 $script:ClaudeSource = 'https://downloads.claude.ai/claude-code-releases'
+$script:SwivalRoot = Join-Path $env:LOCALAPPDATA 'Programs/Swival'
+$script:SwivalBin = Join-Path $script:SwivalRoot 'bin'
+$script:SwivalExe = Join-Path $script:SwivalBin 'swival.exe'
 $script:OpenCodeReleasesApi = 'https://api.github.com/repos/anomalyco/opencode/releases?per_page=100'
 $script:CodexLatestApi = 'https://api.github.com/repos/openai/codex/releases/latest'
 $script:CrushLatestApi = 'https://api.github.com/repos/charmbracelet/crush/releases/latest'
@@ -1472,6 +1475,252 @@ function Install-ClaudeCode {
     finally { Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue }
 }
 
+function Test-SwivalPlatform {
+    try { return ((Get-PlatformTag) -eq 'x64') }
+    catch { return $false }
+}
+
+function Find-SwivalWheel {
+    param($Files, [string]$Version)
+
+    $name = "swival-$Version-py3-none-any.whl"
+    $pattern = '^https://files\.pythonhosted\.org/packages/[0-9a-f/]+/' + [regex]::Escape($name) + '$'
+    $wheels = @($Files | Where-Object {
+            $_.filename -ceq $name -and $_.packagetype -ceq 'bdist_wheel' -and
+            $_.yanked -is [bool] -and -not $_.yanked -and $_.url -cmatch $pattern -and
+            $_.digests.sha256 -cmatch '^[0-9a-f]{64}$'
+        })
+    if ($wheels.Count -eq 1) { return $wheels[0] }
+    return $null
+}
+
+function Get-SwivalLatestVersion {
+    $data = Get-RemoteText -Uri 'https://pypi.org/pypi/swival/json' | ConvertFrom-Json
+    if ($data.info.name -cne 'swival') { throw 'PyPI did not return Swival package metadata.' }
+    $stable = @($data.releases.PSObject.Properties | Where-Object {
+            $_.Name -cmatch "^$script:SemVerCore$" -and (Find-SwivalWheel $_.Value $_.Name)
+        } | Sort-Object -Property @{ Expression = { [version]$_.Name } } -Descending)
+    if (-not $stable.Count) { throw 'PyPI did not return a stable, non-yanked Swival wheel.' }
+    return $stable[0].Name
+}
+
+function Get-SwivalUv {
+    $release = Get-RemoteText -Uri 'https://api.github.com/repos/astral-sh/uv/releases/latest' | ConvertFrom-Json
+    $version = ConvertTo-NormalizedVersion $release.tag_name
+    if ($release.draft -or $release.prerelease -or -not (Test-StableVersionAtLeast $version $version)) {
+        throw 'Astral did not return a valid stable uv release.'
+    }
+    $asset = 'uv-x86_64-pc-windows-msvc.zip'
+    $url = "https://github.com/astral-sh/uv/releases/download/$version/$asset"
+    $assets = @($release.assets | Where-Object { $_.name -ceq $asset })
+    if ($assets.Count -ne 1 -or $assets[0].browser_download_url -cne $url -or
+        $assets[0].digest -cnotmatch '^sha256:[0-9a-f]{64}$') {
+        throw 'Expected one official Astral uv asset with a published SHA-256 digest.'
+    }
+    $digest = $assets[0].digest.Substring(7)
+    $root = Join-Path $script:SwivalRoot 'uv'
+    $directory = Join-Path $root $version
+    $exe = Join-Path $directory 'uv.exe'
+    if ((Test-CliPackageProof $directory 'swival-uv' $version $digest) -and
+        (Test-VersionEqual (Get-ExeVersion $exe) $version)) { return $exe }
+    if (Test-Path -LiteralPath $root -PathType Container) {
+        Assert-CliPackageDirectory $root
+        foreach ($cache in Get-ChildItem -LiteralPath $root -Directory -Filter "$version-*") {
+            if ($cache.Name -cnotmatch ('^' + [regex]::Escape($version) + '-[0-9a-f]{32}$')) { continue }
+            $exe = Join-Path $cache.FullName 'uv.exe'
+            if ((Test-CliPackageProof $cache.FullName 'swival-uv' $version $digest) -and
+                (Test-VersionEqual (Get-ExeVersion $exe) $version)) { return $exe }
+        }
+    }
+
+    $stage = Join-Path $root ('.staging-' + [guid]::NewGuid().ToString('N'))
+    Assert-CliPackageDirectory $stage
+    $null = New-Item -ItemType Directory -Path $stage -Force
+    try {
+        Assert-CliPackageDirectory $stage
+        $archive = Join-Path $stage $asset
+        Invoke-Download -Uri $url -OutFile $archive
+        if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ine $digest) {
+            throw 'Astral uv release SHA-256 mismatch.'
+        }
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        $zip = [IO.Compression.ZipFile]::OpenRead($archive)
+        $staged = Join-Path $stage 'uv.exe'
+        try {
+            $entries = @($zip.Entries | Where-Object { $_.FullName -ceq 'uv.exe' })
+            if ($entries.Count -ne 1 -or $entries[0].Length -le 0 -or $entries[0].Length -gt 268435456 -or
+                (($entries[0].ExternalAttributes -shr 16) -band 0xF000) -notin @(0, 0x8000) -or
+                ($entries[0].ExternalAttributes -band ([IO.FileAttributes]::Directory -bor [IO.FileAttributes]::ReparsePoint))) {
+                throw 'Expected one regular uv.exe in the Astral archive.'
+            }
+            [IO.Compression.ZipFileExtensions]::ExtractToFile($entries[0], $staged)
+        }
+        finally { $zip.Dispose() }
+        Remove-Item -LiteralPath $archive
+        if (-not (Test-VersionEqual (Get-ExeVersion $staged) $version)) { throw 'Staged uv reports an unexpected version.' }
+        Write-CliPackageProof $stage $version $digest 'swival-uv'
+        if (Test-Path -LiteralPath $directory) {
+            $directory += '-' + [guid]::NewGuid().ToString('N')
+        }
+        [IO.Directory]::Move($stage, $directory)
+        return (Join-Path $directory 'uv.exe')
+    }
+    finally {
+        if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
+    }
+}
+
+function Get-SwivalUvStartInfo {
+    param([string]$Uv, [string]$Directory, [string[]]$UvArgs)
+
+    $start = [Diagnostics.ProcessStartInfo]::new()
+    $start.FileName = $Uv
+    $start.WorkingDirectory = $Directory
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    # The arguments are fixed switches and a validated HTTPS requirement.
+    if (@($UvArgs | Where-Object { $_ -match '[\x00-\x1f"\\]' }).Count) { throw 'Invalid uv argument.' }
+    $start.Arguments = (@('--no-config', '--no-progress') + $UvArgs | ForEach-Object { '"' + $_ + '"' }) -join ' '
+    foreach ($key in @($start.EnvironmentVariables.Keys)) {
+        if ($key -match '^(UV_|PIP_|PYTHON|VIRTUAL_ENV$|CONDA_|RUST_LOG$)') { $start.EnvironmentVariables.Remove($key) }
+    }
+    $start.EnvironmentVariables['UV_CACHE_DIR'] = Join-Path $script:SwivalRoot 'cache'
+    $start.EnvironmentVariables['UV_PYTHON_INSTALL_DIR'] = Join-Path $script:SwivalRoot 'python'
+    $start.EnvironmentVariables['UV_PYTHON_NO_REGISTRY'] = '1'
+    $start.EnvironmentVariables['UV_PYTHON_INSTALL_BIN'] = '0'
+    $start.EnvironmentVariables['UV_TOOL_DIR'] = Join-Path $Directory 'tools'
+    $start.EnvironmentVariables['UV_TOOL_BIN_DIR'] = Join-Path $Directory 'bin'
+    return $start
+}
+
+function Invoke-SwivalUv {
+    param([string]$Uv, [string]$Directory, [string[]]$UvArgs, [switch]$Output)
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = Get-SwivalUvStartInfo $Uv $Directory $UvArgs
+    try {
+        if (-not $process.Start()) { throw 'Could not start uv.' }
+        if ($Output) {
+            $buffer = [char[]]::new(8192)
+            $read = $process.StandardOutput.ReadBlockAsync($buffer, 0, $buffer.Length)
+        }
+        else { $read = $process.StandardOutput.BaseStream.CopyToAsync([IO.Stream]::Null) }
+        $errors = $process.StandardError.BaseStream.CopyToAsync([IO.Stream]::Null)
+        $timeout = if ($Output) { 15000 } else { 600000 }
+        if (-not $process.WaitForExit($timeout)) { throw 'uv exceeded the operation time limit.' }
+        if (-not [Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]@($read, $errors), 5000)) {
+            throw 'uv left its output streams open.'
+        }
+        if ($process.ExitCode -ne 0) { throw "uv $($UvArgs[0]) operation failed with exit code $($process.ExitCode)." }
+        if ($Output) {
+            if ($read.Result -ge $buffer.Length) { throw 'uv returned too much output.' }
+            return ([string]::new($buffer, 0, $read.Result)).Trim()
+        }
+    }
+    finally {
+        try {
+            if (-not $process.HasExited) {
+                if ($PSVersionTable.PSEdition -eq 'Desktop') { $process.Kill() }
+                else { $process.Kill($true) }
+            }
+        }
+        catch { Write-Verbose 'The uv process has already exited or could not be stopped.' }
+        $process.Dispose()
+    }
+}
+
+function Initialize-SwivalPython {
+    foreach ($folder in @('cache', 'python')) {
+        $path = Join-Path $script:SwivalRoot $folder
+        Assert-CliPackageDirectory $path
+        $null = New-Item -ItemType Directory -Path $path -Force
+        Assert-CliPackageDirectory $path
+    }
+    $uv = Get-SwivalUv
+    Invoke-SwivalUv $uv $script:SwivalRoot @('python', 'install', '3.14', '--upgrade', '--no-bin', '--no-registry')
+    $python = Invoke-SwivalUv $uv $script:SwivalRoot @('python', 'find', '3.14', '--managed-python') -Output
+    $pythonRoot = (Join-Path $script:SwivalRoot 'python') + [IO.Path]::DirectorySeparatorChar
+    if (-not $python -or -not [IO.Path]::IsPathRooted($python) -or
+        -not [IO.Path]::GetFullPath($python).StartsWith($pythonRoot, [StringComparison]::OrdinalIgnoreCase) -or
+        -not (Test-PrivateCliPath $python) -or (Get-ExeVersion $python) -cnotmatch '^3\.14\.[0-9]+$') {
+        throw 'Could not verify the private, uv-managed Python 3.14 interpreter.'
+    }
+    return $uv
+}
+
+function Install-Swival {
+    param([string]$Version)
+
+    $data = Get-RemoteText -Uri "https://pypi.org/pypi/swival/$Version/json" | ConvertFrom-Json
+    if ($data.info.name -cne 'swival' -or $data.info.version -cne $Version) { throw 'Unexpected Swival release metadata.' }
+    $wheel = Find-SwivalWheel $data.urls $Version
+    if (-not $wheel) { throw 'The selected release has no trusted Swival wheel.' }
+    $uv = Initialize-SwivalPython
+    $privateRelease = Join-Path $script:SwivalRoot ('releases/' + $Version + '-' + [guid]::NewGuid().ToString('N'))
+    Assert-CliPackageDirectory $privateRelease
+    $null = New-Item -ItemType Directory -Path $privateRelease -Force
+    $activated = $false
+    try {
+        Assert-CliPackageDirectory $privateRelease
+        $requirement = "swival @ $($wheel.url)#sha256=$($wheel.digests.sha256)"
+        Invoke-SwivalUv $uv $privateRelease @('tool', 'install', '--managed-python', '--python', '3.14',
+            '--default-index', 'https://pypi.org/simple', '--only-binary', ':all:', '--', $requirement)
+        # uv's launcher targets the environment at its original location.
+        # Keep that directory intact and publish only its verified launcher.
+        $staged = Join-Path $privateRelease 'bin/swival.exe'
+        Assert-CliPackageDirectory (Split-Path -Parent $staged)
+        if (-not (Test-Path -LiteralPath $staged -PathType Leaf)) { throw 'uv did not install a Swival executable.' }
+        $item = Get-Item -LiteralPath $staged -Force
+        if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Swival launcher is a reparse point.' }
+        Assert-CliPackageDirectory $script:SwivalBin
+        $null = New-Item -ItemType Directory -Path $script:SwivalBin -Force
+        Set-CurrentExe -SourceExe $staged -TargetExe $script:SwivalExe -ExpectedVersion $Version
+        $activated = $true
+    }
+    finally {
+        if (-not $activated) { Remove-Item -LiteralPath $privateRelease -Recurse -Force }
+    }
+    return $uv
+}
+
+function Get-SwivalUvLocation {
+    $visible = Join-Path $script:SwivalBin 'uv.exe'
+    $active = Get-CliSnapshot -Name 'uv' -ManagedPath $visible
+    $persistent = Get-CliSnapshot -Name 'uv' -ManagedPath $visible -Persistent
+    if ($active.Unsafe -or $persistent.Unsafe -or $active.Conflict -or $persistent.Conflict -or
+        ($active.ActivePath -and $persistent.ActivePath -and $active.ActivePath -ine $persistent.ActivePath)) {
+        throw 'Resolve conflicting or unsafe uv installations.'
+    }
+    $path = if ($active.ActivePath) { $active.ActivePath } else { $persistent.ActivePath }
+    if ($path -and $path -ine $visible -and (-not $persistent.ActivePath -or -not $persistent.ActiveVersion)) {
+        throw 'The existing uv must be usable through its original installer on persistent PATH.'
+    }
+    return $path
+}
+
+function Enable-SwivalUv {
+    param([string]$Uv, [string]$ExistingPath)
+
+    $visible = Join-Path $script:SwivalBin 'uv.exe'
+    if ($ExistingPath -and $ExistingPath -ine $visible) {
+        # Keep an existing usable installation in its own package manager.
+        $expectedPath = $ExistingPath
+        $expected = Get-ExeVersion $ExistingPath
+    }
+    else {
+        $expectedPath = $visible
+        $expected = Get-ExeVersion $Uv
+        if (-not $expected) { throw 'The verified uv binary no longer reports its version.' }
+        if (-not (Test-VersionEqual (Get-ExeVersion $visible) $expected)) {
+            Set-CurrentExe -SourceExe $Uv -TargetExe $visible -ExpectedVersion $expected
+        }
+    }
+    if (-not $expected -or -not (Test-VersionEqual (Get-FreshCliVersion 'uv' $expectedPath) $expected)) {
+        throw 'Could not verify uv in the persistent PATH.'
+    }
+}
+
 # ---------------------------------------------------------------------------
 # Bun (official upstream downloads)
 # ---------------------------------------------------------------------------
@@ -1646,7 +1895,7 @@ function Get-FreshCliVersion {
 
     # Run a new shell with the registry-backed PATH and no profile. Construct
     # the literal command only from the updater's fixed command names.
-    if ($Name -notin @('opencode', 'codex', 'crush', 'copilot', 'claude', 'bun')) { throw 'Invalid command name.' }
+    if ($Name -notin @('opencode', 'codex', 'crush', 'copilot', 'claude', 'swival', 'uv', 'bun')) { throw 'Invalid command name.' }
     $program = if ($PSVersionTable.PSVersion.Major -ge 6) { 'pwsh.exe' } else { 'powershell.exe' }
     $shell = Join-Path $PSHOME $program
     $code = @'
@@ -1696,6 +1945,7 @@ function Get-SelectedRelease {
         'crush' { Get-CrushLatestVersion }
         'copilot-cli' { Get-CopilotLatestVersion }
         'claude' { Get-ClaudeLatestVersion }
+        'swival' { Get-SwivalLatestVersion }
         'bun' { Get-BunLatestVersion }
     }
 }
@@ -1709,16 +1959,22 @@ function Invoke-SelectedInstall {
         'crush' { Install-Crush -Version $Version }
         'copilot-cli' { Install-CopilotCli -Version $Version }
         'claude' { Install-ClaudeCode -Version $Version }
+        'swival' { Install-Swival -Version $Version }
         'bun' { Install-Bun -Version $Version }
     }
 }
 
 function Invoke-CliUpdate {
-    param([string]$Name, [hashtable]$Cli, [string]$Pin)
+    param([string]$Name, [hashtable]$Cli, [string]$Pin, [switch]$Explicit)
 
     $command = $Cli.Command
     $managed = $Cli.Executable
     $row = [pscustomobject]@{ Agent = $Name; Before = 'unknown'; Latest = 'unknown'; After = 'unknown'; Result = 'failed' }
+    if ($Name -eq 'swival' -and -not (Test-SwivalPlatform)) {
+        Write-Warn 'Swival requires Windows x64 for its current dependency wheels. Native ARM64 and x86 installs are unavailable.'
+        if (-not $Explicit) { $row.Result = 'unsupported' }
+        return $row
+    }
     try {
         $initial = Get-CliSnapshot -Name $command -ManagedPath $managed
         if (-not $initial.ActivePath) {
@@ -1742,6 +1998,9 @@ function Invoke-CliUpdate {
         # A version probe alone cannot establish whether Codex's sandbox
         # resources are present. Retain its existing managed-cache checks.
         $checkCodexLayout = $Name -eq 'codex' -and $initial.Path -eq $managed -and (Test-VersionEqual $initial.Version $wanted)
+        $refreshSwival = $Name -eq 'swival' -and $current -and $initial.Path -eq $managed
+        $swivalUv = $null
+        $swivalExistingUv = $null
         $installed = -not $current -or $Force
         $migrateWinget = $RemoveWinget -and ($Cli.WingetId -or $Name -eq 'bun')
         if ($initial.Conflict -and -not $migrateWinget) {
@@ -1750,12 +2009,15 @@ function Invoke-CliUpdate {
         if ($installed -and $initial.ActivePath -and $initial.ActivePath -ine $managed -and -not $migrateWinget) {
             throw "Update the existing installation through its original installer: $($initial.ActivePath)"
         }
+        if ($Name -eq 'swival' -and ($installed -or $refreshSwival)) { $swivalExistingUv = Get-SwivalUvLocation }
         if ($installed -or $checkCodexLayout) {
             if (-not (Test-PrivateCliPath (Split-Path -Parent $managed) -Directory)) {
                 throw "Refusing to install under a shared or invalid destination: $managed"
             }
-            Invoke-SelectedInstall $Name $wanted
+            if ($Name -eq 'swival') { $swivalUv = Invoke-SelectedInstall $Name $wanted }
+            else { Invoke-SelectedInstall $Name $wanted }
         }
+        elseif ($refreshSwival) { $swivalUv = Initialize-SwivalPython }
 
         if ($managed -and (($current -and $initial.Path -eq $managed) -or $installed -or $checkCodexLayout)) {
             $wrapper = if ($Wrappers) { $Cli.DefaultArgument } else { '' }
@@ -1770,6 +2032,7 @@ function Invoke-CliUpdate {
         # entries so a collision in the calling session is still detected.
         $env:Path = (@(($env:Path + ';' + (Get-PersistentCliPath)).Split(';')) |
                 Where-Object { $_ } | Select-Object -Unique) -join ';'
+        if ($swivalUv) { Enable-SwivalUv $swivalUv $swivalExistingUv }
 
         $after = Get-CliSnapshot -Name $command -ManagedPath $managed
         $row.After = Get-ReportedVersion $after
@@ -1809,8 +2072,8 @@ function Invoke-CliUpdate {
 if ($Agent -and $Agent.Count -eq 1 -and $Agent[0] -eq '--help' -and -not $Target) {
     Write-Output @'
 Usage: update-ai-clis [all | AGENT ...] [--help]
-Agents: opencode codex crush copilot-cli claude
-Use no agents or all for all five agents.
+Agents: opencode codex crush copilot-cli claude swival
+Use no agents or all for all supported agents.
 Windows: -Check reads versions only; -Target is the legacy selector.
 Windows also accepts bun as an explicit target, pinned -OpenCodeVersion,
 -CodexVersion and -CrushVersion, -Force, -RemoveWinget, -Wrappers, and
@@ -1849,6 +2112,7 @@ $commands = @{
     'crush'       = @{ Command = 'crush'; Executable = $script:CrushExe; WingetId = 'charmbracelet.crush'; DefaultArgument = '' }
     'copilot-cli' = @{ Command = 'copilot'; Executable = $script:CopilotExe; WingetId = ''; DefaultArgument = '' }
     'claude'      = @{ Command = 'claude'; Executable = $script:ClaudeExe; WingetId = ''; DefaultArgument = '' }
+    'swival'      = @{ Command = 'swival'; Executable = $script:SwivalExe; WingetId = ''; DefaultArgument = '' }
     'bun'         = @{ Command = 'bun'; Executable = $bunExe; WingetId = ''; DefaultArgument = '' }
 }
 
@@ -1865,8 +2129,10 @@ try {
         if (-not $ownsLock) { throw 'Another update-ai-clis process is running for this user.' }
     }
 
+    $requested = if ($Target) { $Target } else { $Agent }
+    $explicit = [bool]$requested -and $requested -notcontains 'all'
     $rows = foreach ($name in $selected) {
-        Invoke-CliUpdate -Name $name -Cli $commands[$name] -Pin $pins[$name]
+        Invoke-CliUpdate -Name $name -Cli $commands[$name] -Pin $pins[$name] -Explicit:$explicit
     }
     Write-Info 'AGENT | BEFORE | LATEST STABLE | AFTER | RESULT'
     foreach ($row in $rows) {

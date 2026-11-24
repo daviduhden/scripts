@@ -6,7 +6,7 @@ checkout or an extracted copy; its paths are resolved relative to the installer.
 | Script | Purpose |
 | --- | --- |
 | [install-windows.bat](install-windows.bat) | Installs public Perl programs, the PowerShell scripts in this directory, and `test-format/psfmt.ps1`; creates command launchers and optionally adds their directory to the user PATH. |
-| [update-ai-clis.ps1](update-ai-clis.ps1) | Installs or updates OpenCode 2.x, Codex, Crush, GitHub Copilot CLI, and Claude Code for the current user. |
+| [update-ai-clis.ps1](update-ai-clis.ps1) | Installs or updates OpenCode 2.x, Codex, Crush, GitHub Copilot CLI, Claude Code, and Swival for the current user. |
 | [update-xerj.ps1](update-xerj.ps1) | Installs or updates verified xerj and registers its stdio MCP server with selected installed agents. |
 | [ai-purge-history.ps1](ai-purge-history.ps1) | Deletes Codex, Copilot, Claude Code, OpenCode, and project-local Swival history/state. Crush data is preserved unless `-IncludeCrushData` is given; that switch removes the entire `%LOCALAPPDATA%\crush` directory, including any configuration stored there. Use `-DryRun` to preview. |
 | [launcher.cmd](launcher.cmd) | Internal template for installed Perl launchers. Uses the recorded Perl interpreter and forwards arguments and exit status. |
@@ -62,21 +62,22 @@ reparse points or unexpected file types. Dry-run applies the same checks.
 ### AI CLI updates
 
 Run the installed command from CMD or PowerShell. Omit the agent names or
-pass `all` to process all five agents.
+pass `all` to process the agents supported on your architecture.
 
 ```powershell
 update-ai-clis --help
 update-ai-clis
 update-ai-clis codex claude
+update-ai-clis codex swival
 update-ai-clis copilot-cli -Check
 ```
 
 From a checkout, use `./windows/update-ai-clis.ps1` with the same arguments.
 Reinstalling removes the previous `update-aiclis` script and launcher when
 they are managed by the install manifest.
-The supported Windows architectures for all five agents are x64 and ARM64.
-Crush also supports Windows x86.
-The updater uses these native packages, which bundle their language runtimes.
+The native packages for OpenCode, Codex, Copilot and Claude Code target
+x64 and ARM64. Crush also supports Windows x86. Swival uses an isolated Python
+environment.
 
 | Agent | Official distribution | Runtime |
 | --- | --- | --- |
@@ -85,6 +86,10 @@ The updater uses these native packages, which bundle their language runtimes.
 | `crush` | [Charm GitHub releases](https://github.com/charmbracelet/crush/releases), platform ZIP. | Bundled. Project-specific LSP tools are optional. |
 | `copilot-cli` | [GitHub Copilot CLI releases](https://github.com/github/copilot-cli/releases), standalone ZIP. | [Windows PowerShell 5.1 or PowerShell 7](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli#prerequisites) |
 | `claude` | [Anthropic native binary](https://code.claude.com/docs/en/setup), stable channel. | Windows PowerShell. Git for Windows is optional for Bash tools. |
+| `swival` | [Swival on PyPI](https://pypi.org/project/swival/) via official Astral uv. | uv-managed Python 3.14. |
+
+The Swival installation targets Windows x64. Its required packages lack
+the Windows ARM64 wheels needed for this isolated installation.
 
 The GitHub paths verify the upstream release asset SHA-256 before publishing.
 Cached release packages record the verified archive digest and packaged file

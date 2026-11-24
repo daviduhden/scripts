@@ -8,6 +8,8 @@ identifiers to restrict the operation to those agents and their dependencies.
 update-ai-clis --help
 update-ai-clis codex claude
 update-ai-clis copilot-cli
+update-ai-clis swival
+update-ai-clis codex swival
 ```
 
 The updater reports the agent, previous version, latest stable version in the
@@ -25,8 +27,9 @@ arguments.
 | `crush` | `crush` | Charm release package through APT | Official Charm tap | Charm release ZIP |
 | `copilot-cli` | `copilot` | Standalone GitHub release | Homebrew cask | Standalone GitHub release ZIP |
 | `claude` | `claude` | Anthropic stable APT channel | Homebrew stable cask | Anthropic native binary |
+| `swival` | `swival` | Official Astral uv release and isolated PyPI tool | Homebrew core `uv` and isolated PyPI tool | Official Astral uv release and isolated PyPI tool |
 
-These distributions use native executables. Node.js, npm and Bun are needed
+Most of these distributions use native executables. Node.js, npm and Bun are needed
 only for other distribution routes or workloads that explicitly use them.
 Git enables repository features. GitHub CLI is separate from the Copilot CLI.
 Claude Code on Linux requires Bash or Zsh. Git for Windows is optional for
@@ -42,6 +45,42 @@ use the user PATH and are checked from a new PowerShell process with the
 persistent machine and user PATH combined. The scripts preserve existing
 shell configuration. Profiles or terminal applications that change PATH can
 affect which executable is launched.
+
+Swival uses the upstream `uv tool` distribution and a uv-managed Python
+3.14 in its isolated environment. Swival 1.9.6 declares Python
+`>=3.13,<3.15`. uv resolves its Python dependencies from PyPI. Debian's
+system Python and SecureBlue's system image are outside this installation.
+The official Swival Homebrew tap documents macOS only. SecureBlue uses
+Homebrew core for uv and PyPI for Swival. The updater does not install
+the optional `nono` sandbox or the optional MetaSKILLs runtime. An existing
+Swival configuration, including the security settings, stays in place.
+[Swival installation](https://swival.dev/pages/getting-started.html) ·
+[Published package metadata](https://github.com/Swival/swival/blob/1.9.6/pyproject.toml) ·
+[Optional nono sandbox](https://swival.dev/pages/nono.html)
+
+The Swival installer targets amd64 and arm64 on Linux and x64 on Windows.
+Native Windows ARM64 is excluded while required packages such as
+`tiktoken` and `html-to-markdown` lack Windows ARM64 wheels. The updater
+reports conflicting installations so you can manage them through their
+original package channel. Linux publishes the selected command in
+`~/.local/bin`; Debian also uses it for managed uv. Windows uses
+`%LOCALAPPDATA%\Programs\Swival\bin` for its launchers. SecureBlue uses
+the Homebrew path for uv. The updater checks the resolved commands from a
+fresh session.
+The Python interpreter stays private to uv's tool environment.
+[tiktoken distributions](https://pypi.org/project/tiktoken/0.14.0/#files) ·
+[html-to-markdown distributions](https://pypi.org/project/html-to-markdown/3.23.2/#files)
+
+The updater selects stable Swival release metadata and checks the wheel
+against its published SHA-256. It uses the official PyPI index for
+dependencies and requires prebuilt wheels. It updates the managed uv and
+Python runtimes when needed and leaves external package managers in charge
+of their own installations. GitHub's release API is used for the managed
+Astral archive on Debian and Windows.
+
+An already current Swival release keeps its existing tool environment.
+Compatible Python packages are resolved when the environment is first
+installed or replaced for a Swival update.
 
 Debian uses APT for TLS certificates and curl, jq for GitHub metadata,
 OpenSSL for the npm registry signature, Cosign for Codex and Crush, and
@@ -67,3 +106,4 @@ Upstream documentation
 - [Charm Crush](https://github.com/charmbracelet/crush)
 - [GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli)
 - [Anthropic Claude Code](https://code.claude.com/docs/en/setup)
+- [Swival](https://swival.dev/) and [Swival on PyPI](https://pypi.org/project/swival/)

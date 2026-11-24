@@ -155,6 +155,11 @@ already-installed PSScriptAnalyzer; it does not install it.
   native distributions avoid installing package-manager language runtimes.
   PowerShell profile wrappers (`codex --yolo`, `opencode --auto`) are opt-in
   with `-Wrappers`. Profile updates use a backup and atomic replacement.
+- Swival uses a hash-verified Astral uv release and a private managed Python.
+  Keep the uv tool environment at the path used to generate the launcher.
+  Verify its version before publishing the launcher and check the effective
+  command from a new session. The Swival wheel and dependency index must
+  come from official PyPI. Keep the Python interpreter outside user PATH.
 - Probe the command actually resolved from PATH and explicitly recognize
   executable, CMD and PowerShell script candidates. Report shadowed paths
   without running every candidate. Parse semantic version tokens across

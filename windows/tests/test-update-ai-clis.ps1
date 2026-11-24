@@ -47,6 +47,9 @@ $script:CopilotExe = Join-Path $script:CopilotBin 'copilot.exe'
 $script:ClaudeBin = Join-Path $testRoot 'claude/bin'
 $script:ClaudeExe = Join-Path $script:ClaudeBin 'claude.exe'
 $script:ClaudeSource = 'https://downloads.claude.ai/claude-code-releases'
+$script:SwivalRoot = Join-Path $testRoot 'swival'
+$script:SwivalBin = Join-Path $script:SwivalRoot 'bin'
+$script:SwivalExe = Join-Path $script:SwivalBin 'swival.exe'
 $script:ClaudePublisherValid = $true
 $script:FixtureAssets = @()
 $script:CodexFixtureActive = $null
@@ -117,6 +120,11 @@ function Get-RemoteText {
     param([string]$Uri, [hashtable]$Headers)
     if ($Uri -eq "$script:ClaudeSource/stable") { return '1.2.3' }
     if ($Uri -eq "$script:ClaudeSource/1.2.3/manifest.json") { return $script:ClaudeManifest }
+    if ($Uri -eq 'https://pypi.org/pypi/swival/json') { return $script:SwivalIndex }
+    if ($Uri -eq 'https://pypi.org/pypi/swival/1.2.3/json') { return $script:SwivalManifest }
+    if ($Uri -eq 'https://api.github.com/repos/astral-sh/uv/releases/latest') {
+        return (@{ tag_name = '1.2.3'; draft = $false; prerelease = $false; assets = @($script:UvFixtureAsset) } | ConvertTo-Json -Depth 5)
+    }
     return (@{ tag_name = 'bun-v1.2.3'; draft = $false; prerelease = $false; assets = $script:FixtureAssets } | ConvertTo-Json -Depth 5)
 }
 
@@ -335,9 +343,9 @@ try {
     & {
         $Agent = @()
         $Target = @()
-        Assert-True (((Get-SelectedCli) -join ',') -eq 'opencode,codex,crush,copilot-cli,claude') 'Wrong default agents'
+        Assert-True (((Get-SelectedCli) -join ',') -eq 'opencode,codex,crush,copilot-cli,claude,swival') 'Wrong default agents'
         $Agent = @('all')
-        Assert-True (@(Get-SelectedCli).Count -eq 5) 'Explicit all differs from default'
+        Assert-True (@(Get-SelectedCli).Count -eq 6) 'Explicit all differs from default'
         $Agent = @('codex', 'Claude', 'codex')
         Assert-True (((Get-SelectedCli) -join ',') -eq 'codex,claude') 'Multi-agent selection was not deduplicated'
         $Agent = @('all', 'claude')
@@ -425,6 +433,102 @@ try {
             $row = Invoke-CliUpdate 'copilot-cli' $cli
             Assert-True ($row.Result -eq 'failed') "Failure was hidden: $scenario"
         }
+    }
+
+    & {
+        $asset = 'uv-x86_64-pc-windows-msvc.zip'
+        New-ArchiveFixture $asset @('uv.exe', 'uvx.exe') 'astral-sh/uv'
+        $script:UvFixtureAsset = $script:FixtureAssets | Where-Object name -EQ $asset | Select-Object -First 1
+        $script:UvFixtureAsset.browser_download_url = "https://github.com/astral-sh/uv/releases/download/1.2.3/$asset"
+        $wheel = @{
+            filename    = 'swival-1.2.3-py3-none-any.whl'
+            packagetype = 'bdist_wheel'
+            yanked      = $false
+            url         = 'https://files.pythonhosted.org/packages/aa/bb/swival-1.2.3-py3-none-any.whl'
+            digests     = @{ sha256 = 'a' * 64 }
+        }
+        $other = $wheel.Clone()
+        $other.yanked = $true
+        $other.filename = 'swival-2.0.0-py3-none-any.whl'
+        $other.url = $wheel.url.Replace('1.2.3', '2.0.0')
+        $script:SwivalIndex = @{
+            info     = @{ name = 'swival' }
+            releases = @{ '1.2.3' = @($wheel); '2.0.0' = @($other); '3.0.0rc1' = @($wheel) }
+        } | ConvertTo-Json -Depth 7
+        $script:SwivalManifest = @{ info = @{ name = 'swival'; version = '1.2.3' }; urls = @($wheel) } | ConvertTo-Json -Depth 7
+        Assert-True ((Get-SwivalLatestVersion) -eq '1.2.3') 'Swival selected a yanked or preview release'
+        $invalid = $wheel.Clone()
+        $invalid.url = $wheel.url.Replace('files.pythonhosted.org', 'example.invalid')
+        Assert-True (-not (Find-SwivalWheel @($invalid) '1.2.3')) 'Swival accepted an unrelated wheel source'
+
+        $oldIndex = $env:UV_INDEX
+        $oldMirror = $env:UV_PYTHON_INSTALL_MIRROR
+        try {
+            $env:UV_INDEX = 'https://example.invalid'
+            $env:UV_PYTHON_INSTALL_MIRROR = 'https://example.invalid'
+            $probe = Get-SwivalUvStartInfo 'uv.exe' $testRoot @('python', 'list')
+            Assert-True ($probe.Arguments -match '--no-config' -and -not $probe.EnvironmentVariables.ContainsKey('UV_INDEX') -and
+                -not $probe.EnvironmentVariables.ContainsKey('UV_PYTHON_INSTALL_MIRROR') -and $probe.EnvironmentVariables['UV_PYTHON_NO_REGISTRY'] -eq '1') 'Ambient uv options escaped isolation'
+        }
+        finally {
+            $env:UV_INDEX = $oldIndex
+            $env:UV_PYTHON_INSTALL_MIRROR = $oldMirror
+        }
+
+        $script:SwivalUvCalls = @()
+        $script:SwivalFixtureFail = $false
+        $fixturePython = Join-Path $script:SwivalRoot 'python/python.exe'
+        $ordinaryProbe = (Get-Item Function:Get-ExeVersion).ScriptBlock
+        function Get-ExeVersion {
+            param([string]$ExePath)
+            if ($ExePath -eq $fixturePython -and (Test-Path -LiteralPath $ExePath)) { return '3.14.3' }
+            return (& $ordinaryProbe $ExePath)
+        }
+        function Invoke-SwivalUv {
+            param([string]$Uv, [string]$Directory, [string[]]$UvArgs, [switch]$Output)
+            Assert-True ((Get-Content -Raw -LiteralPath $Uv) -eq 'fixture: uv.exe') 'Installer did not select verified uv fixture'
+            $script:SwivalUvCalls += "$($UvArgs[0]) $($UvArgs[1])"
+            if ($UvArgs[0] -eq 'python') {
+                if ($Output) {
+                    Assert-True (($UvArgs -join ' ') -eq 'python find 3.14 --managed-python') 'Wrong managed Python probe'
+                    return $fixturePython
+                }
+                Assert-True (($UvArgs -join ' ') -eq 'python install 3.14 --upgrade --no-bin --no-registry') 'Wrong Swival Python policy'
+                [IO.File]::WriteAllText($fixturePython, 'fixture Python')
+                return
+            }
+            Assert-True (($UvArgs -join ' ') -match '--managed-python --python 3\.14 --default-index https://pypi\.org/simple --only-binary :all:' -and
+                $UvArgs[-1] -eq "swival @ $($wheel.url)#sha256=$($wheel.digests.sha256)") 'Wrong Swival distribution constraints'
+            if ($script:SwivalFixtureFail) { throw 'fixture uv failure' }
+            $bin = Join-Path $Directory 'bin'
+            $null = New-Item -ItemType Directory -Path $bin
+            [IO.File]::WriteAllText((Join-Path $bin 'swival.exe'), 'fixture swival')
+        }
+
+        $uv = Install-Swival '1.2.3'
+        Assert-True ((Get-Content -Raw -LiteralPath $script:SwivalExe) -eq 'fixture swival' -and
+            ($script:SwivalUvCalls -join ',') -eq 'python install,python find,tool install') 'Swival install did not activate the isolated tool'
+        $downloads = $script:Downloads
+        Assert-True ((Get-SwivalUv) -eq $uv -and $script:Downloads -eq $downloads) 'Verified uv was downloaded again'
+        $script:SwivalFixtureFail = $true
+        $failed = $false
+        try { $null = Install-Swival '1.2.3' } catch { $failed = $_.Exception.Message -eq 'fixture uv failure' }
+        Assert-True ($failed -and (Get-Content -Raw -LiteralPath $script:SwivalExe) -eq 'fixture swival') 'Swival runtime failure replaced the working launcher'
+        function Get-FreshCliVersion {
+            param([string]$Name, [string]$ExpectedPath)
+            Assert-True ($Name -eq 'uv') 'Verified an unrelated dependency on PATH'
+            return (Get-ExeVersion $ExpectedPath)
+        }
+        Enable-SwivalUv $uv
+        Assert-True ((Get-Content -Raw -LiteralPath (Join-Path $script:SwivalBin 'uv.exe')) -eq 'fixture: uv.exe') 'The verified uv launcher was not published'
+        function Get-CliSnapshot { return [pscustomobject]@{ Unsafe = $false; Conflict = $true; ActivePath = $null } }
+        $failed = $false
+        try { $null = Get-SwivalUvLocation } catch { $failed = $_.Exception.Message -like '*conflicting or unsafe uv*' }
+        Assert-True $failed 'Conflicting uv installations were not reported'
+        function Test-SwivalPlatform { return $false }
+        $cli = @{ Command = 'swival'; Executable = $script:SwivalExe }
+        Assert-True ((Invoke-CliUpdate 'swival' $cli).Result -eq 'unsupported') 'Automatic run failed on unsupported Swival architecture'
+        Assert-True ((Invoke-CliUpdate 'swival' $cli -Explicit).Result -eq 'failed') 'Explicit unsupported Swival request succeeded'
     }
 
     $cleanupDefinition = (Get-Item Function:Uninstall-BunWinget).ScriptBlock
