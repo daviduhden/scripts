@@ -159,6 +159,7 @@ jobs:
             & powershell.exe -NoProfile -File "windows/$script.ps1" invalid-agent
             if ($LASTEXITCODE -ne 2) { throw "Unexpected usage exit status for $script" }
           }
+          exit 0
       - name: Run portable Perl syntax and regressions
         shell: pwsh
         run: |
