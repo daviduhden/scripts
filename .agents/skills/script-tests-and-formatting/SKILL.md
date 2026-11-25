@@ -232,7 +232,10 @@ Makefiles whose generated `config.mk` is absent. On OpenBSD, `mbake` and
 - The manual Platform Validation workflow runs
   `validate-shell.sh --check --strict`; shellcheck info and warning findings
   are failures. Fix them rather than suppressing them without a documented
-  reason.
+  reason. Read the job's “Show validator logs, including skipped checks”
+  step with `gh run view RUN_ID --log` when the failure step only prints a
+  log path. Recheck with the runner's ShellCheck version, as newer versions
+  can omit diagnostics emitted in CI.
 - Windows batch validators run on the `windows-2025` runner. `findstr /l /c:` can
   mishandle a pattern combining a backslash and wildcard such as
   `windows\*.ps1`; require a plain literal token such as `collect_ps_program`

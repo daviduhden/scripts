@@ -75,8 +75,7 @@ configure_tor() {
 	if grep -Fxq "HiddenServiceDir $directory" "$TOR_CONFIG"; then
 		# Only reuse the exact mapping written by this updater.
 		block=$(sed -n "/^# BEGIN scripts $name\$/,/^# END scripts $name\$/p" "$TOR_CONFIG")
-		grep -Fxq "# BEGIN scripts $name" "$TOR_CONFIG" &&
-			[[ $block == "# BEGIN scripts $name"$'\n'"$expected"$'\n'"# END scripts $name" ]] ||
+		[[ $block == "# BEGIN scripts $name"$'\n'"$expected"$'\n'"# END scripts $name" ]] ||
 			error "Unexpected existing Tor configuration for $name"
 		"${verify[@]}" -f "$TOR_CONFIG" >/dev/null || error 'Tor configuration is invalid'
 		systemctl start "$TOR_UNIT"
