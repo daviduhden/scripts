@@ -140,7 +140,10 @@ description: >-
   units and data intact. Restart only an active service and restore its
   prior binary if activation fails. Keep Tor provisioning opt-in. The
   upstream initializer can clear configuration and data directories, so
-  require empty directories for first initialization. Validate staged
+  require empty directories for first initialization and pass disposable
+  paths through the upstream server's environment variables. Publish the
+  complete configuration after the systemd drop-in. Check onion TCP
+  reachability through Tor before enabling the unit. Validate staged
   torrc against Debian's service defaults before publication, retain unrelated
   Tor settings, and keep generated authentication material out of logs and
   arguments. Document the cgroup eBPF requirement for systemd IP filtering.

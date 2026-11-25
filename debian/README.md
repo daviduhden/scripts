@@ -105,6 +105,12 @@ The flag installs missing Tor/OpenSSL tools from Debian APT. It initializes
 the selected servers with their native INI files and generated credentials,
 adds a separate onion service for each to `/etc/tor/torrc`, and enables and
 starts the selected systemd units. SMP uses TCP 5223 and XFTP uses TCP 443.
+Initialization runs in a private staging tree. The updater publishes the
+complete configuration directory after writing the systemd policy, so an
+interrupted setup can be retried with the same command. Before enabling a
+service, it verifies a SOCKS connection to its onion address through Tor on
+`127.0.0.1:9050`. Keep that listener available when using this flag. The
+probe checks onion TCP reachability without testing the SimpleX protocol.
 XFTP stores uploads in `/srv/xftp` with an initial 20 GB quota. The updater
 prints the onion hostnames but keeps creation passwords out of its output.
 The passwords are in the `[AUTH]` section of the respective INI files under

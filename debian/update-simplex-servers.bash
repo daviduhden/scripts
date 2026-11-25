@@ -16,6 +16,7 @@ WORK=''
 PENDING=''
 UNIT_PENDING=''
 CONFIG_PENDING=''
+INIT_STAGE=''
 TOR_PENDING=''
 TOR_PREVIOUS=''
 PREVIOUS=''
@@ -58,6 +59,7 @@ cleanup() {
 	for file in "$PENDING" "$UNIT_PENDING" "$CONFIG_PENDING" "$TOR_PENDING" "$TOR_PREVIOUS"; do
 		if [[ -n $file ]]; then rm -f -- "$file"; fi
 	done
+	if [[ -n $INIT_STAGE ]]; then rm -rf -- "$INIT_STAGE"; fi
 	if [[ -n $WORK ]]; then
 		rm -f -- "$WORK/release.json" "$WORK/download" "$WORK/tor-block" \
 			"$WORK/tor-policy" "$WORK/init.log"
@@ -65,6 +67,8 @@ cleanup() {
 	fi
 }
 
+# Validate the full candidate with Debian's Tor defaults. Keep the original
+# inode until systemd accepts the reload, so a failed reload can restore torrc.
 configure_tor() {
 	local name=$1 port=$2 directory=$TOR_DATA/$1 expected block
 	local -a verify=(tor --verify-config --defaults-torrc /usr/share/tor/tor-service-defaults-torrc)
@@ -115,10 +119,26 @@ is_empty_directory() (
 	(("${#entries[@]}" == 0))
 )
 
+# SOCKS5 CONNECT with a domain address asks Tor to resolve the onion name
+# and open the service stream. Read only the reply header and send no data
+# to SimpleX. The timeout covers connect, negotiation and rendezvous.
+probe_onion() {
+	timeout 12s /bin/bash -euo pipefail -s -- "$1" "$2" 2>/dev/null <<'SOCKS'
+		exec 3<>/dev/tcp/127.0.0.1/9050
+		printf "\005\001\000" >&3
+		read -r version status < <(head -c 2 <&3 | od -An -tu1)
+		[[ $version == 5 && $status == 0 ]]
+		printf "\005\001\000\003\076%s" "$1" >&3
+		printf "%b" "\\0$(printf "%03o" "$(($2 / 256))")\\0$(printf "%03o" "$(($2 % 256))")" >&3
+		read -r version status reserved address_type < <(head -c 4 <&3 | od -An -tu1)
+		[[ $version == 5 && $status == 0 && $reserved == 0 && $address_type =~ ^[134]$ ]]
+SOCKS
+}
+
 setup_server() {
 	local server=$1 config_dir=$2 data_dir=$3 uid=$4 gid=$5
 	local name=$1-server ini='smp-server.ini' port=5223 hostname_file onion='' password='' line
-	local dropin candidate attempt restart=0
+	local dropin candidate attempt restart=0 active=0 prefix fresh_ini
 	local -a init=(init)
 	if [[ $server == xftp ]]; then
 		ini='file-server.ini'
@@ -155,6 +175,8 @@ UNIT
 		fi
 	fi
 
+	# Obtain the Tor hostname before deriving the SimpleX configuration and
+	# certificate common name.
 	configure_tor "$name" "$port"
 	hostname_file=$TOR_DATA/$name/hostname
 	for ((attempt = 0; attempt < 15; attempt++)); do
@@ -168,13 +190,24 @@ UNIT
 		if ! is_empty_directory "$config_dir" || ! is_empty_directory "$data_dir"; then
 			error "Incomplete initialization for $name, inspect $config_dir and $data_dir"
 		fi
-		# The vendor initializer prints a connection URI containing credentials.
-		runuser -u "$server" -- "$BIN_DIR/$name" "${init[@]}" --fqdn "$onion" >"$WORK/init.log" 2>&1 ||
+		# The vendor initializer can clear its configured directories. Give it
+		# disposable paths beside the live config so publication is one rename.
+		INIT_STAGE=$(mktemp -d "${config_dir}.init.XXXXXXXX")
+		chmod 0711 "$INIT_STAGE"
+		install -d -m 0700 -o "$uid" -g "$gid" "$INIT_STAGE/work"
+		prefix=${server^^}_SERVER
+		runuser -u "$server" -- env "${prefix}_CFG_PATH=$INIT_STAGE/work/config" \
+			"${prefix}_LOG_PATH=$INIT_STAGE/work/log" \
+			"$BIN_DIR/$name" "${init[@]}" --fqdn "$onion" >"$WORK/init.log" 2>&1 ||
 			error "Could not initialize $name"
-		[[ -f $ini && ! -L $ini ]] || error "Initializer did not create $ini"
-		CONFIG_PENDING=$(mktemp "$config_dir/.simplex-config.XXXXXXXX")
+		fresh_ini=$INIT_STAGE/work/config/${ini##*/}
+		[[ -d $INIT_STAGE/work/config && ! -L $INIT_STAGE/work/config &&
+			-f $fresh_ini && ! -L $fresh_ini ]] || error "Initializer did not create $ini"
+		CONFIG_PENDING=$(mktemp "$INIT_STAGE/config.XXXXXXXX")
 		if [[ $server == xftp ]]; then password=$(openssl rand -hex 32); fi
 		while IFS= read -r line || [[ -n $line ]]; do
+			line=${line//"$INIT_STAGE/work/config"/"$config_dir"}
+			line=${line//"$INIT_STAGE/work/log"/"$data_dir"}
 			case "$server:$line" in
 			'smp:port = 5223,443') line='port = 5223' ;;
 			'xftp:[AUTH]')
@@ -183,17 +216,13 @@ UNIT
 				;;
 			esac
 			printf '%s\n' "$line"
-		done <"$ini" >"$CONFIG_PENDING"
+		done <"$fresh_ini" >"$CONFIG_PENDING"
 		grep -Fxq "port = $port" "$CONFIG_PENDING" || error "Unexpected transport port in $ini"
 		grep -Eq '^create_password = [^[:space:]]+$' "$CONFIG_PENDING" ||
 			error "Missing creation password in $ini"
 		chown "$uid:$gid" "$CONFIG_PENDING"
-		mv -Tf -- "$CONFIG_PENDING" "$ini"
+		mv -Tf -- "$CONFIG_PENDING" "$fresh_ini"
 		CONFIG_PENDING=''
-	fi
-	if [[ ! -f $ini || -L $ini ]] ||
-		! grep -Fxq "host = $onion" "$ini" || ! grep -Fxq "port = $port" "$ini"; then
-		error "Existing configuration for $name does not match its Tor mapping"
 	fi
 	prepare_directory "$dropin" 0 0
 	if [[ ! -f $dropin/tor.conf ]]; then
@@ -204,12 +233,35 @@ UNIT
 		UNIT_PENDING=''
 		restart=1
 	fi
-	systemctl daemon-reload
-	if ((restart)) && systemctl is-active --quiet "$name.service"; then
-		systemctl restart "$name.service"
+	if [[ -n $INIT_STAGE ]]; then
+		grep -Fxq "host = $onion" "$fresh_ini" ||
+			error "Initializer did not set the onion hostname for $name"
+		chmod 0750 "$INIT_STAGE/work/config"
+		# GNU mv rejects a nonempty destination, including concurrent edits.
+		mv -Tf -- "$INIT_STAGE/work/config" "$config_dir"
+		rm -rf -- "$INIT_STAGE"
+		INIT_STAGE=''
 	fi
-	systemctl start "$name.service"
+	if [[ ! -f $ini || -L $ini ]] ||
+		! grep -Fxq "host = $onion" "$ini" || ! grep -Fxq "port = $port" "$ini"; then
+		error "Existing configuration for $name does not match its Tor mapping"
+	fi
+	systemctl daemon-reload
+	if systemctl is-active --quiet "$name.service"; then
+		active=1
+		if ((restart)); then systemctl restart "$name.service"; fi
+	else
+		systemctl start "$name.service"
+	fi
 	systemctl is-active --quiet "$name.service" || error "$name did not start"
+	for ((attempt = 0; attempt < 5; attempt++)); do
+		if probe_onion "$onion" "$port"; then break; fi
+		sleep 2
+	done
+	if ((attempt == 5)); then
+		if ((active == 0)); then systemctl stop "$name.service" || warn "Could not stop $name"; fi
+		error "Could not connect to $name at $onion:$port through Tor SOCKS on 127.0.0.1:9050"
+	fi
 	systemctl enable "$name.service"
 	log "$name enabled at $onion:$port"
 }
@@ -328,6 +380,8 @@ publish_server() {
 		PREVIOUS=$(mktemp "$BIN_DIR/.$name.previous.XXXXXXXX")
 		ln -fT -- "$binary" "$PREVIOUS"
 	fi
+	# Cleanup retains the previous inode if interrupted during activation.
+	# The explicit rollback below handles a failed systemd restart.
 	ACTIVATING=1
 	mv -Tf -- "$PENDING" "$binary"
 	PENDING=''
