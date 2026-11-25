@@ -13,6 +13,8 @@ $ErrorActionPreference = 'Stop'
 
 function Get-ManagedPath {
     param([string]$Entry)
+    # Both manifests are path inputs. Bound them to the installer's layout
+    # before using them to replace or remove anything under the destination.
     if ($Entry -match '^(?:perl-path\.txt|installed-files\.txt|VERSION|bin\\[\w.-]+\.cmd|perl\\[\w.-]+\.pl|windows\\[\w.-]+\.ps1)$') {
         return $Entry
     }
@@ -59,6 +61,8 @@ try {
         $null = Assert-InstallPath $path -Directory
     }
 
+    # Keep incoming files and backups on the destination filesystem. Each
+    # replacement is recorded for rollback across the multi-file operation.
     $transaction = Join-Path $Destination ('.scripts-install-' + [guid]::NewGuid().ToString('N'))
     [IO.Directory]::CreateDirectory($transaction) | Out-Null
     foreach ($entry in @($fresh | Where-Object { $_ -ne $manifest }) + @($manifest)) {
@@ -82,6 +86,8 @@ try {
         $null = Assert-InstallPath $target
         Assert-RegularItem -Path $target
         if (-not [IO.File]::Exists($target)) { continue }
+        # A stale manifest entry alone is insufficient to remove a launcher
+        # that a user may have replaced with a command of the same name.
         if ($entry -like 'bin\*' -and
             -not (Select-String -LiteralPath $target -Pattern 'perl-path.txt', 'rem scripts-powershell-launcher' -SimpleMatch -Quiet)) {
             continue
@@ -92,6 +98,8 @@ try {
     }
 }
 catch {
+    # Undo completed operations in reverse order so the previous manifest
+    # and files can be recovered together after a partial publication.
     for ($index = $changes.Count - 1; $index -ge 0; $index--) {
         $change = $changes[$index]
         try {

@@ -698,6 +698,8 @@ function Get-CliPackageHash {
 function Write-CliPackageProof {
     param([string]$Directory, [string]$Version, [string]$Digest, [string]$Agent)
 
+    # The release digest identifies the archive. The file map binds cache
+    # reuse to the extracted tree, including executables and their resources.
     $files = Get-CliPackageHash $Directory
     if (-not $files.Count -or $Digest -cnotmatch '^[0-9a-f]{64}$') { throw 'Invalid verified release proof.' }
     $proof = [ordered]@{ agent = $Agent; release = $Version; archive = $Digest; files = $files }
@@ -1175,6 +1177,8 @@ function Set-CodexVisibleBin {
     $guid = [guid]::NewGuid().ToString('N')
     $pending = "$($script:CodexBin).pending-$guid"
     $backup = "$($script:CodexBin).previous-$guid"
+    # Capture the old path type before moving it. Cleanup can remove a
+    # retired junction without traversing its target but keeps a real folder.
     $previous = Get-Item -LiteralPath $script:CodexBin -Force -ErrorAction SilentlyContinue
     $previousWasJunction = $previous -and ($previous.Attributes -band [IO.FileAttributes]::ReparsePoint)
     New-Item -ItemType Junction -Path $pending -Target (Join-Path $VersionDir 'bin') | Out-Null
@@ -1893,8 +1897,9 @@ function Get-SelectedCli {
 function Get-FreshCliVersion {
     param([string]$Name, [string]$ExpectedPath)
 
-    # Run a new shell with the registry-backed PATH and no profile. Construct
-    # the literal command only from the updater's fixed command names.
+    # A usable binary can still be shadowed in a new session. Verify command
+    # resolution against the registry-backed PATH with profiles disabled.
+    # Construct the literal command only from the updater's fixed names.
     if ($Name -notin @('opencode', 'codex', 'crush', 'copilot', 'claude', 'swival', 'uv', 'bun')) { throw 'Invalid command name.' }
     $program = if ($PSVersionTable.PSVersion.Major -ge 6) { 'pwsh.exe' } else { 'powershell.exe' }
     $shell = Join-Path $PSHOME $program

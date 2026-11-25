@@ -66,6 +66,8 @@ function Assert-InstallPath {
                     throw "Filesystem path can be changed by another identity: $current"
                 }
             }
+            # For ancestors, replacement rights matter. Permission to create a
+            # new sibling does not itself let another identity change the target.
             $required = $replace
         }
         $expectDirectory = $true

@@ -407,6 +407,8 @@ function Write-PsfmtAtomicFile {
             $stream = [IO.FileStream]::new($temporary, $options)
         }
         try { $stream.Write($bytes, 0, $bytes.Length); $stream.Flush($true) } finally { $stream.Dispose() }
+        # Check the bytes actually staged and compare the destination with the
+        # original read. A concurrent change after this check is still possible.
         if ([Convert]::ToBase64String([IO.File]::ReadAllBytes($temporary)) -cne [Convert]::ToBase64String($bytes)) { throw 'Temporary file verification failed.' }
         if (Test-PsfmtReparsePath $Path) { throw 'Path became a reparse point during writing.' }
         if ([Convert]::ToBase64String([IO.File]::ReadAllBytes($Path)) -cne [Convert]::ToBase64String($Document.Bytes)) {

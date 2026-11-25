@@ -17,7 +17,8 @@ $tokens = $null
 $errors = $null
 $ast = [Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$errors)
 if ($errors.Count) { throw 'Updater syntax errors' }
-# Load definitions only: never run the updater against real user directories.
+# Extract definitions without evaluating the script entry point. The tests
+# supply temporary destinations and substitute download and version probes.
 foreach ($line in $source.Split("`n")) {
     if ($line -match '^\$script:(SemVer|StableAgents)') { . ([scriptblock]::Create($line)) }
 }

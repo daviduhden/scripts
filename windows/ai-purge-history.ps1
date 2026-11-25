@@ -174,6 +174,8 @@ function Remove-HistoryTarget {
 }
 
 function Clear-OpenCodeSession {
+    # Sessions share storage with credentials in OpenCode 2. Use the CLI's
+    # session operations so the database and its companion files stay intact.
     if ($DryRun) {
         Write-Information '[DRY-RUN] Would delete OpenCode sessions through the CLI if available.' -InformationAction Continue
         return
@@ -209,6 +211,8 @@ function Clear-OpenCodeSession {
                 $row.id
             })
         if (-not $ids.Count) { return }
+        # Validate the whole batch before deleting any of it. A sorted
+        # fingerprint detects an immediately repeated batch in any order.
         $fingerprint = ($ids | Sort-Object -CaseSensitive -Unique) -join ' '
         if ($fingerprint.Split(' ').Count -ne $ids.Count) { throw 'OpenCode returned duplicate session IDs.' }
         if ($fingerprint -ceq $previous) { throw 'OpenCode session deletion made no progress.' }

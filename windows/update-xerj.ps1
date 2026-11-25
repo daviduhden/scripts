@@ -189,6 +189,8 @@ function ConvertFrom-StrictConfig {
     param([string]$Text)
 
     if ($Text -notmatch '^\s*\{') { throw 'Configuration must be a JSON object.' }
+    # Preflight constructs that cannot safely round-trip through PowerShell
+    # objects. ConvertFrom-Json still checks the actual JSON grammar.
     $objects = [Collections.Generic.Stack[hashtable]]::new()
     $tokens = [regex]::Matches($Text, '(?<string>"(?:[^"\\\x00-\x1f]|\\.)*")(?<property>\s*:)?|(?<open>\{)|(?<close>\})|(?<arrayOpen>\[)|(?<arrayClose>\])|(?<nonstandard>//|/\*|\x27|,\s*[}\]])')
     $depth = 0
@@ -243,6 +245,8 @@ function Get-JsonObject {
 
 function Test-ManagedCommand {
     param($Command, $CommandArgs, [string]$Binary)
+    # The executable and argument shape establish ownership. The URL value
+    # may differ because a subsequent registration can change the endpoint.
     return ($Command -is [string] -and $Command -ieq $Binary -and $CommandArgs -is [array] -and
         $CommandArgs.Count -eq 3 -and $CommandArgs[0] -ceq 'mcp' -and $CommandArgs[1] -ceq '--url' -and
         $CommandArgs[2] -is [string])
@@ -476,6 +480,8 @@ if ($null -ne $LASTEXITCODE) { exit $LASTEXITCODE }
     try {
         if (-not $process.Start()) { throw 'Could not start Swival configuration validation.' }
         $process.StandardInput.Close()
+        # Drain both streams even though only the exit status is needed.
+        # Forwarding diagnostics could expose values from the user's config.
         $output = $process.StandardOutput.BaseStream.CopyToAsync([IO.Stream]::Null)
         $errors = $process.StandardError.BaseStream.CopyToAsync([IO.Stream]::Null)
         if (-not $process.WaitForExit(20000) -or $process.ExitCode -ne 0 -or

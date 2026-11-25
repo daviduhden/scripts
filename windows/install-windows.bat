@@ -118,6 +118,8 @@ if not defined PROGRAMS (
 )
 
 rem --------------------------------------------------------------------
+rem Top-level scripts become public commands. Keep installer helpers in a
+rem subdirectory so they do not acquire standalone launchers.
 rem Discover PowerShell programs alongside this installer and the formatter.
 rem --------------------------------------------------------------------
 if not exist "%REPO%windows\powershell-launcher.cmd" (

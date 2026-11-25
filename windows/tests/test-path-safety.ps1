@@ -41,6 +41,8 @@ try {
     $null = New-Item -ItemType Directory -Path $memory, $subagents -Force
     $selected = @((Join-Path $claude 'history.jsonl'), (Join-Path $project 'session.jsonl'),
         (Join-Path $project 'session.jsonl.superseded-1'), (Join-Path $subagents 'agent.jsonl'))
+    # A JSONL file under memory also has a subagents directory in its path.
+    # Its exclusion tests the project layout boundary, not just the extension.
     $preserved = @((Join-Path $claude 'settings.json'), (Join-Path $claude '.credentials.json'),
         (Join-Path $memory 'notes.jsonl'))
     foreach ($path in ($selected + $preserved)) { [IO.File]::WriteAllText($path, 'fixture') }
