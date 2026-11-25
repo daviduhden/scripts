@@ -163,7 +163,8 @@ repair_dtb() {
 	fi
 
 	# Remove only a complete boot argument token from bootargs properties.
-	# The token-by-token comparison below rejects any other DTS round-trip change.
+	# Compare the ordered boot argument tokens after rebuilding. This check
+	# covers the bootargs property alone.
 	"$PERL_CMD" "$BOOTARGS_HELPER" remove-token "$dts" ||
 		die 'cannot remove cgroup_disable=memory from the DTB source'
 	dtc -q -I dts -O dtb -o "$new" "$dts" || die 'cannot compile the repaired DTB'

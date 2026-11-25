@@ -797,6 +797,8 @@ can_replace_launcher() {
 	[[ $target == "$STATE_DIR/$agent/"* ]]
 }
 
+# Build and verify in a private release directory. The launcher rename is
+# the publication point. After it succeeds the cleanup trap keeps that tree.
 activate_user_release() (
 	local agent=$1 binary=$2 stage="" links="" verified
 	trap 'if [[ -n $stage && -d $stage ]]; then rm -rf -- "$stage"; fi
@@ -1025,6 +1027,8 @@ is_supported() {
 	esac
 }
 
+# Validate the current path before mutation. After any installation attempt
+# probe again so the summary reflects what is actually installed.
 process_agent() {
 	local agent=$1 binary=${COMMANDS[$1]} path="" relative update
 	PREVIOUS="" LATEST="" FINAL="" RESULT=failed TAG="" METADATA=""

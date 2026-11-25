@@ -16,7 +16,8 @@ ExecReload=/bin/kill -HUP $MAINPID
 KillSignal=SIGINT
 LimitNOFILE=16384
 
-# Hardening
+# The service can write its configuration, data, state and cache directories.
+# Its view of the rest of the filesystem is read-only apart from private tmp.
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectHome=read-only

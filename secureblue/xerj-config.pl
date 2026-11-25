@@ -183,6 +183,8 @@ sub object_at {
     return $parent->{$key};
 }
 
+# An existing entry is eligible for a URL change only if it invokes the
+# expected MCP command. Preserve unrelated fields in the recognized entry.
 sub update_entry {
     my ( $servers, $style ) = @_;
     if ( exists $servers->{xerj} ) {
@@ -225,6 +227,9 @@ sub update_entry {
     }
 }
 
+# Parse the candidate through Swival's profile-listing path using an
+# isolated configuration directory and project. Hide command output because
+# parse diagnostics may quote existing configuration values.
 sub validate_swival {
     my ( $candidate, $stage ) = @_;
     my $config = "$stage/swival/config.toml";

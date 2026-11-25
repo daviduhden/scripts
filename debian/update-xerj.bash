@@ -289,6 +289,8 @@ main() {
 	parse_args "$@"
 	ensure_debian
 	if ((EUID != 0)); then
+		# Discover and configure MCP clients in the desktop user's environment.
+		# The recursive invocation handles package delivery only.
 		xerj_find_clients || return 1
 		require_cmd sudo
 		local -a package_args=(--binary-only)

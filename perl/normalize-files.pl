@@ -6,8 +6,8 @@
 # - Three independent operations: rename, encoding -> UTF-8 (no BOM),
 #   line endings -> LF.
 # - Dry-run by default; only --apply modifies anything.
-# - Never overwrites, never follows symlinks by default, never calls
-#   destructive git commands, never shells out with concatenated paths.
+# - Name changes reserve unoccupied destinations. Content edits replace the
+#   source only after writing the new bytes and checking the source snapshot.
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.
@@ -1586,9 +1586,8 @@ sub editorconfig_for {
 # Atomic file writing  #
 ########################
 
-# Replace a target atomically.  Unix uses rename(2); Windows renames the old
-# file aside first because its rename(2) does not replace an existing path.
-# The helper restores the old name if the second rename fails.
+# On Windows, if rename cannot replace an existing target, move the original
+# aside and retry. If restoration also fails, report where the original remains.
 sub safe_replace {
     my ( $tmp, $target ) = @_;
     if ( rename( $tmp, $target ) ) { return 1 }
@@ -1613,10 +1612,9 @@ sub safe_replace {
     return 0;
 }
 
-# Write transformed content through a temporary file and atomically replace the
-# original.  The original mode (and optionally timestamps) is preserved, and a
-# pre-write device/inode check detects files changed by another process during
-# processing.
+# Stage transformed content beside the source and apply its mode and optional
+# timestamps before replacement. Compare the source with the read snapshot
+# before staging and again just before calling safe_replace().
 sub atomic_write {
     my ( $cfg, $path_raw, $bytes, $R, $expected ) = @_;
     my @before = lstat($path_raw);

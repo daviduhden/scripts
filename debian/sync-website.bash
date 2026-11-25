@@ -406,6 +406,8 @@ check_atomic_target() {
 	fi
 }
 
+# Stage the new link under the destination's parent filesystem.
+# GNU mv -T replaces the docroot symlink itself even if it targets a directory.
 replace_public_link() {
 	local target="$1" parent linkdir
 	parent="${WWW_DIR%/*}"

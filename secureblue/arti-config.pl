@@ -317,6 +317,8 @@ sub parse_assignment {
     return @keys;
 }
 
+# Track dotted prefixes as tables, separately recording explicit headers.
+# A later header can claim an implicit table but cannot replace a value.
 sub define_table {
     my ( $nodes, $explicit, $path ) = @_;
     my @prefix;

@@ -348,6 +348,8 @@ check_atomic_target() {
 	fi
 }
 
+# Stage the new link under the destination's parent filesystem.
+# The Perl helper uses rename(2) to replace the docroot symlink itself.
 replace_public_link() {
 	typeset target="$1" parent linkdir
 	parent="${WWW_DIR%/*}"

@@ -121,6 +121,8 @@ sub stream_gzip_child {
     return 1;
 }
 
+# Stream decompressed bytes to the iterator through a pipe. Bound the whole
+# stream separately from the member payload quota to allow for TAR overhead.
 sub process_archive {
     my ( $archive, $limit, $consume ) = @_;
     my $max_entries = 200_000;
@@ -176,6 +178,8 @@ sub process_archive {
     return 1;
 }
 
+# Use the logical path, which includes the USTAR prefix. Track normalized
+# names so a second header cannot claim a destination already seen.
 sub validate_member {
     my ( $entry, $root, $seen, $total, $limit ) = @_;
     my $name  = $entry->full_path;
@@ -235,6 +239,8 @@ sub write_entry {
       or die "cannot set archive entry mode: $!\n";
 }
 
+# Members are written as they are read. The caller owns staging cleanup
+# after an error, including failures reported after the final member.
 sub extract_all {
     my ( $archive, $destination, $root, $limit ) = @_;
     usage() unless defined $limit && $limit =~ /\A[0-9]+\z/ && $limit > 0;
@@ -263,6 +269,8 @@ sub extract_all {
     return 1;
 }
 
+# Check the entire stream for duplicate matches and gzip errors before
+# creating the selected output.
 sub extract_entry {
     my ( $archive, $destination, $entry_name, $limit ) = @_;
     usage() unless defined $entry_name && length $entry_name;

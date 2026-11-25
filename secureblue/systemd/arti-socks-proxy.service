@@ -7,6 +7,7 @@
 Description=UNIX socket -> Arti SOCKS bridge (socat)
 After=arti.service
 Requires=arti.service
+# Propagate stops and restarts from Arti to the dependent socket listener.
 PartOf=arti.service
 
 [Service]

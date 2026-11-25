@@ -42,8 +42,8 @@ managed_signature() {
 	fi
 }
 
-# A record identifies the installation family and exact bytes it installed.
-# cksum is a portable change detector, not an authenticity check.
+# The record path identifies the installation family. Its contents capture
+# the link target or a portable checksum and byte count for drift detection.
 managed_entry() (
 	phase=$1
 	mode=$2
@@ -210,6 +210,8 @@ with_platform_install_locks() {
 
 install_platform() {
 	install_family=$1
+	# Preflight every entry under the same locks before publishing any of
+	# them. Publication can still fail after earlier entries have landed.
 	for phase in check publish; do
 		install_list "$phase" "$platform_list" "$DESTBIN"
 		if [ "$install_family" = secureblue ]; then

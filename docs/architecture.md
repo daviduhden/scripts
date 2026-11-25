@@ -13,11 +13,29 @@ are installed beside their caller when non-shell logic is needed.
 - `perl/`: portable Perl 5.10.1+ programs using core modules;
 - `windows/`: batch installers/launchers and PowerShell utilities;
 - `scripts/manage-install.sh`: POSIX install/uninstall/help/format logic used by the Makefile;
-- `tests-format/`: POSIX validators and formatters;
+- `tests-format/`: POSIX validators and formatters, bundled configuration
+  for external projects, and regression tests for portable programs;
 - `tests/`: isolated regression suites;
 - `scripts/` also contains the standalone agent-knowledge validator and
   the shared Linux agent delivery and XERJ client-discovery helpers;
 - `shell/`: sourced interactive Bash helpers.
+
+## Entry points and data ownership
+
+The Debian and SecureBlue `update-ai-clis` entry points delegate to the
+shared Linux implementation. It selects the distribution method for each
+agent and checks the executable that an interactive session resolves.
+Windows implements the same selection interface in PowerShell.
+`update-xerj` handles delivery of xerj and registration of its stdio MCP
+server. The POSIX variants share the client discovery and configuration
+helpers. See the [agent delivery matrix](update-ai-clis.md) and the
+[MCP configuration matrix](update-xerj.md) for platform boundaries.
+
+The POSIX Makefile passes manifests and destination paths to
+`scripts/manage-install.sh`. Installation records describe files published
+by each target. Windows maintains a separate inventory under its per-user
+installation root and generates wrappers that resolve the installed script
+and interpreter. The public Perl program manifest is shared by both installers.
 
 ## Trust boundaries
 

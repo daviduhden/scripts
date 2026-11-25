@@ -4,8 +4,8 @@
 # Loaded from ~/.bashrc.d
 # ==================================================
 # This file is sourced, not executed. Sourcing it changes the current
-# interactive shell: it enables vi key bindings and exports EDITOR and VISUAL
-# when those variables are not already set.
+# interactive shell: it enables vi key bindings, sets defaults for empty or
+# unset EDITOR and VISUAL, and exports both.
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.

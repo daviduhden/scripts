@@ -119,6 +119,8 @@ xerj_find_clients() {
 	((missing == 0))
 }
 
+# Codex owns its configuration file. Read its registration through the CLI
+# and confirm the result through the same interface after adding an entry.
 xerj_configure_codex() {
 	local command=$1 helper=$2 binary=$3 perl=$4 payload action
 	if payload=$(/usr/bin/timeout --kill-after=3s 20s "$command" mcp get xerj --json 2>/dev/null); then

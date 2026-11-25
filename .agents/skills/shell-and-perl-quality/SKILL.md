@@ -36,6 +36,11 @@ description: >-
    guard optional options.
 4. Quote every expansion used as a path or argument. Use `--` before operands
    that may start with `-`.
+5. For comment-only changes, review diff hunks in context. A hash inside a
+   heredoc, a multiline literal or a continued command can be runtime data.
+   ShellCheck directives and Perl tool annotations must retain their scope.
+   Compare before/after shell parses in addition to checking formatting when
+   the placement of a new comment is ambiguous.
 
 ### Shell-specific checks
 

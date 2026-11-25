@@ -4,7 +4,7 @@
 #  - Exports SSH_ASKPASS/SSH_ASKPASS_REQUIRE for ksshaskpass GUI
 #  - Parses known_hosts and de-duplicates hosts (including custom ports)
 #  - Presents a numbered menu to choose a server
-#  - questions for SSH username (default SSH_MENU_USER or $USER)
+#  - Prompts for an SSH username (default SSH_MENU_USER or $USER)
 #  - Remembers the last SSH username used and reuses it as default
 #  - Persists usage frequencies to sort frequently used hosts to top
 #  - Supports custom aliases via a separate alias file
@@ -203,8 +203,8 @@ sub setup_openbsd_sandbox {
 # 2. State persistence #
 ########################
 
-# Replace a state file atomically.  Windows cannot rename over an existing file,
-# so it moves the old file aside and restores it if the new install fails.
+# Publish a prepared state file. If Windows cannot rename it over the
+# destination, keep the old file aside until the replacement succeeds.
 sub replace_state_file {
     my ( $path, $tmp ) = @_;
 
@@ -300,7 +300,8 @@ sub read_preferences {
 }
 
 # All writers lock the stable sibling, reread current state, and merge a
-# single change before atomically replacing the data file.
+# single change before replacing the data file. Locking the data file itself
+# would leave later writers locking a different inode after replacement.
 sub edit_preferences {
     my ( $path, $state, $counts, $edit ) = @_;
     my $ok = eval {

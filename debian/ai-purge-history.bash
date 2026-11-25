@@ -194,6 +194,9 @@ purge_claude_history() {
 	done
 }
 
+# OpenCode can store credentials alongside sessions. Delete sessions through
+# the CLI and validate each complete page of IDs before issuing deletions.
+# Sort the IDs so a repeated page signals lack of progress regardless of order.
 purge_opencode_history() {
 	typeset batch ids previous='' session_id
 	if [ "$DRY_RUN" -eq 1 ]; then
