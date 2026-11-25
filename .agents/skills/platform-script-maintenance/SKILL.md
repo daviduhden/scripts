@@ -181,6 +181,9 @@ tool is missing, report the check as skipped rather than passed.
   with a hyphen in Bash associative maps after formatting. Keep the managed
   PATH directories user-owned or administrator-controlled, and check which
   executable a new session resolves before claiming it is available.
+  Probe SecureBlue Bash with an interactive login because its interactive
+  startup adds Homebrew to PATH. Leave protected profiles alone when the
+  probe already sees the expected executable.
   Use the tests in [test_ai_cli_updates.pl](../../../tests/test_ai_cli_updates.pl)
   for offline selector, version, conflict and failure coverage. The Copilot
   CLI version banner ends its SemVer token with a sentence period.

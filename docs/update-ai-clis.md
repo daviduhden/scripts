@@ -46,6 +46,9 @@ persistent machine and user PATH combined. The scripts preserve existing
 shell configuration. Profiles or terminal applications that change PATH can
 affect which executable is launched.
 
+On SecureBlue, Bash verification uses an interactive login so that it
+sees the Homebrew PATH configured by interactive startup.
+
 Swival uses the upstream `uv tool` distribution and a uv-managed Python
 3.14 in its isolated environment. Swival 1.9.6 declares Python
 `>=3.13,<3.15`. uv resolves its Python dependencies from PyPI. Debian's

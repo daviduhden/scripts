@@ -902,7 +902,11 @@ can_update() {
 # process cannot inherit. Probe the safe, expected executable inside that
 # shell only when its command resolution identifies the same file.
 session_command() {
-	local binary=$1 expected=$2
+	local binary=$1 expected=$2 login_flags=-lc
+	# SecureBlue adds the Homebrew path in interactive Bash startup.
+	if [[ $PLATFORM == secureblue && ${SHELL_BIN##*/} == bash ]]; then
+		login_flags=-lic
+	fi
 	if [[ ${SHELL_BIN##*/} == fish ]]; then
 		# shellcheck disable=SC2016 # Expanded by Fish.
 		timeout --kill-after=2s 20s env PATH="$SYSTEM_PATH" "$SHELL_BIN" -lc '
@@ -915,7 +919,7 @@ session_command() {
 		' "$binary" "$expected" 2>&1
 	else
 		# shellcheck disable=SC2016 # Expanded by the login shell.
-		timeout --kill-after=2s 20s env PATH="$SYSTEM_PATH" BASH_ENV= ENV= "$SHELL_BIN" -lc '
+		timeout --kill-after=2s 20s env PATH="$SYSTEM_PATH" BASH_ENV= ENV= "$SHELL_BIN" "$login_flags" '
 			resolved=$(command -v -- "$1") || resolved=
 			printf "__scripts_ai_cli_path__%s\n" "$resolved"
 			case "$resolved" in
@@ -969,12 +973,17 @@ persist_path() {
 		return 1
 	fi
 	quoted="'$dir'"
-	if [[ ${SHELL_BIN##*/} == fish ]]; then
-		printf '\n%s\nfish_add_path --path --append %s\n' "$label" "$quoted" >>"$PROFILE"
-	else
-		# shellcheck disable=SC2016 # Write a literal variable into the profile.
-		printf '\n%s\ncase ":$PATH:" in\n  *:%s:*) ;;\n  *) PATH="$PATH":%s ;;\nesac\nexport PATH\n' \
-			"$label" "$quoted" "$quoted" >>"$PROFILE"
+	if ! {
+		if [[ ${SHELL_BIN##*/} == fish ]]; then
+			printf '\n%s\nfish_add_path --path --append %s\n' "$label" "$quoted"
+		else
+			# shellcheck disable=SC2016 # Write a literal variable into the profile.
+			printf '\n%s\ncase ":$PATH:" in\n  *:%s:*) ;;\n  *) PATH="$PATH":%s ;;\nesac\nexport PATH\n' \
+				"$label" "$quoted" "$quoted"
+		fi
+	} 2>/dev/null >>"$PROFILE"; then
+		warn "Cannot add $dir to $PROFILE. Configure PATH in your shell startup and retry."
+		return 1
 	fi
 }
 

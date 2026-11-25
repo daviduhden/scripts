@@ -239,6 +239,28 @@ SH
     is( slurp($profile),    $conflict, 'preserves conflicting profile entry' );
   };
 
+subtest 'SecureBlue sees the interactive PATH without writing the profile' =>
+  sub {
+    my $root  = sandbox();
+    my $shell = write_file( "$root/bin/bash", <<'SH' );
+#!/bin/sh
+[ "$1" = -lic ] || exit 2
+shift
+export PATH="$FIXTURE_ROOT/bin:$PATH"
+exec /bin/bash --noprofile --norc -c "$@"
+SH
+    chmod 0755, $shell or die "cannot chmod $shell: $!";
+    my $contents = "# protected startup file\n";
+    my $profile  = write_file( "$root/home/.bash_profile", $contents );
+    chmod 0400, $profile or die "cannot chmod $profile: $!";
+    executable( "$root/bin", 'codex', 'codex-cli 2.0.0' );
+
+    my $run = run_updater( $root, {}, '--test-session', 'secureblue' );
+    is( $run->{returncode}, 0, 'interactive login resolves the expected CLI' )
+      or diag $run->{stdout} . $run->{stderr};
+    is( slurp($profile), $contents, 'protected profile is unchanged' );
+  };
+
 subtest 'Homebrew selects official casks and scopes package operations' => sub {
     my $jq = find_command('jq');
     plan skip_all => 'jq is required to parse Homebrew metadata' unless $jq;

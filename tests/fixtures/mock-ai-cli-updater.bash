@@ -88,6 +88,7 @@ if [[ ${1:-} == --test-swival ]]; then
 fi
 
 if [[ ${1:-} == --test-session ]]; then
+	PLATFORM=${2:-debian}
 	HOME_DIR="$HOME"
 	SHELL_BIN="$FIXTURE_ROOT/bin/bash"
 	ORIGINAL_PATH=/usr/bin:/bin
