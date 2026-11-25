@@ -277,6 +277,9 @@ Makefiles whose generated `config.mk` is absent. On OpenBSD, `mbake` and
   temporary user directories. Include installed-name coverage through staged
   Make targets or the disposable Windows installer. A launcher `--help`
   invocation checks argument forwarding without downloading software.
+- Keep the Perl harness deadline in force after output EOF. Test fixtures
+  can close both output streams before exiting, so pipe readiness alone
+  cannot bound the wait for process exit.
 - `make test-tooling` covers the shell, Perl, and Make validator modes, strict
   missing tools, make execution opt-in, installation paths with spaces, and
   early failures using temporary paths and offline tool doubles. It also runs

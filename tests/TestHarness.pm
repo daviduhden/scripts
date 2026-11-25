@@ -127,6 +127,8 @@ sub shell_quote {
     return "'" . $escaped . "'";
 }
 
+# Fixture scripts expose top-level shell functions with an unindented close.
+# Extract only the requested function so tests can supply its dependencies.
 sub extract_function {
     my ( $text, $name ) = @_;
     my @lines = split /\n/, $text, -1;
@@ -149,6 +151,8 @@ sub extract_function {
     return join "\n", @lines[ $start .. $end ];
 }
 
+# Check the entry point convention before returning code for a fixture to
+# source. Trailing executable statements would bypass that isolation.
 sub functions_without_main {
     my ($path) = @_;
     my $text   = slurp($path);
@@ -161,11 +165,20 @@ sub functions_without_main {
 }
 
 sub _wait_status {
-    my ( $pid, $timed_out ) = @_;
+    my ( $pid, $deadline, $timed_out ) = @_;
+    my $reaped = waitpid( $pid, WNOHANG );
+    while ( $reaped == 0 && !$timed_out ) {
+        my $remaining = $deadline - time();
+        if ( $remaining <= 0 ) {
+            $timed_out = 1;
+            last;
+        }
+        sleep( $remaining < 0.02 ? $remaining : 0.02 );
+        $reaped = waitpid( $pid, WNOHANG );
+    }
     if ($timed_out) {
-        kill 'TERM', $pid;
-        my $reaped = waitpid( $pid, WNOHANG );
         if ( $reaped == 0 ) {
+            kill 'TERM', $pid;
             sleep 0.1;
             $reaped = waitpid( $pid, WNOHANG );
         }
@@ -174,13 +187,11 @@ sub _wait_status {
             waitpid( $pid, 0 );
         }
     }
-    else {
-        waitpid( $pid, 0 );
-    }
     my $status = $?;
     return {
         exit       => $status >> 8,
         signal     => $status & 127,
+        timed_out  => $timed_out,
         returncode => ( $status & 127 )
         ? -( ( $status & 127 ) )
         : ( $status >> 8 ),
@@ -224,6 +235,8 @@ sub spawn_command {
     };
 }
 
+# Drain both pipes together so a child writing to stderr cannot block while
+# the harness drains stdout. Use the same deadline for pipe reads and reaping.
 sub collect_output {
     my ( $process, $timeout, %initial ) = @_;
     $timeout = 20 unless defined $timeout;
@@ -268,14 +281,13 @@ sub collect_output {
         }
     }
 
-    my $status = _wait_status( $process->{pid}, $timed_out );
+    my $status = _wait_status( $process->{pid}, $deadline, $timed_out );
     return {
         %{$status},
         stdout => $buffers{ fileno( $process->{out} ) } // '',
         stderr => defined $process->{err}
         ? ( $buffers{ fileno( $process->{err} ) } // '' )
         : '',
-        timed_out => $timed_out,
     };
 }
 
@@ -347,13 +359,12 @@ sub run_concurrent {
 
     my @results;
     for my $process (@processes) {
-        my $status = _wait_status( $process->{pid}, $timed_out );
+        my $status = _wait_status( $process->{pid}, $deadline, $timed_out );
         push @results,
           {
             %{$status},
-            stdout    => $buffers{ fileno( $process->{out} ) } // '',
-            stderr    => $buffers{ fileno( $process->{err} ) } // '',
-            timed_out => $timed_out,
+            stdout => $buffers{ fileno( $process->{out} ) } // '',
+            stderr => $buffers{ fileno( $process->{err} ) } // '',
           };
     }
     return \@results;

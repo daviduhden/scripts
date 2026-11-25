@@ -27,6 +27,7 @@ use TestHarness qw(
   read_line
   repo_root
   run_command
+  run_concurrent
   slurp
   spawn_command
   trim
@@ -35,6 +36,21 @@ use TestHarness qw(
 
 my $REPO = repo_root();
 
+subtest 'child deadline continues beyond output EOF' => sub {
+    plan skip_all => 'POSIX pipe and signal semantics required'
+      if $^O eq 'MSWin32';
+    my $command =
+      { cmd => [ '/bin/sh', '-c', 'exec 1>&- 2>&-; exec sleep 2', ], };
+    my $result = run_command( %$command, timeout => 0.5 );
+    ok( $result->{timed_out}, 'single process timed out after EOF' );
+    isnt( $result->{returncode}, 0, 'single process was terminated' );
+    my $results = run_concurrent( [$command], 0.5 );
+    ok( $results->[0]{timed_out}, 'concurrent process timed out after EOF' );
+    isnt( $results->[0]{returncode}, 0, 'concurrent process was terminated' );
+};
+
+# Use a closed PATH so a tool deleted by a strict-mode test cannot be found
+# elsewhere on the host. Keep real utilities only for shell and file operations.
 sub build_fixture {
     my ($base) = @_;
     $base //= new_tempdir('tooling-tests-');
