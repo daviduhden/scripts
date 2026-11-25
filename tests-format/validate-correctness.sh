@@ -553,6 +553,11 @@ in_array == 1 {
     if (orig ~ /\\[[:space:]]*$/ && orig !~ /""\\[[:space:]]*$/)
         code_cont = 1
 
+    # A Bash arithmetic for header has two semicolons and can contain
+    # comparison operators. Keep an inline loop body for command scanning.
+    if (sub(/^for[[:space:]]+\(\([^;]*;[^;]*;[^;]*\)\)[[:space:]]*(;|$)/, "", line))
+        sub(/^[[:space:]]*do([[:space:]]+|$)/, "", line)
+
     # Remove redirect targets (> file, >>file, 2>/dev/null, ...).
     while (sub(/>[[:space:]]*[^[:space:];|&<>]*/, "", line)) {
         ;

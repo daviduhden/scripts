@@ -298,6 +298,16 @@ fi
 case "$HOST_FAMILY" in
 debian | secureblue)
 	mkdir -p "$T/scripts"
+	cat >"$T/$HOST_FAMILY/arithmetic-loop.bash" <<'EOF'
+#!/bin/bash
+for ((fixture_retry = 0; fixture_retry < 2; fixture_retry++)); do
+	printf '%s\n' "$fixture_retry"
+done
+EOF
+	cat >"$T/$HOST_FAMILY/arithmetic-loop-bad.bash" <<'EOF'
+#!/bin/bash
+for ((fixture_retry = 0; fixture_retry < 2; fixture_retry++)); do definitely-not-a-real-command-xyz; done
+EOF
 	cat >"$T/scripts/xerj-clients.bash" <<'EOF'
 #!/bin/bash
 xerj_fixture_helper() { printf '%s\n' ok; }
@@ -346,6 +356,10 @@ if [ -n "$HOST_FAMILY" ]; then
 fi
 case "$HOST_FAMILY" in
 debian | secureblue)
+	assert_no_error "$HOST_FAMILY/arithmetic-loop.bash" "$out" \
+		"arithmetic loop clauses are not commands"
+	assert_error "$HOST_FAMILY/arithmetic-loop-bad.bash" "$out" \
+		"unknown commands after an arithmetic loop header are detected"
 	assert_no_error "$HOST_FAMILY/update-xerj.bash" "$out" \
 		"shared xerj declaration is not mistaken for an external command"
 	;;

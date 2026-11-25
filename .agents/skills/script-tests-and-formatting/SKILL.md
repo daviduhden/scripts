@@ -236,6 +236,9 @@ Makefiles whose generated `config.mk` is absent. On OpenBSD, `mbake` and
   step with `gh run view RUN_ID --log` when the failure step only prints a
   log path. Recheck with the runner's ShellCheck version, as newer versions
   can omit diagnostics emitted in CI.
+- The correctness auditor uses a heuristic lexer. When a Bash loop header
+  yields a bogus command candidate, test both the valid header and an
+  unknown command in its body on the host family before changing the lexer.
 - Windows batch validators run on the `windows-2025` runner. `findstr /l /c:` can
   mishandle a pattern combining a backslash and wildcard such as
   `windows\*.ps1`; require a plain literal token such as `collect_ps_program`
