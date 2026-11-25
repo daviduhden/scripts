@@ -62,6 +62,8 @@ my @SYNC_IMPLEMENTATIONS = (
     [ 'openbsd/sync-website.ksh', 'ksh' ],
 );
 
+# Exercise the production filter and copy functions without running the
+# deployment scripts' entry points or touching the configured document root.
 sub common_functions {
     my ($text) = @_;
     return join "\n\n", map { extract_function( $text, $_ ) } qw(

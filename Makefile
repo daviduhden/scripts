@@ -5,6 +5,8 @@
 # and license details.
 
 PREFIX ?= /usr/local
+# DESTDIR stages filesystem writes. Runtime paths such as the one embedded in
+# the tests-format login snippet use the final prefix without DESTDIR.
 DESTDIR ?=
 BINDIR ?= ${PREFIX}/bin
 DESTBIN = ${DESTDIR}${BINDIR}
@@ -138,6 +140,7 @@ install-shell-bash-unlock:
 	@INFO='${INFO}' BASH_CONF_DST_DIR='${BASH_CONF_DST_DIR}' \
 		$(MANAGE) install-shell-bash-unlock
 
+# Keep unlock, copy and lock in a dependency chain for parallel make.
 install-shell-bash-copy: install-shell-bash-unlock
 	@INFO='${INFO}' BASH_CONF_DST_DIR='${BASH_CONF_DST_DIR}' \
 		BASH_CONF_FILES='${BASH_CONF_FILES}' \
@@ -182,6 +185,8 @@ uninstall-shell:
 		BASH_CONF_FILES='${BASH_CONF_FILES}' \
 		$(MANAGE) uninstall-shell
 
+# Invoke the suites from this recipe so they start only after validation
+# succeeds, including when the caller uses parallel make.
 test: test-validate
 	@${MAKE} test-manpages
 	@${MAKE} test-regression

@@ -2,7 +2,8 @@
 
 # Central style for clang-format-all, originally based on Openbar's style.
 # Maintained only in scripts. Targets clang-format 23 (C and C++).
-# KNF approximation, not byte-for-byte equivalence with knfmt.
+# These rules approximate KNF. The formatter wrapper can select knfmt for
+# sources that do not use a recognized modern C or C++ standard.
 #
 # See the LICENSE file at the top of the project tree for copyright
 # and license details.

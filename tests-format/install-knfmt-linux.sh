@@ -88,6 +88,8 @@ main() {
 		printf '%s\n' '[ERROR] Build did not produce the expected installation files.' >&2
 		exit 1
 	fi
+	# Elevate only file publication when the prefix is not writable. The
+	# upstream checkout, configure script and Makefile ran as the caller.
 	set -- /usr/bin/install
 	if ! mkdir -p "$PREFIX/bin" "$PREFIX/man/man1" 2>/dev/null ||
 		[ ! -w "$PREFIX/bin" ] || [ ! -w "$PREFIX/man/man1" ]; then

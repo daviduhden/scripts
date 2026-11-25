@@ -37,6 +37,8 @@ jobs:
         if: ${{ !cancelled() }}
         run: /usr/bin/time -v perl tests/profile_release_verify.pl
       - name: Show validator logs, including skipped checks
+        # Validators print their log paths to the test step and retain the
+        # details under TMPDIR for this step to surface even on failure.
         if: always()
         run: |
           if [ -d "$RUNNER_TEMP/validation" ]; then
@@ -61,6 +63,8 @@ jobs:
         shell: cmd  # zizmor: ignore[misfeature] required to execute the repository batch installer and launchers
         run: windows\install-windows.bat --dry-run
       - name: Stage the runner Perl in a private directory
+        # Later steps exercise Win32 modules from a controlled installation
+        # path. GITHUB_PATH takes effect in subsequent steps.
         shell: pwsh
         run: |
           $fixture = Join-Path $env:LOCALAPPDATA ('scripts-ci-' + [guid]::NewGuid())
@@ -72,6 +76,8 @@ jobs:
           Add-Content -LiteralPath $env:GITHUB_PATH -Value $perlBin
           Add-Content -LiteralPath $env:GITHUB_ENV -Value "SCRIPTS_CI_PRIVATE=$fixture"
       - name: Install and verify in a disposable directory
+        # Deny sharing on a launcher to induce a publication failure. The
+        # VERSION sentinel distinguishes rollback from a partial install.
         shell: pwsh
         run: |
           $destination = Join-Path $env:SCRIPTS_CI_PRIVATE 'scripts-install-test'
@@ -177,6 +183,8 @@ jobs:
 
   debian:
     name: Debian 13 isolated regression checks
+    # Use Debian's runtime and package metadata for the delivery fixtures.
+    # The Ubuntu job owns full linting and formatting.
     runs-on: ubuntu-24.04
     container: debian:13
     timeout-minutes: 20

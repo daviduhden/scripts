@@ -44,8 +44,8 @@ require_cmd() {
 
 run_validate_shell() {
 
-	# One optional ROOT_DIR. Reject option-looking paths and verify the
-	# directory before creating any temporary files.
+	# Validate the optional ROOT_DIR before creating the inventory and
+	# result lists. The diagnostic log is already open for usage errors.
 	MODE=check
 	STRICT=0
 	while [ "$#" -gt 0 ]; do
@@ -84,6 +84,8 @@ run_validate_shell() {
 	TMP_SKIPS=$(mktemp "$TMPDIR_BASE/validate-shell-skips-XXXXXX")
 
 	INVENTORY=$(mktemp "$TMPDIR_BASE/validate-shell-files-XXXXXX")
+	# Both passes use the same inventory. A failed find must not look like
+	# an empty tree and allow validation to succeed.
 	if ! find "$ROOT_DIR" -name .git -type d -prune -o -type f \
 		\( -name '*.sh' -o -name '*.bash' -o -name '*.ksh' \) -print >"$INVENTORY"; then
 		printf '[ERROR] Cannot inventory shell scripts in %s\n' "$ROOT_DIR"

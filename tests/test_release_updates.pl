@@ -35,6 +35,8 @@ plan skip_all => 'Linux release updaters require GNU/Linux' unless is_linux();
 
 my $ROOT = repo_root();
 
+# Source definitions without running the administrative entry point. Set the
+# helper paths after loading because some scripts reset PATH and defaults.
 sub run_shell {
     my ( $root, $path, $body, %extra ) = @_;
     my $environment = env_with(

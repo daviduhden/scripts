@@ -104,6 +104,8 @@ SH
         "local\n", 'published worktree preserves local changes' );
 };
 
+# Drive the Arti installer through its real entry point. Fake service state
+# and downloads, and use paths with metacharacters to exercise unit rendering.
 sub run_installer {
     my ( $root, %options ) = @_;
     my $mocks = "$root/mocks";

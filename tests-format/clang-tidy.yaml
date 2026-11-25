@@ -1,16 +1,15 @@
 ---
 # .clang-tidy — shared security-focused configuration for clang-tidy-all.
 #
-# Extended for maximum safety:
+# The enabled check families cover:
 #   - every CERT rule set is enabled (cert-c-*, cert-cpp-*, cert-posix-* and
 #     cert-str34-c);
 #   - the C++ Core Guidelines and concurrency families are added in full;
 #   - memory and varargs analyzer checks stay enabled, including
 #     clang-analyzer-unix.Malloc, clang-analyzer-valist.Uninitialized and the
 #     insecureAPI buffer handling analyzer;
-#   - only the opt-in performance padding analyzer stays disabled.
-# WarningsAsErrors makes every finding an error, so clang-tidy-all fails when
-# it reports anything.
+#   - the Clang Static Analyzer families, excluding the opt-in padding check.
+# WarningsAsErrors makes enabled check warnings fail the clang-tidy run.
 #
 # Central configuration for clang-tidy-all, maintained only in scripts.
 # Targets clang-tidy 23 (C and C++).

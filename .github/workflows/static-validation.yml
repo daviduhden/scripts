@@ -13,6 +13,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Fast feedback for changes to main. Native integration coverage lives in
+  # the manually dispatched Platform Validation workflow.
   syntax:
     runs-on: ubuntu-24.04
     timeout-minutes: 10

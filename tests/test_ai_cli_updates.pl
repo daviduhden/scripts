@@ -33,6 +33,8 @@ sub sandbox {
     return $root;
 }
 
+# The fixture replaces package operations while the real updater still owns
+# selector handling, version comparison, and result reporting.
 sub run_updater {
     my ( $root, $variables, @arguments ) = @_;
     return run_command(
