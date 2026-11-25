@@ -41,6 +41,7 @@ DEBIAN_SCRIPTS = \
 	debian/update-msedit.bash \
 	debian/update-openrsync.bash \
 	debian/update-signify.bash \
+	debian/update-simplex-servers.bash \
 	debian/update-xd-torrent.bash \
 	debian/update-xerj.bash \
 	debian/ai-purge-history.bash \

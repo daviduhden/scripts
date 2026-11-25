@@ -135,6 +135,15 @@ description: >-
   sysctl file.
 - `debian/enable-tor-transport.bash` rewrites APT sources and keeps a
   timestamped backup.
+- `debian/update-simplex-servers.bash` verifies official asset digests and
+  probes the staged server as an unprivileged user. Keep existing SimpleX
+  units and data intact. Restart only an active service and restore its
+  prior binary if activation fails. Keep Tor provisioning opt-in. The
+  upstream initializer can clear configuration and data directories, so
+  require empty directories for first initialization. Validate staged
+  torrc against Debian's service defaults before publication, retain unrelated
+  Tor settings, and keep generated authentication material out of logs and
+  arguments. Document the cgroup eBPF requirement for systemd IP filtering.
 - `debian/update-monero.bash` edits service units, Tor/I2P/Monero configs,
   and adds runtime nftables rules.
 - Debian btop and Lyrebird build in disposable staging as an unprivileged

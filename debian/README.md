@@ -38,6 +38,7 @@ users.
 | [update-msedit.bash](update-msedit.bash) | Installs or updates Microsoft Edit from precompiled GitHub release binaries. |
 | [update-openrsync.bash](update-openrsync.bash) | Builds and installs openrsync, installing build dependencies through APT. |
 | [update-signify.bash](update-signify.bash) | Builds and installs the portable OpenBSD signify utility. |
+| [update-simplex-servers.bash](update-simplex-servers.bash) | Installs or updates official SimpleX SMP and XFTP servers on Debian 13+ amd64 and arm64. |
 | [update-xd-torrent.bash](update-xd-torrent.bash) | Builds XD as an unprivileged account and installs the system unit defined by this repository. The service runs as `xd`. `--skip-service-and-user-setup` skips service setup. |
 | [update-xerj.bash](update-xerj.bash) | Installs verified upstream xerj assets through APT on Debian 13 or later. |
 | [rpi-update-safe.bash](rpi-update-safe.bash) | Runs `rpi-update` without rebooting on Raspberry Pi 5, then validates and repairs the selected DTB and initramfs with backups. Requires root and can change firmware, modules, and boot files; it does not provide a complete updater rollback. |
@@ -82,6 +83,44 @@ Run history cleanup as the user whose data should be removed; set
 
 System maintenance stores its reports in the private root-owned directory
 `/var/log/scripts-sysupgrade`. Process summaries use executable names.
+
+### SimpleX SMP and XFTP
+
+`update-simplex-servers smp`, `update-simplex-servers xftp` and
+`update-simplex-servers all` install or update the selected servers.
+Use `--version vX.Y.Z` to select a specific release. The updater checks
+the SHA-256 digest from GitHub release metadata and probes the selected
+Ubuntu 24.04 build on Debian as an unprivileged account before publishing it.
+Make sure `ca-certificates`, `curl`, `perl`, `libgmp10` and `libssl3t64`
+are installed.
+
+First-time installations create a systemd unit and service account. For
+automatic onion service setup, run:
+
+```sh
+update-simplex-servers all --setup-tor
+```
+
+The flag installs missing Tor/OpenSSL tools from Debian APT. It initializes
+the selected servers with their native INI files and generated credentials,
+adds a separate onion service for each to `/etc/tor/torrc`, and enables and
+starts the selected systemd units. SMP uses TCP 5223 and XFTP uses TCP 443.
+XFTP stores uploads in `/srv/xftp` with an initial 20 GB quota. The updater
+prints the onion hostnames but keeps creation passwords out of its output.
+The passwords are in the `[AUTH]` section of the respective INI files under
+`/etc/opt/simplex/` and `/etc/opt/simplex-xftp/`.
+
+The generated systemd drop-ins limit incoming and outgoing IP traffic to
+loopback on systems with cgroup eBPF filtering. Keep the ports closed at
+the host firewall if the kernel or container lacks that support. Port 443
+must be available for the XFTP listener. Existing installations with
+operator-managed units, configuration or data require manual Tor setup.
+Without the flag, use the official guides to initialize a new service.
+Updates keep existing units, configuration and data.
+An active service is restarted and its previous binary is restored if the
+restart fails. The updater manages the server executables and units.
+[SMP guide](https://simplex.chat/docs/server.html) ·
+[XFTP guide](https://simplex.chat/docs/xftp-server.html)
 
 ## AI CLI updates
 
