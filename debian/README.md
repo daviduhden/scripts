@@ -41,7 +41,7 @@ users.
 | [update-simplex-servers.bash](update-simplex-servers.bash) | Installs or updates official SimpleX SMP and XFTP servers on Debian 13+ amd64 and arm64. |
 | [update-xd-torrent.bash](update-xd-torrent.bash) | Builds XD as an unprivileged account and installs the system unit defined by this repository. The service runs as `xd`. `--skip-service-and-user-setup` skips service setup. |
 | [update-xerj.bash](update-xerj.bash) | Installs verified upstream xerj assets through APT on Debian 13 or later. |
-| [rpi-update-safe.bash](rpi-update-safe.bash) | Runs `rpi-update` without rebooting on Raspberry Pi 5, then validates and repairs the selected DTB and initramfs with backups. Requires root and can change firmware, modules, and boot files; it does not provide a complete updater rollback. |
+| [rpi-update-safe.bash](rpi-update-safe.bash) | Runs `rpi-update` without rebooting on Raspberry Pi 5, repairs the DTB, and rebuilds and validates the initramfs for each installed boot image, including the `kernel8.img` fallback. Requires root. Backups cover the boot files replaced by the wrapper. |
 
 Claude Code cleanup removes local prompt history and conversation and subagent
 transcripts under `CLAUDE_CONFIG_DIR` (default `~/.claude`). Settings, login

@@ -45,6 +45,7 @@ readonly LOCK_FILE=/run/rpi-update-safe.lock
 
 WORK_DIRS=()
 NEW_WORK_DIR=
+LAST_BACKUP=
 
 log() {
 	printf '%s [INFO] rpi-update-safe: %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
@@ -120,6 +121,7 @@ create_backup() {
 		rm -f -- "$backup"
 		die "backup verification failed for ${source}"
 	fi
+	LAST_BACKUP=$backup
 	log "backup created: ${backup}"
 }
 
@@ -189,12 +191,22 @@ repair_dtb() {
 	log "patched ${DTB}"
 }
 
-regenerate_initramfs() {
-	local kver work generated timestamp
-	[[ -f $KERNEL_IMAGE && ! -L $KERNEL_IMAGE && -s $KERNEL_IMAGE ]] ||
-		die "missing or invalid installed kernel image: ${KERNEL_IMAGE}"
-	kver=$(gzip -dc "$KERNEL_IMAGE" 2>/dev/null | strings | sed -n 's/^Linux version \([^ ]*\).*/\1/p' | sed -n '1p')
-	[[ $kver =~ ^[0-9]+\.[0-9]+\.[0-9]+- ]] || die "cannot identify KVER from ${KERNEL_IMAGE}"
+stage_initramfs() {
+	local kernel_image=$1
+	local destination=$2
+	local generated=$3
+	local kver magic
+	local -a reader=(cat)
+	[[ -f $kernel_image && ! -L $kernel_image && -s $kernel_image ]] ||
+		die "missing or invalid installed kernel image: ${kernel_image}"
+	magic=$(od -An -N2 -tx1 -- "$kernel_image") || die "cannot read kernel image: ${kernel_image}"
+	if [[ ${magic//[[:space:]]/} == 1f8b ]]; then
+		reader=(gzip -dc)
+	fi
+	kver=$("${reader[@]}" -- "$kernel_image" | strings -a | sed -n 's/^Linux version \([^ ]*\).*/\1/p' | sed -n '1p') ||
+		die "cannot read kernel image: ${kernel_image}"
+	[[ $kver =~ ^[0-9]+\.[0-9]+\.[0-9]+[-+._[:alnum:]]*$ ]] ||
+		die "cannot identify KVER from ${kernel_image}"
 	[[ -d /lib/modules/$kver && ! -L /lib/modules/$kver ]] || die "missing modules directory for ${kver}"
 
 	# Refresh module dependency metadata before building the matching initramfs.
@@ -202,32 +214,77 @@ regenerate_initramfs() {
 	[[ -f /lib/modules/$kver/modules.dep && -s /lib/modules/$kver/modules.dep ]] ||
 		die "depmod did not create modules.dep for ${kver}"
 
-	new_boot_work_dir
-	work=$NEW_WORK_DIR
-	generated=${work}/initramfs_2712
 	dracut --force --kver "$kver" "$generated" || die "dracut failed for ${kver}"
 	[[ -f $generated && -s $generated ]] || die 'dracut produced an empty or invalid initramfs'
-	lsinitrd "$generated" >/dev/null || die 'generated initramfs failed lsinitrd validation'
+	# Inspect the archived module paths, not just the recorded dracut arguments.
+	if ! lsinitrd "$generated" | awk -v expected="$kver" '
+		$1 ~ /^[-dl]/ {
+			path = $0
+			sub(/ -> .*/, "", path)
+			sub(/^.*[[:space:]](\.\/)?/, "", path)
+			if (path !~ /^(usr\/)?lib\/modules\/[^/]+/) next
+			sub(/^(usr\/)?lib\/modules\//, "", path)
+			split(path, parts, "/")
+			if (parts[1] != expected) mismatch = 1
+			if ($1 ~ /^-/ && path ~ /\.ko(\.[[:alnum:]]+)?$/) found = 1
+		}
+		END { exit (mismatch || !found) }
+	'; then
+		die "generated initramfs does not contain matching modules for ${kver}"
+	fi
 
-	[[ ! -L ${BOOT_DIR}/initramfs_2712 ]] || die 'initramfs_2712 must not be a symlink'
-	if [[ -e ${BOOT_DIR}/initramfs_2712 ]]; then
-		[[ -f ${BOOT_DIR}/initramfs_2712 ]] ||
-			die 'existing initramfs_2712 is not a regular file'
-		chmod --reference="${BOOT_DIR}/initramfs_2712" "$generated" ||
+	[[ ! -L $destination ]] || die "${destination} must not be a symlink"
+	if [[ -e $destination ]]; then
+		[[ -f $destination ]] || die "existing initramfs is not a regular file: ${destination}"
+		chmod --reference="$destination" "$generated" ||
 			die 'cannot preserve initramfs permissions'
-		chown --reference="${BOOT_DIR}/initramfs_2712" "$generated" ||
+		chown --reference="$destination" "$generated" ||
 			die 'cannot preserve initramfs ownership'
-		timestamp=$(date '+%Y%m%d-%H%M%S')
-		create_backup "${BOOT_DIR}/initramfs_2712" "$timestamp"
 	else
 		chmod 0644 "$generated" || die 'cannot set initramfs permissions'
 	fi
+	log "validated ${destination##*/} for ${kver}"
+}
 
-	# The generated image is staged under BOOT_DIR to avoid a cross-filesystem move.
-	mv -fT -- "$generated" "${BOOT_DIR}/initramfs_2712" ||
-		die 'cannot atomically install the generated initramfs'
+regenerate_initramfs() {
+	local work timestamp target previous
+	local -A backups=()
+	local -a installed=()
+	local -a targets=(initramfs_2712)
+	new_boot_work_dir
+	work=$NEW_WORK_DIR
+	stage_initramfs "$KERNEL_IMAGE" "${BOOT_DIR}/initramfs_2712" "${work}/initramfs_2712"
+	if [[ -e ${BOOT_DIR}/kernel8.img || -L ${BOOT_DIR}/kernel8.img ]]; then
+		stage_initramfs "${BOOT_DIR}/kernel8.img" "${BOOT_DIR}/initramfs8" "${work}/initramfs8"
+		targets+=(initramfs8)
+	fi
+
+	# Validate every image and back up all destinations before replacing any of them.
+	timestamp=$(date '+%Y%m%d-%H%M%S')
+	for target in "${targets[@]}"; do
+		if [[ -e ${BOOT_DIR}/$target ]]; then
+			create_backup "${BOOT_DIR}/$target" "$timestamp"
+			backups[$target]=$LAST_BACKUP
+		fi
+	done
+	for target in "${targets[@]}"; do
+		if ! mv -fT -- "${work}/$target" "${BOOT_DIR}/$target"; then
+			for previous in "${installed[@]}"; do
+				if [[ -n ${backups[$previous]:-} ]]; then
+					if ! cp -a -- "${backups[$previous]}" "${work}/$previous" ||
+						! mv -fT -- "${work}/$previous" "${BOOT_DIR}/$previous"; then
+						die "rollback failed for ${previous}; restore ${backups[$previous]}"
+					fi
+				else
+					rm -- "${BOOT_DIR}/$previous" || die "rollback failed for ${previous}"
+				fi
+			done
+			die "cannot atomically install ${target}"
+		fi
+		installed+=("$target")
+		log "installed ${BOOT_DIR}/${target}"
+	done
 	sync
-	log "generated initramfs for ${kver}"
 }
 
 usage() {
@@ -236,8 +293,8 @@ Usage: rpi-update-safe [--repair-only] [rpi-update arguments...]
 
 Run the official Raspberry Pi updater with rebooting disabled, then remove
 the cgroup_disable=memory boot argument from the Raspberry Pi 5 DTB and
-regenerate its initramfs. The script requires root access and re-executes
-itself through sudo on a Raspberry Pi 5 with /boot/firmware mounted.
+regenerate the initramfs for each installed Pi boot image. The script requires
+root access and re-executes through sudo on a Pi 5 with /boot/firmware mounted.
 
 Options:
   --repair-only  Skip rpi-update and repair the current DTB only.
@@ -258,7 +315,7 @@ main() {
 
 	require_root
 	for command_name in date mountpoint tr dtc perl sed cp cmp mktemp rm mv sync \
-		gzip strings dracut lsinitrd depmod flock; do
+		awk cat od gzip strings dracut lsinitrd depmod flock; do
 		require_cmd "$command_name"
 	done
 	[[ -x $RPI_UPDATE ]] || die "missing official updater: ${RPI_UPDATE}"

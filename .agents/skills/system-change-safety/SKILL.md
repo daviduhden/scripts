@@ -157,9 +157,12 @@ description: >-
   release binaries before stopping the service, and restores them on an
   incomplete core update. Optional LWS work follows that commit point.
 - `debian/rpi-update-safe.bash` runs `rpi-update` as root with rebooting disabled,
-  then runs `depmod` and can replace the Raspberry Pi 5 DTB and initramfs in
-  `/boot/firmware`. Backups cover replaced boot files, not every firmware or
-  module change made by the updater. Its DTB validation must compare the
+  then runs `depmod` for the version embedded in each present boot image.
+  Pair `kernel_2712.img` with `initramfs_2712` and `kernel8.img` with
+  `initramfs8`. Inspect the module paths inside both staged archives and
+  back up the existing initramfs files before publishing either replacement.
+  `--repair-only` still repairs only the DTB. Backups cover the boot files
+  the wrapper replaces. Its DTB validation must compare the
   repaired bootargs against the original with the removed token excluded, and
   `dtc -q` suppresses expected upstream warnings without hiding errors. Never
   execute it during review or tests.
