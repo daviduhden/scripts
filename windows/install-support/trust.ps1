@@ -76,6 +76,29 @@ function Assert-InstallPath {
     return $full
 }
 
+function Assert-WingetPath {
+    param([string]$Candidate)
+    # WindowsApps is owned by the system and denies ACL reads to users, so
+    # trust the registered physical path and the Microsoft signature instead.
+    $full = [IO.Path]::GetFullPath($Candidate)
+    $root = (Join-Path ([Environment]::GetFolderPath('ProgramFiles')) 'WindowsApps') + '\'
+    if (-not $full.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "WinGet is outside the protected WindowsApps directory: $full"
+    }
+    $item = [IO.FileInfo]::new($full)
+    while ($item) {
+        if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "Unexpected reparse point: $($item.FullName)" }
+        if ($item -is [IO.FileInfo]) { $item = $item.Directory }
+        else { $item = $item.Parent }
+    }
+    Import-Module (Join-Path $PSHOME 'Modules\Microsoft.PowerShell.Security\Microsoft.PowerShell.Security.psd1')
+    $signature = Microsoft.PowerShell.Security\Get-AuthenticodeSignature -LiteralPath $full
+    if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch '(^|, )O=Microsoft Corporation(,|$)') {
+        throw "WinGet is not signed by Microsoft: $full"
+    }
+    return $full
+}
+
 function Get-TrustedPerl {
     $processDirectories = @($env:Path -split ';')
     $registryDirectories = @([Environment]::GetEnvironmentVariable('Path', 'Machine') -split ';') +
@@ -123,7 +146,7 @@ switch ($Action) {
             Where-Object { $_.PublisherId -ceq '8wekyb3d8bbwe' } | Select-Object -First 1
         if ($registered -and $registered.InstallLocation) {
             $executable = Join-Path $registered.InstallLocation 'winget.exe'
-            if ([IO.File]::Exists($executable)) { Assert-InstallPath $executable }
+            if ([IO.File]::Exists($executable)) { Assert-WingetPath $executable }
         }
     }
     'ValidatePath' { $null = Assert-InstallPath $Path -Directory }

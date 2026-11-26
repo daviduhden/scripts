@@ -403,6 +403,7 @@ rem have become available, so find_perl is retried.
 echo [INFO] No suitable Perl found; a Windows Perl distribution is required.
 set "WINGET_EXE="
 for /f "usebackq delims=" %%P in (`""%SYS_PS%" -NoProfile -File "%TRUST%" -Action Winget"`) do set "WINGET_EXE=%%P"
+if defined WINGET_EXE if not exist "%WINGET_EXE%" set "WINGET_EXE="
 if not defined WINGET_EXE (
     echo [ERROR] winget is not available.
     echo         Install or update "App Installer" from the Microsoft Store,

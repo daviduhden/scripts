@@ -49,8 +49,9 @@ Perl discovery inspects absolute paths from the process and registry PATH
 and standard Strawberry Perl locations. A portable Perl can be selected
 from a trusted absolute PATH entry. The launcher requires the recorded
 interpreter at runtime. The Strawberry Perl fallback uses the registered
-Microsoft App Installer executable after validating its absolute filesystem
-path. Dry-run lists eligible paths without executing
+Microsoft App Installer executable after validating that its physical path
+is under `%ProgramFiles%\WindowsApps`, has no reparse points, and is signed
+by Microsoft. Dry-run lists eligible paths without executing
 Perl or creating scratch files. Installation, publication and PATH changes
 require a local directory whose ancestors, ownership and write permissions
 pass the installer checks. `--no-path` leaves the registry alone.

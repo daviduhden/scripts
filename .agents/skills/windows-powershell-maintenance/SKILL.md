@@ -52,7 +52,10 @@ does not prove Windows runtime behavior or Windows PowerShell 5.1 execution.
      trust helper. Windows PowerShell started by PowerShell 7 can inherit a
      module path that breaks Security cmdlet autoload. Resolve WinGet from the
      registered Microsoft App Installer executable and validate the physical
-     path without an exception for application aliases;
+     path without an exception for application aliases. `WindowsApps` denies
+     ACL reads to users, so WinGet is validated by its physical path under
+     `%ProgramFiles%\WindowsApps`, absence of reparse points, and a valid
+     Authenticode signature from Microsoft instead of the ACL check;
    - keep `PERL_MODULES` aligned with the runtime modules required by the
      installed Perl programs, including Windows-specific bundled modules;
    - keep the dry-run path free of writes, Perl candidate execution,
