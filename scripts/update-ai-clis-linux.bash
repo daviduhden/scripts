@@ -250,7 +250,9 @@ run_brew() {
 }
 
 run_root() {
-	if [[ -x /usr/bin/sudo ]]; then
+	if ((EUID == 0)); then
+		"$@"
+	elif [[ -x /usr/bin/sudo ]]; then
 		/usr/bin/sudo -- "$@"
 	else
 		warn "sudo is required for Debian package operations."
@@ -563,7 +565,7 @@ activate_uv() (
 	digest_file=$WORK_DIR/uv.tgz
 	github_asset astral-sh/uv "uv-$triplet.tar.gz" "$digest_file" &&
 		release_extract tar-extract-entry "$digest_file" "$stage/uv" "uv-$triplet/uv" &&
-		chmod 0700 -- "$stage/uv" || return
+		chmod 0755 -- "$stage/uv" "$stage" || return
 	[[ $(version_of "$stage/uv") == "$latest" ]] || return 1
 	links=$(mktemp -d "$USER_BIN/.scripts-ai-clis.XXXXXX") || return
 	ln -s -- "$stage/uv" "$links/uv" && can_replace_launcher uv "$USER_BIN/uv" &&
@@ -823,6 +825,10 @@ activate_user_release() (
 	esac
 	verified=$(version_of "$stage/$binary") &&
 		[[ $(compare_to_stable "$verified" "$LATEST") == current ]] || return
+	if [[ $PLATFORM == debian ]]; then
+		# Publish the release with readable assets and traversable directories.
+		chmod -R a+rX -- "$stage" || return
+	fi
 	links=$(mktemp -d "$USER_BIN/.scripts-ai-clis.XXXXXX") || return
 	ln -s -- "$stage/$binary" "$links/${COMMANDS[$agent]}" || return
 	can_replace_launcher "$agent" "$MANAGED" || {
@@ -993,7 +999,7 @@ verify_session() {
 	local binary=$1 expected=$2 path output session_version
 	output=$(session_command "$binary" "$expected") || return
 	path=$(sed -n 's/^__scripts_ai_cli_path__//p' <<<"$output") || return
-	if [[ -z $path ]]; then
+	if [[ -z $path && $PLATFORM != debian ]]; then
 		persist_path "${expected%/*}" || return
 		output=$(session_command "$binary" "$expected") || return
 		path=$(sed -n 's/^__scripts_ai_cli_path__//p' <<<"$output") || return
@@ -1027,11 +1033,24 @@ is_supported() {
 	esac
 }
 
+warn_legacy_user_install() {
+	local home legacy target
+	[[ $PLATFORM == debian && -n ${SUDO_USER:-} && $SUDO_USER != root ]] || return 0
+	home=$(getent passwd -- "$SUDO_USER" | cut -d: -f6) || return 0
+	legacy=$home/.local/bin/$1
+	[[ -n $home && $home == /* && -L $legacy ]] || return 0
+	target=$(realpath -m -- "$legacy") || return 0
+	if [[ $target == "$home/.local/share/scripts-ai-clis/"* ]]; then
+		warn "Remove the per-user $legacy; it can shadow the global installation."
+	fi
+}
+
 # Validate the current path before mutation. After any installation attempt
 # probe again so the summary reflects what is actually installed.
 process_agent() {
 	local agent=$1 binary=${COMMANDS[$1]} path="" relative update
 	PREVIOUS="" LATEST="" FINAL="" RESULT=failed TAG="" METADATA=""
+	warn_legacy_user_install "$binary"
 	find_candidates "$binary"
 	if ((${#CANDIDATES[@]})); then
 		path=${CANDIDATES[0]}
@@ -1135,15 +1154,30 @@ setup_runtime() {
 	local source helper
 	ORIGINAL_PATH=$PATH
 	export PATH=$SYSTEM_PATH LC_ALL=C
-	umask 077
-	if ((EUID == 0)); then
-		warn "Run this command as the target user. Debian package operations request sudo separately."
-		return 1
+	if [[ $PLATFORM == debian ]]; then
+		# Debian installs system-wide, so releases must be readable by everyone.
+		umask 022
+		if ((EUID != 0)); then
+			warn "Debian installs agents globally and must run as root; use the update-ai-clis wrapper."
+			return 1
+		fi
+		HOME_DIR=$(realpath -e -- "${HOME:-/root}") && [[ $HOME_DIR == /* && -O $HOME_DIR ]] && safe_path "$HOME_DIR" || return
+		cd -- "$HOME_DIR" || return
+		USER_BIN=/usr/local/bin
+		STATE_DIR=/usr/local/lib/scripts-ai-clis
+		# Root's own shell is irrelevant: /usr/local/bin is in every default PATH.
+		SHELL_BIN=/bin/bash
+	else
+		umask 077
+		if ((EUID == 0)); then
+			warn "Run this command as the target user."
+			return 1
+		fi
+		HOME_DIR=$(realpath -e -- "$HOME") && [[ $HOME_DIR == /* && -O $HOME_DIR ]] && safe_path "$HOME_DIR" || return
+		USER_BIN=$HOME_DIR/.local/bin
+		STATE_DIR=$HOME_DIR/.local/share/scripts-ai-clis
+		SHELL_BIN=${SHELL:-/bin/bash}
 	fi
-	HOME_DIR=$(realpath -e -- "$HOME") && [[ $HOME_DIR == /* && -O $HOME_DIR ]] && safe_path "$HOME_DIR" || return
-	USER_BIN=$HOME_DIR/.local/bin
-	STATE_DIR=$HOME_DIR/.local/share/scripts-ai-clis
-	SHELL_BIN=${SHELL:-/bin/bash}
 	if [[ ! -x $SHELL_BIN ]] || ! safe_path "$SHELL_BIN"; then
 		warn "Cannot safely launch the configured shell $SHELL_BIN."
 		return 1
@@ -1187,11 +1221,15 @@ setup_runtime() {
 	if ((supported == 0)); then
 		return 0
 	fi
-	ensure_user_dir "$HOME_DIR/.local" && ensure_user_dir "$HOME_DIR/.local/share" &&
-		ensure_user_dir "$STATE_DIR" || return
+	if [[ $PLATFORM == debian ]]; then
+		ensure_user_dir "${STATE_DIR%/*}" && ensure_user_dir "$STATE_DIR" || return
+	else
+		ensure_user_dir "$HOME_DIR/.local" && ensure_user_dir "$HOME_DIR/.local/share" &&
+			ensure_user_dir "$STATE_DIR" || return
+	fi
 	exec {LOCK_FD}<"$STATE_DIR" || return
 	flock -n "$LOCK_FD" || {
-		warn "An update is already running for this user."
+		warn "An update is already running."
 		return 1
 	}
 	WORK_DIR=$(mktemp -d /tmp/scripts-ai-clis.XXXXXX) || return

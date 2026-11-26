@@ -90,7 +90,7 @@ description: >-
     Use system
     install(1) to publish selected build outputs instead of elevating an
     upstream Makefile.
-12. For a Debian AI CLI package downloaded as the target user, retain the
+12. For a Debian AI CLI package, the Debian updater already runs as root; retain the
     expected digest from the verified publisher metadata. Before granting
     APT access, copy the file to a root-owned temporary directory and
     verify the copy against that digest. Pass only the root-owned path to

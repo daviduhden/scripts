@@ -175,7 +175,12 @@ tool is missing, report the check as skipped rather than passed.
   artifact used by the run before installation.
 
 - The Debian and SecureBlue `update-ai-clis` wrappers use the same private
-  Linux helper. Keep the helper in both installer lists and keep the
+  Linux helper. Debian installs globally: its wrapper re-execs the whole
+  helper through `sudo`, the helper requires root there, publishes launchers in
+  `/usr/local/bin` with releases in root-owned
+  `/usr/local/lib/scripts-ai-clis` (mode 0755 so every user can run them) and
+  never edits user profiles. SecureBlue stays per-user through Homebrew and
+  refuses root. Keep the helper in both installer lists and keep the
   installed-name and checkout-relative lookup working. Verify every
   selected executable before recording a successful result. Cover selectors
   with a hyphen in Bash associative maps after formatting. Keep the managed

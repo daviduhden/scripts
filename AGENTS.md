@@ -46,7 +46,9 @@ through `uninstall-tests-format`. An empty `TESTS_FORMAT_PROFILE_DIR` disables
 this integration for either target.
 
 Debian and SecureBlue install `update-ai-clis` together with its private
-`update-ai-clis-linux` entry point. Windows discovers the self-contained
+`update-ai-clis-linux` entry point. Debian installs agents globally (wrapper
+re-execs via `sudo`; `/usr/local/bin` plus `/usr/local/lib/scripts-ai-clis`);
+SecureBlue stays per-user through Homebrew. Windows discovers the self-contained
 `update-ai-clis.ps1` and generates the `update-ai-clis.cmd` launcher.
 Keep the shared selectors, exit codes and summary fields aligned across these
 entry points. The public matrix is in [docs/update-ai-clis.md](docs/update-ai-clis.md).

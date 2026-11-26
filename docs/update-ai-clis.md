@@ -1,7 +1,10 @@
 # AI CLI updater
 
-Run `update-ai-clis` as the account that will run the agents. With no
-arguments or with `all`, it processes the supported agents. Pass one or more
+Run `update-ai-clis` as the account that will run the agents on SecureBlue and
+Windows. On Debian, run it as any administrator: the wrapper re-executes the
+whole updater through `sudo` (unless the sole argument is `--help`) and installs
+the agents system-wide. With no arguments or with `all`, it processes the
+supported agents. Pass one or more
 identifiers to restrict the operation to those agents and their dependencies.
 
 ```sh
@@ -37,8 +40,15 @@ Claude Code and provides Git Bash. Existing account and agent settings remain
 in their current locations.
 
 The Linux packages target amd64 and arm64, and the Windows builds target
-x64 and ARM64. On Debian, Crush is also supported on armhf. The updater on
-Linux checks the configured login shell and, if
+x64 and ARM64. On Debian, Crush is also supported on armhf. On Debian, agents
+are global: launchers go to `/usr/local/bin` (already on every default PATH,
+so no profile is edited) and releases to the root-owned
+`/usr/local/lib/scripts-ai-clis`; Crush and Claude Code stay under `/usr/bin`.
+`/usr/local/bin` and `/usr/local/lib` must not be group- or world-writable.
+A leftover per-user launcher in `~/.local/bin` from an earlier version of the
+updater can take precedence over the global one. When invoked through
+`sudo`, the updater reports these links for the invoking account.
+On SecureBlue the updater checks the configured login shell and, if
 needed, appends an idempotent PATH entry to its user startup file. Supported
 shells include Bash, Zsh, Fish, sh/dash and ksh. On Windows, managed binaries
 use the user PATH and are checked from a new PowerShell process with the
@@ -65,8 +75,9 @@ The Swival installer targets amd64 and arm64 on Linux and x64 on Windows.
 Native Windows ARM64 is excluded while required packages such as
 `tiktoken` and `html-to-markdown` lack Windows ARM64 wheels. The updater
 reports conflicting installations so you can manage them through their
-original package channel. Linux publishes the selected command in
-`~/.local/bin`; Debian also uses it for managed uv. Windows uses
+original package channel. SecureBlue publishes the selected command through
+Homebrew's per-user tooling; Debian publishes Swival and its managed uv in
+`/usr/local/bin`. Windows uses
 `%LOCALAPPDATA%\Programs\Swival\bin` for its launchers. SecureBlue uses
 the Homebrew path for uv. The updater checks the resolved commands from a
 fresh session.

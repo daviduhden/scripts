@@ -130,15 +130,16 @@ restart fails. The updater manages the server executables and units.
 
 ## AI CLI updates
 
-Run `update-ai-clis codex swival` as your normal user. The updater uses
-`sudo` for APT operations. It tracks the Debian candidates for its selected
+Run `update-ai-clis codex swival` as any administrator account. The wrapper
+re-executes the updater through `sudo` and installs globally. It tracks the Debian candidates for its selected
 download, metadata and verification tools. APT resolves the declared
 dependencies of Crush and Claude Code.
 Version discovery uses existing tools when available. An installation or
 update refreshes Debian package metadata before installing its prerequisites.
 
-OpenCode, Codex and Copilot use `~/.local/bin` launchers for releases under
-`~/.local/share/scripts-ai-clis`. The updater queries Anthropic's signed
+OpenCode, Codex, Copilot and Swival use `/usr/local/bin` launchers for
+releases under the root-owned `/usr/local/lib/scripts-ai-clis`; no user
+profile is modified. The updater queries Anthropic's signed
 stable APT index in a temporary directory. Crush and Claude Code install under
 `/usr/bin`. For a version managed by a different package channel, the
 updater reports the existing path. See the [agent matrix and PATH

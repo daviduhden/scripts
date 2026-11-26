@@ -206,12 +206,11 @@ subtest 'APT upgrades required tools and reuses shared dependencies' => sub {
         'dependency failure prevents an incomplete install' );
 };
 
-subtest 'fresh shell PATH persists once and confirms the expected binary' =>
-  sub {
+subtest 'fresh shell verifies PATH according to platform policy' => sub {
     my $root     = sandbox();
     my $launcher = <<'SH';
 #!/bin/sh
-[ "$1" = -lc ] || exit 2
+case "$1" in -lc|-lic) ;; *) exit 2 ;; esac
 shift
 command=$1
 shift
@@ -223,8 +222,12 @@ SH
     chmod 0755, $shell or die "cannot chmod $shell: $!";
     my $profile = write_file( "$root/home/.profile", "# existing profile\n" );
     executable( "$root/bin", 'codex', 'codex-cli 2.0.0' );
+    my $missing = run_updater( $root, {}, '--test-session', 'debian' );
+    is( $missing->{returncode}, 1, 'Debian reports the missing global CLI' );
+    is( slurp($profile), "# existing profile\n", 'Debian preserves profiles' );
+
     for ( 1 .. 2 ) {
-        my $run = run_updater( $root, {}, '--test-session' );
+        my $run = run_updater( $root, {}, '--test-session', 'secureblue' );
         is( $run->{returncode}, 0, 'fresh shell sees the installed executable' )
           or diag $run->{stdout} . $run->{stderr};
     }
@@ -236,10 +239,10 @@ SH
     executable( "$root/other", 'codex', 'codex-cli 2.0.0' );
     my $conflict = "export PATH='$root/other':\$PATH\n$contents";
     write_file( $profile, $conflict );
-    my $run = run_updater( $root, {}, '--test-session' );
+    my $run = run_updater( $root, {}, '--test-session', 'secureblue' );
     is( $run->{returncode}, 1, 'a different same-version executable fails' );
     is( slurp($profile),    $conflict, 'preserves conflicting profile entry' );
-  };
+};
 
 subtest 'SecureBlue sees the interactive PATH without writing the profile' =>
   sub {
