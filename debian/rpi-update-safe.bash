@@ -315,10 +315,15 @@ main() {
 
 	require_root
 	for command_name in date mountpoint tr dtc perl sed cp cmp mktemp rm mv sync \
-		awk cat od gzip strings dracut lsinitrd depmod flock; do
+		flock; do
 		require_cmd "$command_name"
 	done
-	[[ -x $RPI_UPDATE ]] || die "missing official updater: ${RPI_UPDATE}"
+	if ((repair_only == 0)); then
+		for command_name in awk cat od gzip strings dracut lsinitrd depmod; do
+			require_cmd "$command_name"
+		done
+		[[ -x $RPI_UPDATE ]] || die "missing official updater: ${RPI_UPDATE}"
+	fi
 	[[ -f $BOOTARGS_HELPER ]] ||
 		die "missing bootargs helper: ${BOOTARGS_HELPER}"
 	check_platform
