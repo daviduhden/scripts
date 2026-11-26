@@ -86,12 +86,31 @@ if not defined PROJECT set "PROJECT=scripts"
 if exist "%REPO%VERSION" set /p VERSION=<"%REPO%VERSION"
 if not defined VERSION set "VERSION=unknown"
 
-if defined OPT_INSTALL_DIR goto install_dir_ready
-if defined LOCALAPPDATA set "OPT_INSTALL_DIR=%LOCALAPPDATA%\Programs\%PROJECT%"
-if not defined OPT_INSTALL_DIR set "OPT_INSTALL_DIR=%USERPROFILE%\Programs\%PROJECT%"
-:install_dir_ready
+if defined OPT_INSTALL_DIR goto install_dir_custom
+if defined LOCALAPPDATA (
+    set "INSTALL_DIR=%LOCALAPPDATA%\Programs\%PROJECT%"
+) else (
+    set "INSTALL_DIR=%USERPROFILE%\Programs\%PROJECT%"
+)
+goto install_dir_ready
+
+:install_dir_custom
 set "INSTALL_DIR=%OPT_INSTALL_DIR%"
+
+:install_dir_ready
 rem Canonicalize so a relative --install-dir is not stored verbatim in PATH.
+for %%I in ("%INSTALL_DIR%") do set "INSTALL_DIR=%%~fI"
+if not defined OPT_INSTALL_DIR (
+    "%SYS_PS%" -NoProfile -File "%TRUST%" -Action ValidatePath -Path "%INSTALL_DIR%" >nul 2>&1
+    if errorlevel 1 (
+        if not defined USERPROFILE (
+            echo [ERROR] the default install directory is not trusted and USERPROFILE is unavailable.
+            exit /b 2
+        )
+        echo [WARN] the default install directory is not trusted; trying "%USERPROFILE%\Programs\%PROJECT%".
+        set "INSTALL_DIR=%USERPROFILE%\Programs\%PROJECT%"
+    )
+)
 for %%I in ("%INSTALL_DIR%") do set "INSTALL_DIR=%%~fI"
 "%SYS_PS%" -NoProfile -File "%TRUST%" -Action ValidatePath -Path "%INSTALL_DIR%"
 if errorlevel 1 exit /b 2

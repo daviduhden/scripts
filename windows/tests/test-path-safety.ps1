@@ -67,6 +67,15 @@ try {
     Set-Acl -LiteralPath $writable -AclObject $acl
     Assert-RejectedPath $writable
 
+    $sharedTemp = Join-Path $root 'shared-temp'
+    $null = New-Item -ItemType Directory -Path $sharedTemp
+    $acl = Get-Acl -LiteralPath $sharedTemp
+    $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($everyone, 'Modify', 'Allow'))
+    Set-Acl -LiteralPath $sharedTemp -AclObject $acl
+    if ((Get-TrustedStageRoot $sharedTemp $root) -ne [IO.Path]::GetFullPath($root)) {
+        throw 'Untrusted temporary storage did not fall back to the private user stage.'
+    }
+
     $junction = Join-Path $root 'junction'
     $null = New-Item -ItemType Junction -Path $junction -Target $codex
     try {

@@ -40,7 +40,9 @@ tests-format\validate-windows-installer.bat
 
 Installer options are `--dry-run`, `--no-path`, `--install-dir PATH`, and
 `--help`. The default destination is
-`%LOCALAPPDATA%\Programs\<repository-name>`. The installer reuses suitable
+`%LOCALAPPDATA%\Programs\<repository-name>` when its owner, ancestors, and
+write permissions pass validation; otherwise the installer tries
+`%USERPROFILE%\Programs\<repository-name>`. The installer reuses suitable
 Perl or installs Strawberry Perl with winget. It does not install PowerShell 7;
 install it separately to run `psfmt`. The installer verifies staged files
 before publishing them and restores existing managed files if publication
@@ -54,7 +56,9 @@ is under `%ProgramFiles%\WindowsApps`, has no reparse points, and is signed
 by Microsoft. Dry-run lists eligible paths without executing
 Perl or creating scratch files. Installation, publication and PATH changes
 require a local directory whose ancestors, ownership and write permissions
-pass the installer checks. `--no-path` leaves the registry alone.
+pass the installer checks. If the system temporary directory does not pass
+those checks, private staging is created under the current user profile.
+`--no-path` leaves the registry alone.
 
 `ai-purge-history.ps1` checks every selected path and its ancestors before
 removing anything. It needs local absolute history roots and refuses

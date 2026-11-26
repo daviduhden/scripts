@@ -60,7 +60,11 @@ does not prove Windows runtime behavior or Windows PowerShell 5.1 execution.
      installed Perl programs, including Windows-specific bundled modules;
    - keep the dry-run path free of writes, Perl candidate execution,
      packaging, and PATH changes. Allocate verification files inside the
-     private stage created by `windows/install-support/trust.ps1`.
+     private stage created by `windows/install-support/trust.ps1`. If the
+     default `%LOCALAPPDATA%\Programs` path or the system temporary directory
+     fails ACL validation, use `%USERPROFILE%\Programs` or private staging
+     under `%USERPROFILE%` only after that location independently passes the
+     same trust checks; never whitelist a shared sandbox identity.
 3. For a new top-level `windows/*.ps1`, the installer picks it up
    automatically and creates `<name>.cmd`. For a new public Perl program,
    add it to `perl/programs.txt`; both the POSIX and Windows installers read
@@ -228,6 +232,10 @@ already-installed PSScriptAnalyzer; it does not install it.
   token rather than the `windows\*.ps1` glob: `findstr /l /c:` is unreliable
   for patterns containing both a backslash and `*`. Keep that function name
   stable or update the validator with the change.
+- Isolated Windows profiles may grant a sandbox identity write access to
+  `%LOCALAPPDATA%` and `%TEMP%`. Keep those ACLs untrusted; the installer may
+  fall back to `%USERPROFILE%\Programs` and private staging under the profile
+  only after validating those paths.
 
 ## Maintenance & Continuous Learning
 

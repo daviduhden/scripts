@@ -48,7 +48,8 @@ function Assert-InstallPath {
     $current = $full
     $expectDirectory = [bool]$Directory
     while ($current) {
-        $item = Get-Item -LiteralPath $current -Force -ErrorAction SilentlyContinue
+        try { $item = Get-Item -LiteralPath $current -Force -ErrorAction Stop }
+        catch [System.Management.Automation.ItemNotFoundException] { $item = $null }
         if ($item) {
             if ([bool]$item.PSIsContainer -ne $expectDirectory -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
                 throw "Unexpected file type or reparse point: $current"
@@ -99,6 +100,15 @@ function Assert-WingetPath {
     return $full
 }
 
+function Get-TrustedStageRoot {
+    param([string]$TemporaryPath, [string]$ProfilePath)
+    try { return (Assert-InstallPath $TemporaryPath -Directory) }
+    catch {
+        [Console]::Error.WriteLine('The temporary directory is not trusted; using private staging under the current user profile.')
+        return (Assert-InstallPath $ProfilePath -Directory)
+    }
+}
+
 function Get-TrustedPerl {
     $processDirectories = @($env:Path -split ';')
     $registryDirectories = @([Environment]::GetEnvironmentVariable('Path', 'Machine') -split ';') +
@@ -118,7 +128,7 @@ function Get-TrustedPerl {
 }
 
 function Initialize-InstallStage {
-    $root = Assert-InstallPath ([IO.Path]::GetTempPath().TrimEnd('\')) -Directory
+    $root = Get-TrustedStageRoot ([IO.Path]::GetTempPath().TrimEnd('\')) $env:USERPROFILE
     $name = Join-Path $root ('scripts-install-' + [guid]::NewGuid().ToString('N'))
     if (Test-Path -LiteralPath $name) { throw 'Staging name is already in use.' }
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
