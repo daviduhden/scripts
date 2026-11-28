@@ -43,6 +43,13 @@ users.
 | [update-xerj.bash](update-xerj.bash) | Installs verified upstream xerj assets through APT on Debian 13 or later. |
 | [rpi-update-safe.bash](rpi-update-safe.bash) | Runs `rpi-update` without rebooting on Raspberry Pi 5, repairs the DTB, and rebuilds and validates the initramfs for each installed boot image, including the `kernel8.img` fallback. Requires root. Backups cover the boot files replaced by the wrapper. |
 
+For unattended Pi 5 updates, run the installed command from root's crontab.
+For example, `0 4 * * 0 /usr/local/bin/rpi-update-safe` runs on Sundays at
+04:00 with the default install prefix. The wrapper sets `SKIP_WARNING=1` for
+the official updater and disables automatic reboot. An unexpected prompt,
+such as a legacy NOOBS fstab repair, receives end-of-file and fails.
+[Official rpi-update source](https://github.com/raspberrypi/rpi-update/blob/master/rpi-update)
+
 Claude Code cleanup removes local prompt history and conversation and subagent
 transcripts under `CLAUDE_CONFIG_DIR` (default `~/.claude`). Settings, login
 credentials, and project auto memory are preserved. See the

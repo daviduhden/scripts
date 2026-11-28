@@ -85,9 +85,9 @@ require_root() {
 	done
 	log "Re-executing this script via sudo to gain root privileges..."
 	if ((${#env_args[@]} > 0)); then
-		exec sudo -- env "${env_args[@]}" "$SCRIPT_PATH" "${SCRIPT_ARGS[@]}"
+		exec sudo -n -- env "${env_args[@]}" "$SCRIPT_PATH" "${SCRIPT_ARGS[@]}"
 	fi
-	exec sudo -- "$SCRIPT_PATH" "${SCRIPT_ARGS[@]}"
+	exec sudo -n -- "$SCRIPT_PATH" "${SCRIPT_ARGS[@]}"
 }
 
 cleanup() {
@@ -294,7 +294,9 @@ Usage: rpi-update-safe [--repair-only] [rpi-update arguments...]
 Run the official Raspberry Pi updater with rebooting disabled, then remove
 the cgroup_disable=memory boot argument from the Raspberry Pi 5 DTB and
 regenerate the initramfs for each installed Pi boot image. The script requires
-root access and re-executes through sudo on a Pi 5 with /boot/firmware mounted.
+a Pi 5 with /boot/firmware mounted. Firmware updates skip upstream warning
+prompts. Use root’s crontab for unattended runs. Non-root runs require sudo
+authorization without a password prompt.
 
 Options:
   --repair-only  Skip rpi-update and repair the current DTB only.
@@ -334,7 +336,7 @@ main() {
 	flock -n 9 || die 'another rpi-update-safe process is already running'
 
 	if [[ $repair_only -eq 0 ]]; then
-		RPI_REBOOT=0 "$RPI_UPDATE" "$@"
+		SKIP_WARNING=1 RPI_REBOOT=0 "$RPI_UPDATE" "$@" </dev/null
 		check_platform
 	fi
 

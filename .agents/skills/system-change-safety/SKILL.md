@@ -157,6 +157,8 @@ description: >-
   release binaries before stopping the service, and restores them on an
   incomplete core update. Optional LWS work follows that commit point.
 - `debian/rpi-update-safe.bash` runs `rpi-update` as root with rebooting disabled,
+  with `SKIP_WARNING=1` and stdin from `/dev/null` for cron. Preserve failure
+  on unexpected prompts and use noninteractive sudo for elevation. The wrapper
   then runs `depmod` for the version embedded in each present boot image.
   Pair `kernel_2712.img` with `initramfs_2712` and `kernel8.img` with
   `initramfs8`. Inspect the module paths inside both staged archives and
