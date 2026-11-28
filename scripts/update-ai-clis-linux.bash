@@ -959,9 +959,13 @@ can_update() {
 # shell only when its command resolution identifies the same file.
 session_command() {
 	local binary=$1 expected=$2 login_flags=-lc
+	local -a session=()
 	# SecureBlue adds the Homebrew path in interactive Bash startup.
 	if [[ $PLATFORM == secureblue && ${SHELL_BIN##*/} == bash ]]; then
 		login_flags=-lic
+		# Without a controlling terminal, interactive Bash cannot suspend
+		# itself waiting for timeout's process group to reach the foreground.
+		session=(setsid --wait)
 	fi
 	if [[ ${SHELL_BIN##*/} == fish ]]; then
 		# shellcheck disable=SC2016 # Expanded by Fish.
@@ -975,7 +979,7 @@ session_command() {
 		' "$binary" "$expected" 2>&1
 	else
 		# shellcheck disable=SC2016 # Expanded by the login shell.
-		timeout --kill-after=2s 20s env PATH="$SYSTEM_PATH" BASH_ENV= ENV= "$SHELL_BIN" "$login_flags" '
+		"${session[@]}" timeout --kill-after=2s 20s env PATH="$SYSTEM_PATH" BASH_ENV= ENV= "$SHELL_BIN" "$login_flags" '
 			resolved=$(command -v -- "$1") || resolved=
 			printf "__scripts_ai_cli_path__%s\n" "$resolved"
 			case "$resolved" in
@@ -984,7 +988,7 @@ session_command() {
 					"$2" --version
 				fi ;;
 			esac
-		' update-ai-clis "$binary" "$expected" 2>&1
+		' update-ai-clis "$binary" "$expected" </dev/null 2>&1
 	fi
 }
 
@@ -1044,14 +1048,17 @@ persist_path() {
 }
 
 verify_session() {
-	local binary=$1 expected=$2 path output session_version
-	output=$(session_command "$binary" "$expected") || return
-	path=$(sed -n 's/^__scripts_ai_cli_path__//p' <<<"$output") || return
-	if [[ -z $path && $PLATFORM != debian ]]; then
-		persist_path "${expected%/*}" || return
-		output=$(session_command "$binary" "$expected") || return
+	local binary=$1 expected=$2 path output session_version attempt status
+	for attempt in 1 2; do
+		output=$(session_command "$binary" "$expected") || {
+			status=$?
+			warn "Fresh ${SHELL_BIN##*/} login failed while checking $binary (exit $status)."
+			return "$status"
+		}
 		path=$(sed -n 's/^__scripts_ai_cli_path__//p' <<<"$output") || return
-	fi
+		[[ -z $path && $PLATFORM != debian && $attempt == 1 ]] || break
+		persist_path "${expected%/*}" || return
+	done
 	same_executable "$path" "$expected" || {
 		warn "A fresh ${SHELL_BIN##*/} login resolves $binary to ${path:-nothing}, expected $expected."
 		return 1

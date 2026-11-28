@@ -269,7 +269,7 @@ subtest 'SecureBlue sees the interactive PATH without writing the profile' =>
 [ "$1" = -lic ] || exit 2
 shift
 export PATH="$FIXTURE_ROOT/bin:$PATH"
-exec /bin/bash --noprofile --norc -c "$@"
+exec /bin/bash --noprofile --norc -ic "$@"
 SH
     chmod 0755, $shell or die "cannot chmod $shell: $!";
     my $contents = "# protected startup file\n";
@@ -281,6 +281,28 @@ SH
     is( $run->{returncode}, 0, 'interactive login resolves the expected CLI' )
       or diag $run->{stdout} . $run->{stderr};
     is( slurp($profile), $contents, 'protected profile is unchanged' );
+  SKIP: {
+        my $script = find_command('script');
+        skip 'util-linux script is required for the terminal test', 1
+          unless $script;
+        my $probe = run_command(
+            cmd => [
+                $script, '-qec',
+                'exec bash "$FIXTURE" "$UPDATER" --test-session secureblue',
+                '/dev/null'
+            ],
+            env => env_with(
+                FIXTURE      => $fixture,
+                UPDATER      => $updater,
+                FIXTURE_ROOT => $root,
+                HOME         => "$root/home",
+                SHELL        => '/bin/sh'
+            ),
+            timeout => 30
+        );
+        is( $probe->{returncode}, 0, 'interactive probe from a terminal' )
+          or diag $probe->{stdout} . $probe->{stderr};
+    }
   };
 
 subtest 'SecureBlue prefers official Homebrew packages and taps' => sub {

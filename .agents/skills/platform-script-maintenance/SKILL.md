@@ -195,7 +195,10 @@ tool is missing, report the check as skipped rather than passed.
   Keep the managed PATH directories user-owned or administrator-controlled,
   and check which executable a new session resolves before claiming it is
   available. Probe SecureBlue Bash with an interactive login because its
-  interactive startup adds Homebrew to PATH. Leave protected profiles alone
+  interactive startup adds Homebrew to PATH. Run the bounded Bash probe in
+  its own session so terminal job control cannot suspend it. Exercise the
+  probe from a pseudoterminal as well as the piped test harness.
+  Leave protected profiles alone
   when the probe already sees the expected executable.
   Use the tests in [test_ai_cli_updates.pl](../../../tests/test_ai_cli_updates.pl)
   for offline selector, version, conflict and failure coverage. The Copilot
