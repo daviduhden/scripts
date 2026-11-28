@@ -105,7 +105,10 @@ if [[ ${1:-} == --test-homebrew ]]; then
 		printf '%s\n' "$*" >>"$FIXTURE_ROOT/events"
 		case "$1:${4:-}" in
 		update: | install:* | upgrade:*) return 0 ;;
-		tap:) printf '%s\n' homebrew/core charmbracelet/tap ;;
+		tap:) printf '%s\n' homebrew/core charmbracelet/tap oven-sh/bun ;;
+		info:oven-sh/bun/bun)
+			printf '%s\n' '{"formulae":[{"full_name":"oven-sh/bun/bun","versions":{"stable":"2.0.0"},"installed":[],"dependencies":[]}]}'
+			;;
 		info:homebrew/core/opencode)
 			printf '%s\n' '{"formulae":[{"full_name":"homebrew/core/opencode","tap":"homebrew/core","name":"opencode","versions":{"stable":"2.0.0"},"installed":[],"dependencies":[]}]}'
 			;;
@@ -134,6 +137,8 @@ if [[ ${1:-} == --test-homebrew ]]; then
 	install_brew copilot-cli
 	latest_brew claude
 	install_brew claude
+	latest_brew bun
+	install_brew bun
 	exit
 fi
 

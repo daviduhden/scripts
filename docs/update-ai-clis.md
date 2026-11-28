@@ -15,6 +15,10 @@ update-ai-clis swival
 update-ai-clis codex swival
 ```
 
+Bun is an explicit target outside the default six agents. Debian uses its
+signed npm distribution, SecureBlue uses the publisher's Homebrew tap,
+and Windows uses the official release archive.
+
 The updater reports the agent, previous version, latest stable version in the
 selected distribution channel, final version and result. Version checks run the
 actual command, including after a package manager reports success. If more

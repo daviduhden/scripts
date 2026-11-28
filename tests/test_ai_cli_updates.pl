@@ -306,6 +306,9 @@ subtest 'Swival isolated install, update and idempotence on Linux' => sub {
             is( $run->{returncode}, 0, 'uses stable wheel if PyPI is preview' )
               or diag $run->{stdout} . $run->{stderr};
             like(
+            'tap',
+            'info --json=v2 --formula oven-sh/bun/bun',
+            'install --formula oven-sh/bun/bun',
                 $run->{stdout},
                 qr/^swival\t-\t1\.2\.3\t1\.2\.3\tinstalled$/m,
                 'reports exact installed stable version'

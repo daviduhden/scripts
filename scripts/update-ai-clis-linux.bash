@@ -15,9 +15,10 @@ readonly CLAUDE_SIGNER=31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE
 readonly SWIVAL_PYTHON=3.14
 
 declare -ar AGENTS=(opencode codex crush copilot-cli claude swival)
-declare -Ar COMMANDS=([opencode]=opencode [codex]=codex [crush]=crush ["copilot-cli"]=copilot [claude]=claude [swival]=swival)
+declare -Ar COMMANDS=([opencode]=opencode [codex]=codex [crush]=crush ["copilot-cli"]=copilot [claude]=claude [swival]=swival [bun]=bun)
 declare -Ar BREW_PACKAGES=(
 	[opencode]=homebrew/core/opencode
+	[bun]=oven-sh/bun/bun
 	[codex]=homebrew/cask/codex
 	[crush]=charmbracelet/tap/crush
 	["copilot-cli"]=homebrew/cask/copilot-cli
@@ -70,6 +71,7 @@ Usage: update-ai-clis [all | AGENT ...]
 
 Install or update the latest stable release of each selected agent.
 Agents: opencode, codex, crush, copilot-cli, claude, swival.
+Bun is available as an explicit target.
 With no agents or with 'all', process every supported agent.
 
 Exit status: 0 success, 1 operation failed, 2 invalid arguments.
@@ -88,7 +90,7 @@ select_agents() {
 	fi
 	for agent in "$@"; do
 		case "$agent" in
-		opencode | codex | crush | copilot-cli | claude | swival)
+		opencode | codex | crush | copilot-cli | claude | swival | bun)
 			if [[ ! ${seen[$agent]+present} ]]; then
 				SELECTED+=("$agent")
 				seen[$agent]=1
@@ -280,7 +282,7 @@ ensure_packages() {
 	if [[ $agent != claude ]]; then required+=(jq); fi
 	if [[ $phase == install ]]; then
 		case "$agent" in
-		opencode) required+=(openssl perl) ;;
+		opencode | bun) required+=(openssl perl) ;;
 		codex) required+=(cosign perl) ;;
 		crush) required+=(cosign) ;;
 		copilot-cli | swival) required+=(perl) ;;
@@ -323,7 +325,7 @@ ensure_packages() {
 			command -v "$command" >/dev/null || return
 		fi
 	done
-	if [[ $phase == install && ($agent == opencode || $agent == codex || $agent == copilot-cli || $agent == swival) ]] &&
+	if [[ $phase == install && ($agent == opencode || $agent == bun || $agent == codex || $agent == copilot-cli || $agent == swival) ]] &&
 		{ ! command -v perl >/dev/null || [[ ! -r $RELEASE_HELPER ]]; }; then
 		warn "Perl and the installed release-verify helper are required for archive verification."
 		return 1
@@ -435,6 +437,10 @@ claude_apt() {
 latest_debian() {
 	local agent=$1 repo
 	case "$agent" in
+	bun)
+		METADATA=$(fetch https://registry.npmjs.org/bun/latest) || return
+		LATEST=$(jq -er 'select(.name == "bun") | .version' <<<"$METADATA") || return
+		;;
 	opencode)
 		METADATA=$(fetch 'https://registry.npmjs.org/@opencode%2fcli/latest') || return
 		LATEST=$(jq -er 'select(.name == "@opencode/cli") | .version' <<<"$METADATA") || return
@@ -486,7 +492,7 @@ JQ_FILTER
 
 brew_kind() {
 	case "$1" in
-	opencode | crush) printf '%s\n' --formula ;;
+	opencode | crush | bun) printf '%s\n' --formula ;;
 	*) printf '%s\n' --cask ;;
 	esac
 }
@@ -501,10 +507,10 @@ latest_brew() {
 	kind=$(brew_kind "$agent")
 	BREW_DEPENDENCIES=""
 	refresh_brew || return
-	if [[ $agent == crush ]]; then
+	if [[ $agent == crush || $agent == bun ]]; then
 		taps=$(run_brew tap) || return
-		if ! grep -Fxq charmbracelet/tap <<<"$taps"; then
-			run_brew tap charmbracelet/tap >&2 || return
+		if ! grep -Fxq "${package%/*}" <<<"$taps"; then
+			run_brew tap "${package%/*}" >&2 || return
 		fi
 	fi
 	metadata=$(run_brew info --json=v2 "$kind" "$package") || return
@@ -652,17 +658,20 @@ swival_install() {
 		--managed-python --only-binary :all: --default-index https://pypi.org/simple "swival @ $SWIVAL_WHEEL" >&2
 }
 
-opencode_archive() {
+signed_npm_archive() {
 	local platform=linux-$VENDOR_ARCH pkg version_doc url integrity digest keyids keyid key expires sig
-	local archive=$WORK_DIR/opencode.tgz keys
+	local agent=$1 archive=$WORK_DIR/$1.tgz keys
 	# The baseline build runs on x86-64 CPUs without AVX2. This package
 	# contains the native executable, so no npm lifecycle script is needed.
 	if [[ $VENDOR_ARCH == x64 ]] && ! grep -qwi avx2 /proc/cpuinfo; then
 		platform+=-baseline
 	fi
 	pkg=@opencode/cli-$platform
-	version_doc=$(fetch "https://registry.npmjs.org/@opencode%2fcli-$platform/$LATEST") || return
-	url=https://registry.npmjs.org/$pkg/-/cli-$platform-$LATEST.tgz
+	if [[ $agent == bun ]]; then
+		pkg=@oven/bun-${platform/arm64/aarch64}
+	fi
+	version_doc=$(fetch "https://registry.npmjs.org/${pkg/\//%2f}/$LATEST") || return
+	url=https://registry.npmjs.org/$pkg/-/${pkg##*/}-$LATEST.tgz
 	integrity=$(jq -er --arg pkg "$pkg" --arg version "$LATEST" --arg url "$url" '
 		select(.name == $pkg and .version == $version and .dist.tarball == $url) |
 		.dist.integrity | select(test("^sha512-[A-Za-z0-9+/]{86}==$"))
@@ -686,12 +695,12 @@ opencode_archive() {
 				fetch "$url" -o "$archive" || return
 				digest=$(openssl dgst -sha512 -binary "$archive" | base64 -w 0) || return
 				[[ sha512-$digest == "$integrity" ]] && return 0
-				warn "OpenCode archive failed npm integrity verification"
+				warn "$agent archive failed npm integrity verification"
 				return 1
 			fi
 		done < <(jq -r --arg id "$keyid" '.dist.signatures[] | select(.keyid == $id) | .sig' <<<"$version_doc")
 	done <<<"$keyids"
-	warn "OpenCode npm metadata signature could not be verified"
+	warn "$agent npm metadata signature could not be verified"
 	return 1
 }
 
@@ -809,9 +818,9 @@ activate_user_release() (
 	ensure_user_dir "$USER_BIN" && ensure_user_dir "$STATE_DIR/$agent" || return
 	stage=$(mktemp -d "$STATE_DIR/$agent/$LATEST.XXXXXX") || return
 	case "$agent" in
-	opencode)
-		opencode_archive &&
-			release_extract tar-extract-entry "$WORK_DIR/opencode.tgz" "$stage/$binary" "package/bin/$binary" || return
+	opencode | bun)
+		signed_npm_archive "$agent" &&
+			release_extract tar-extract-entry "$WORK_DIR/$agent.tgz" "$stage/$binary" "package/bin/$binary" || return
 		;;
 	codex)
 		codex_archive "$stage" || return
