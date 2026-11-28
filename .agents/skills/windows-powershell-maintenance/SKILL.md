@@ -156,6 +156,9 @@ already-installed PSScriptAnalyzer; it does not install it.
 - `psfmt.ps1` requires PSScriptAnalyzer 1.25.0. Missing modules fail without
   network access by default; `-install-dependency` explicitly opts in to the
   pinned PSGallery install. Keep the runner and CI version aligned.
+  For OpenCode release selection, pass the numeric version sort key directly
+  to `Sort-Object -Property`. Cover single- and double-digit minor versions
+  in the offline fixture so a lexical sort fails the test.
   Release updaters `update-ai-clis.ps1` and `update-xerj.ps1` also download
   upstream artifacts as their documented purpose. Keep downloads confined
   to those flows rather than adding them to launchers or checks.

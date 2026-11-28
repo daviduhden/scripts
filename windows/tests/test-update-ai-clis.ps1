@@ -128,7 +128,8 @@ function Get-RemoteText {
         return (@(
                 @{ tag_name = 'v1.19.6'; draft = $false; prerelease = $false }
                 @{ tag_name = 'v2.4.2'; draft = $false; prerelease = $false }
-                @{ tag_name = 'v2.5.0-rc.1'; draft = $false; prerelease = $true }
+                @{ tag_name = 'v2.10.0'; draft = $false; prerelease = $false }
+                @{ tag_name = 'v2.11.0-rc.1'; draft = $false; prerelease = $true }
             ) | ConvertTo-Json)
     }
     if ($Uri -eq 'https://api.github.com/repos/astral-sh/uv/releases/latest') {
@@ -182,7 +183,7 @@ try {
     Assert-True (-not (Test-StableVersionAtLeast '1.2.3-rc.10' '1.2.3')) 'Same-core prerelease satisfied stable requirement'
     Assert-True (Test-StableVersionAtLeast '2.0.0-rc.10' '1.2.3') 'Higher-version prerelease would be downgraded'
     Assert-True (Test-StableVersionAtLeast '1.10.0' '1.9.0') 'Numeric version ordering failed'
-    Assert-True ((Get-OpenCodeLatestVersion) -eq '2.4.2') 'OpenCode stable v2 release selection failed'
+    Assert-True ((Get-OpenCodeLatestVersion) -eq '2.10.0') 'OpenCode stable v2 release selection failed'
 
     $wrapper = Join-Path $testRoot 'probe script.ps1'
     Set-Content -LiteralPath $wrapper -Value "'wrapper banner'; '1.2.3 (Claude Code)'"

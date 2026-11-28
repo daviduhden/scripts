@@ -807,9 +807,7 @@ function Get-OpenCodeLatestVersion {
             $latest = $releases | Where-Object {
                 (-not $_.draft) -and (-not $_.prerelease) -and
                 ([string]$_.tag_name -cmatch '^v2\.[0-9]+\.[0-9]+$')
-            } | Sort-Object -Property @{ Expression = {
-                    [version]([string]$_.tag_name).Substring(1)
-                } } -Descending | Select-Object -First 1
+            } | Sort-Object -Property { [version]([string]$_.tag_name).Substring(1) } -Descending | Select-Object -First 1
             if ($null -ne $latest) {
                 return (ConvertTo-NormalizedVersion $latest.tag_name)
             }
