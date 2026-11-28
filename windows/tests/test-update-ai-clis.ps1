@@ -40,6 +40,7 @@ $script:CodexExe = Join-Path $script:CodexBin 'codex.exe'
 $script:OpenCodeRoot = Join-Path $testRoot 'opencode'
 $script:OpenCodeBin = Join-Path $script:OpenCodeRoot 'bin'
 $script:OpenCodeExe = Join-Path $script:OpenCodeBin 'opencode.exe'
+$script:OpenCodeReleasesApi = 'https://api.github.com/repos/anomalyco/opencode/releases?per_page=100'
 $script:CrushVersions = Join-Path $testRoot 'crush/versions'
 $script:CrushBin = Join-Path $testRoot 'crush/bin'
 $script:CrushExe = Join-Path $script:CrushBin 'crush.exe'
@@ -123,6 +124,13 @@ function Get-RemoteText {
     if ($Uri -eq "$script:ClaudeSource/1.2.3/manifest.json") { return $script:ClaudeManifest }
     if ($Uri -eq 'https://pypi.org/pypi/swival/json') { return $script:SwivalIndex }
     if ($Uri -eq 'https://pypi.org/pypi/swival/1.2.3/json') { return $script:SwivalManifest }
+    if ($Uri -eq $script:OpenCodeReleasesApi) {
+        return (@(
+                @{ tag_name = 'v1.19.6'; draft = $false; prerelease = $false }
+                @{ tag_name = 'v2.4.2'; draft = $false; prerelease = $false }
+                @{ tag_name = 'v2.5.0-rc.1'; draft = $false; prerelease = $true }
+            ) | ConvertTo-Json)
+    }
     if ($Uri -eq 'https://api.github.com/repos/astral-sh/uv/releases/latest') {
         return (@{ tag_name = '1.2.3'; draft = $false; prerelease = $false; assets = @($script:UvFixtureAsset) } | ConvertTo-Json -Depth 5)
     }
@@ -174,6 +182,7 @@ try {
     Assert-True (-not (Test-StableVersionAtLeast '1.2.3-rc.10' '1.2.3')) 'Same-core prerelease satisfied stable requirement'
     Assert-True (Test-StableVersionAtLeast '2.0.0-rc.10' '1.2.3') 'Higher-version prerelease would be downgraded'
     Assert-True (Test-StableVersionAtLeast '1.10.0' '1.9.0') 'Numeric version ordering failed'
+    Assert-True ((Get-OpenCodeLatestVersion) -eq '2.4.2') 'OpenCode stable v2 release selection failed'
 
     $wrapper = Join-Path $testRoot 'probe script.ps1'
     Set-Content -LiteralPath $wrapper -Value "'wrapper banner'; '1.2.3 (Claude Code)'"

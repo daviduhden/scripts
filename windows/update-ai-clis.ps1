@@ -798,16 +798,28 @@ function Set-CurrentExe {
 #>
 function Get-OpenCodeLatestVersion {
     $headers = @{ 'User-Agent' = 'update-ai-clis'; 'Accept' = 'application/vnd.github+json' }
-    $raw = Get-RemoteText -Uri $script:OpenCodeReleasesApi -Headers $headers
-    $releases = @($raw | ConvertFrom-Json)
-    $latest = $releases | Where-Object {
-        (-not $_.draft) -and (-not $_.prerelease) -and ($_.tag_name -cmatch '^v2\.[0-9]+\.[0-9]+$')
-    } | Sort-Object -Property @{ Expression = { [version]($_.tag_name.Substring(1)) } } -Descending |
-    Select-Object -First 1
-    if ($null -eq $latest) {
-        throw 'Could not resolve the latest OpenCode 2.x release.'
+    $lastError = $null
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        try {
+            $raw = Get-RemoteText -Uri $script:OpenCodeReleasesApi -Headers $headers
+            $releases = ConvertFrom-Json -InputObject ([string]$raw)
+            $latest = $releases | Where-Object {
+                (-not $_.draft) -and (-not $_.prerelease) -and
+                ([string]$_.tag_name -cmatch '^v2\.[0-9]+\.[0-9]+$')
+            } | Sort-Object -Property @{ Expression = {
+                    [version]([string]$_.tag_name).Substring(1)
+                } } -Descending | Select-Object -First 1
+            if ($null -ne $latest) {
+                return (ConvertTo-NormalizedVersion $latest.tag_name)
+            }
+            throw 'The release list contained no stable OpenCode 2.x tag.'
+        }
+        catch {
+            $lastError = $_.Exception.Message
+            if ($attempt -lt 3) { Start-Sleep -Seconds 2 }
+        }
     }
-    return (ConvertTo-NormalizedVersion $latest.tag_name)
+    throw "Could not resolve the latest OpenCode 2.x release: $lastError"
 }
 
 <#
