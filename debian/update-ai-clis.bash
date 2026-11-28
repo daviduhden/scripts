@@ -14,6 +14,9 @@ if [[ ! -f $helper ]]; then
 	printf 'update-ai-clis: cannot locate the Linux updater\n' >&2
 	exit 1
 fi
+for option in "$@"; do
+	if [[ $option == --check ]]; then exec /bin/bash "$helper" debian "$@"; fi
+done
 if ((EUID != 0)) && [[ $# != 1 || $1 != --help ]]; then
 	# Agents are installed system-wide, so the whole updater runs as root.
 	if [[ ! -x /usr/bin/sudo ]]; then

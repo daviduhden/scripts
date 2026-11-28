@@ -57,6 +57,8 @@ Windows discovers the self-contained `update-ai-clis.ps1` and generates the
 `update-ai-clis.cmd` launcher.
 Keep the shared selectors, exit codes and summary fields aligned across these
 entry points. The public matrix is in [docs/update-ai-clis.md](docs/update-ai-clis.md).
+Keep version checks non-elevated on Debian. Check mode must skip package
+installation, wrapper publication and daemon updates. Bun is opt-in.
 
 `update-xerj` shares those selectors and registers only xerj's stdio MCP
 server for installed clients. Keep optional GitHub release asset

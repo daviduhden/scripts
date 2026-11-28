@@ -2101,11 +2101,38 @@ function Invoke-CliUpdate {
     return $row
 }
 
+if ($Agent) {
+    $names = for ($i = 0; $i -lt $Agent.Count; $i++) {
+        $item = $Agent[$i]
+        switch -CaseSensitive ($item) {
+            '--update-codex-daemon' { $UpdateCodexDaemon = $true }
+            '--wrappers' { $Wrappers = $true }
+            { $_ -cin @('--opencode-version', '--codex-version', '--crush-version') } {
+                if (++$i -ge $Agent.Count -or $Agent[$i] -notmatch "^$script:SemVerCore$") {
+                    Write-Fail "Expected a stable version after $item."
+                    exit 2
+                }
+                switch ($item) {
+                    '--opencode-version' { $OpenCodeVersion = $Agent[$i] }
+                    '--codex-version' { $CodexVersion = $Agent[$i] }
+                    '--crush-version' { $CrushVersion = $Agent[$i] }
+                }
+            }
+            '--check' { $Check = $true }
+            '--force' { $Force = $true; $script:Force = $true }
+            default { $item }
+        }
+    }
+    $Agent = @($names | Where-Object { $_ })
+}
+
 # Validate arguments before acquiring locks or invoking installers.
 if ($Agent -and $Agent.Count -eq 1 -and $Agent[0] -eq '--help' -and -not $Target) {
     Write-Output @'
-Usage: update-ai-clis [all | AGENT ...] [--help]
+Usage: update-ai-clis [--check] [--force] [all | AGENT ...] [--help]
 Agents: opencode codex crush copilot-cli claude swival
+Options: --opencode-version VERSION, --codex-version VERSION, --crush-version VERSION,
+         --update-codex-daemon
 Use no agents or all for all supported agents.
 Windows: -Check reads versions only; -Target is the legacy selector.
 Windows also accepts bun as an explicit target, pinned -OpenCodeVersion,

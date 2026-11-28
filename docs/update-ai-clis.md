@@ -2,7 +2,7 @@
 
 Run `update-ai-clis` as the account that will run the agents on SecureBlue and
 Windows. On Debian, run it as any administrator: the wrapper re-executes the
-whole updater through `sudo` (unless the sole argument is `--help`) and installs
+whole updater through `sudo` for installation and installs
 the agents system-wide. With no arguments or with `all`, it processes the
 supported agents. Pass one or more
 identifiers to restrict the operation to those agents and their dependencies.
@@ -13,8 +13,23 @@ update-ai-clis codex claude
 update-ai-clis copilot-cli
 update-ai-clis swival
 update-ai-clis codex swival
+update-ai-clis --check
+update-ai-clis --force codex
+update-ai-clis --update-codex-daemon codex
+update-ai-clis bun
 ```
 
+`--check` reports versions without installing packages or changing PATH.
+On Debian it runs without elevation. On SecureBlue it reads the configured
+Homebrew metadata and needs the selected publisher tap and jq already available.
+`--force` reinstalls a managed release. Use `--opencode-version VERSION`,
+`--codex-version VERSION` or `--crush-version VERSION` to request a stable
+release. SecureBlue accepts the version available through the selected
+Homebrew formula or cask and reports an unavailable pin as a failure.
+`--update-codex-daemon` updates the managed Codex daemon for the invoking
+account. A running daemon may restart. `--wrappers` installs optional
+shortcuts for OpenCode and Codex. Linux uses the separate commands
+`opencode-auto` and `codex-yolo`; Windows uses PowerShell profile functions.
 Bun is an explicit target outside the default six agents. Debian uses its
 signed npm distribution, SecureBlue uses the publisher's Homebrew tap,
 and Windows uses the official release archive.

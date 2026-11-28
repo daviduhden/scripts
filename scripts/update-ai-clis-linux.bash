@@ -53,6 +53,11 @@ BREW_READY=0
 BREW_INSTALLED=0
 BREW_DEPENDENCIES=""
 DEFAULT_SELECTION=0
+CHECK=0
+FORCE=0
+UPDATE_DAEMON=0
+WRAPPERS=0
+declare -A PINS=()
 LATEST=""
 TAG=""
 METADATA=""
@@ -66,12 +71,17 @@ RESULT=""
 
 usage() {
 	cat <<'HELP'
-Usage: update-ai-clis [all | AGENT ...]
+Usage: update-ai-clis [--check] [--force] [all | AGENT ...]
        update-ai-clis --help
 
 Install or update the latest stable release of each selected agent.
 Agents: opencode, codex, crush, copilot-cli, claude, swival.
 Bun is available as an explicit target.
+--check reports available updates without installing packages.
+--force reinstalls the selected managed release.
+--opencode-version, --codex-version and --crush-version take a stable version.
+--update-codex-daemon updates the invoking user's managed Codex daemon.
+--wrappers installs opt-in codex-yolo and opencode-auto commands.
 With no agents or with 'all', process every supported agent.
 
 Exit status: 0 success, 1 operation failed, 2 invalid arguments.
@@ -82,6 +92,27 @@ warn() { printf 'update-ai-clis: %s\n' "$*" >&2; }
 
 select_agents() {
 	local agent
+	local -a names=()
+	while (($#)); do
+		agent=$1
+		shift
+		case "$agent" in
+		--update-codex-daemon) UPDATE_DAEMON=1 ;;
+		--wrappers) WRAPPERS=1 ;;
+		--opencode-version | --codex-version | --crush-version)
+			agent=${agent#--}
+			agent=${agent%-version}
+			(($#)) && is_stable "$1" || return 2
+			[[ $agent != opencode || $1 == 2.* ]] || return 2
+			PINS[$agent]=$1
+			shift
+			;;
+		--check) CHECK=1 ;;
+		--force) FORCE=1 ;;
+		*) names+=("$agent") ;;
+		esac
+	done
+	set -- "${names[@]}"
 	local -A seen=()
 	if [[ $# -eq 0 || ($# -eq 1 && $1 == all) ]]; then
 		SELECTED=("${AGENTS[@]}")
@@ -102,6 +133,8 @@ select_agents() {
 			;;
 		esac
 	done
+	for agent in "${!PINS[@]}"; do [[ ${seen[$agent]+selected} ]] || return 2; done
+	((UPDATE_DAEMON == 0)) || [[ ${seen[codex]+selected} ]]
 }
 
 # Extract the first complete semver token from the agent's version banner.
@@ -353,6 +386,7 @@ setup_metadata_tools() {
 	fi
 	local path=$BREW_PREFIX/bin/jq
 	if [[ ! -x $path ]]; then
+		((CHECK == 0)) || return 1
 		refresh_brew && run_brew install --formula homebrew/core/jq >&2 || return
 	fi
 	[[ -x $path ]] && safe_path "$path" || return
@@ -506,10 +540,11 @@ latest_brew() {
 	package=${BREW_PACKAGES[$agent]}
 	kind=$(brew_kind "$agent")
 	BREW_DEPENDENCIES=""
-	refresh_brew || return
+	if ((CHECK == 0)); then refresh_brew || return; fi
 	if [[ $agent == crush || $agent == bun ]]; then
 		taps=$(run_brew tap) || return
 		if ! grep -Fxq "${package%/*}" <<<"$taps"; then
+			((CHECK == 0)) || return 1
 			run_brew tap "${package%/*}" >&2 || return
 		fi
 	fi
@@ -767,8 +802,10 @@ install_deb() {
 		actual=$(sha256sum -- "$stage/package.deb")
 		[[ ${actual%% *} == "$2" ]]
 		chmod 0711 -- "$stage"
-		apt-get --assume-yes --no-remove --no-install-recommends install -- "$stage/package.deb"
-	' update-ai-clis "$file" "$expected" >&2
+		options=()
+		if [[ -n $3 ]]; then options+=(--allow-downgrades); fi
+		apt-get --assume-yes --no-remove --no-install-recommends --reinstall "${options[@]}" install -- "$stage/package.deb"
+	' update-ai-clis "$file" "$expected" "${PINS[$name]:-}" >&2
 }
 
 install_crush() {
@@ -869,6 +906,8 @@ install_brew() {
 	fi
 	if ((BREW_INSTALLED == 0)); then
 		run_brew install "${options[@]}" "$package" >&2
+	elif ((FORCE)); then
+		run_brew reinstall "${options[@]}" "$package" >&2
 	elif [[ $kind == --cask ]]; then
 		run_brew upgrade "${options[@]}" --greedy "$package" >&2
 	else
@@ -1083,7 +1122,7 @@ process_agent() {
 		return 1
 	fi
 	if [[ $PLATFORM == debian ]]; then
-		if ! metadata_ready "$agent" && ! ensure_packages "$agent" metadata; then
+		if ! metadata_ready "$agent" && { ((CHECK)) || ! ensure_packages "$agent" metadata; }; then
 			warn "Cannot prepare version checks for $agent."
 			return 1
 		fi
@@ -1097,10 +1136,33 @@ process_agent() {
 			return 1
 		}
 	fi
+	local channel_version=$LATEST pin=${PINS[$agent]:-}
+	if [[ -n $pin && $pin != "$LATEST" ]]; then
+		if [[ $PLATFORM == secureblue ]]; then
+			warn "Homebrew offers $agent $LATEST, requested $pin."
+			return 1
+		fi
+		if [[ $agent != opencode ]]; then
+			TAG=v$pin
+			if [[ $agent == codex ]]; then TAG=rust-v$pin; fi
+			METADATA=$(fetch "https://api.github.com/repos/${GITHUB_REPOS[$agent]}/releases/tags/$TAG") &&
+				jq -e --arg tag "$TAG" '.tag_name == $tag and .draft == false and .prerelease == false' <<<"$METADATA" >/dev/null || return 1
+		fi
+		LATEST=$pin
+	fi
+	if ((CHECK)); then
+		RESULT=available
+		if [[ -n $PREVIOUS ]]; then
+			relative=$(compare_to_stable "$PREVIOUS" "$LATEST")
+			if [[ $relative == current || ($relative == newer && -z $pin) ]]; then RESULT=$relative; fi
+		fi
+		LATEST=$channel_version
+		return 0
+	fi
 	managed_path "$agent"
 	if [[ -n $PREVIOUS ]]; then
 		relative=$(compare_to_stable "$PREVIOUS" "$LATEST")
-		if [[ $relative != older ]]; then
+		if [[ $FORCE == 0 && ($relative == current || ($relative == newer && -z $pin)) ]]; then
 			if same_executable "$path" "$MANAGED"; then
 				if [[ $agent == swival ]] && can_update "$agent" "$binary"; then
 					ensure_swival_runtime || return
@@ -1110,6 +1172,7 @@ process_agent() {
 			fi
 			verify_session "$binary" "$path" || return
 			RESULT=$relative
+			LATEST=$channel_version
 			return 0
 		fi
 		if ! same_executable "$path" "$MANAGED"; then
@@ -1154,6 +1217,7 @@ process_agent() {
 	fi
 	verify_session "$binary" "$MANAGED" || return
 	RESULT=installed
+	LATEST=$channel_version
 	if [[ -n $PREVIOUS ]]; then
 		RESULT=updated
 	fi
@@ -1166,7 +1230,7 @@ setup_runtime() {
 	if [[ $PLATFORM == debian ]]; then
 		# Debian installs system-wide, so releases must be readable by everyone.
 		umask 022
-		if ((EUID != 0)); then
+		if ((EUID != 0 && CHECK == 0)); then
 			warn "Debian installs agents globally and must run as root; use the update-ai-clis wrapper."
 			return 1
 		fi
@@ -1230,6 +1294,13 @@ setup_runtime() {
 	if ((supported == 0)); then
 		return 0
 	fi
+	if ((CHECK)); then
+		WORK_DIR=$(mktemp -d /tmp/scripts-ai-clis.XXXXXX) || return
+		if [[ $PLATFORM == secureblue ]]; then locate_brew && setup_metadata_tools || return; fi
+		set_probe_path
+		find_npm_prefix
+		return
+	fi
 	if [[ $PLATFORM == debian ]]; then
 		ensure_user_dir "${STATE_DIR%/*}" && ensure_user_dir "$STATE_DIR" || return
 	else
@@ -1253,6 +1324,43 @@ cleanup() {
 	if [[ -n $WORK_DIR && -d $WORK_DIR ]]; then
 		rm -rf -- "$WORK_DIR"
 	fi
+}
+
+install_agent_wrapper() (
+	local agent=$1 name option stage
+	case "$agent" in
+	codex) name=codex-yolo option=--yolo ;;
+	opencode) name=opencode-auto option=--auto ;;
+	*) return 0 ;;
+	esac
+	managed_path "$agent"
+	can_update "$agent" "$agent" && [[ -x $MANAGED ]] || return 1
+	ensure_user_dir "$USER_BIN" || return
+	stage=$(mktemp -d "$USER_BIN/.scripts-ai-clis.XXXXXX") || return
+	trap 'rm -f -- "$stage/wrapper"; rmdir -- "$stage"' EXIT
+	printf '#!/bin/bash\nexec %q %s "$@"\n' "$MANAGED" "$option" >"$stage/wrapper" &&
+		chmod 0755 "$stage/wrapper" || return
+	if [[ -e $USER_BIN/$name || -L $USER_BIN/$name ]]; then
+		[[ -f $USER_BIN/$name && ! -L $USER_BIN/$name && -x $USER_BIN/$name ]] &&
+			cmp -s "$stage/wrapper" "$USER_BIN/$name" || return 1
+	else
+		ln -- "$stage/wrapper" "$USER_BIN/$name" || return
+	fi
+	if [[ $PLATFORM == secureblue ]]; then
+		verify_session "$name" "$USER_BIN/$name" || return
+	fi
+)
+
+update_codex_daemon() {
+	managed_path codex
+	can_update codex codex && [[ -x $MANAGED ]] || return 1
+	local -a command=("$MANAGED")
+	if [[ $PLATFORM == debian && -n ${SUDO_USER:-} && $SUDO_USER != root ]]; then
+		command=(sudo -H -u "$SUDO_USER" -- "$MANAGED")
+	fi
+	local result
+	result=$("${command[@]}" app-server daemon update) || return
+	"$JQ" -e '.status == "updated" or .status == "noUpdate"' <<<"$result" >/dev/null
 }
 
 main() {
@@ -1285,6 +1393,15 @@ main() {
 		PREVIOUS="" LATEST="" FINAL="" RESULT=failed
 		if ((ready)) && ! process_agent "$agent"; then
 			status=1
+		elif ((ready && WRAPPERS && ! CHECK)) && [[ $RESULT != unsupported ]] && ! install_agent_wrapper "$agent"; then
+			warn "Could not install the optional wrapper for $agent."
+			RESULT=failed
+			status=1
+		elif ((ready && UPDATE_DAEMON && ! CHECK)) && [[ $agent == codex && $RESULT != unsupported ]]; then
+			if ! update_codex_daemon; then
+				RESULT=failed
+				status=1
+			fi
 		fi
 		summary+=("$agent"$'\t'"${PREVIOUS:--}"$'\t'"${LATEST:--}"$'\t'"${FINAL:--}"$'\t'"$RESULT")
 	done

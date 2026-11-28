@@ -62,6 +62,23 @@ subtest 'invalid selectors are rejected before processing any target' => sub {
     is( slurp("$root/events"), '', 'no package or executable was touched' );
 };
 
+subtest 'portable check, force and version selection' => sub {
+    my $root = sandbox();
+    my $run  = run_updater( $root, {}, '--check', 'opencode' );
+    is( $run->{returncode}, 0, 'check succeeds for missing agent' );
+    like( $run->{stdout}, qr/available$/m, 'reports available release' );
+    is( slurp("$root/events"), "resolve opencode\n", 'only queries metadata' );
+    executable( "$root/bin", 'opencode', '2.0.0' );
+    $run = run_updater( $root, {}, 'opencode', '--force' );
+    is( $run->{returncode}, 0, 'reinstalls a current managed release' );
+    like( slurp("$root/events"), qr/^install opencode$/m, 'installer ran' );
+    $run = run_updater( $root, {}, '--opencode-version', '2.0.1', 'opencode' );
+    is( $run->{returncode}, 0, 'installs a selected release' );
+    like( $run->{stdout}, qr/2\.0\.0\t2\.0\.1\tupdated/, 'reports pin' );
+    $run = run_updater( $root, {}, '--update-codex-daemon', 'crush' );
+    is( $run->{returncode}, 2, 'daemon update requires selecting Codex' );
+};
+
 subtest 'install, preview replacement, and repeated selective updates' => sub {
     my $root = sandbox();
     executable( "$root/bin", 'claude', '2.0.0-rc.10 (Claude Code)' );
@@ -289,6 +306,9 @@ subtest 'SecureBlue prefers official Homebrew packages and taps' => sub {
             'install --cask --require-sha homebrew/cask/copilot-cli',
             'info --json=v2 --cask homebrew/cask/claude-code',
             'upgrade --cask --require-sha --greedy homebrew/cask/claude-code',
+            'tap',
+            'info --json=v2 --formula oven-sh/bun/bun',
+            'install --formula oven-sh/bun/bun',
         ],
         'uses official Homebrew packages and publisher taps'
     );
@@ -306,9 +326,6 @@ subtest 'Swival isolated install, update and idempotence on Linux' => sub {
             is( $run->{returncode}, 0, 'uses stable wheel if PyPI is preview' )
               or diag $run->{stdout} . $run->{stderr};
             like(
-            'tap',
-            'info --json=v2 --formula oven-sh/bun/bun',
-            'install --formula oven-sh/bun/bun',
                 $run->{stdout},
                 qr/^swival\t-\t1\.2\.3\t1\.2\.3\tinstalled$/m,
                 'reports exact installed stable version'
