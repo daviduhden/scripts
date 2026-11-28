@@ -107,8 +107,7 @@ PERL_PROGRAMS_MANIFEST = perl/programs.txt
 
 .PHONY: all clean install-debian install-openbsd install-secureblue install-shell install-shell-bash install-shell-bash-unlock install-shell-bash-copy install-shell-openbsd install-perl install-tests-format uninstall-debian uninstall-openbsd uninstall-secureblue uninstall-shell uninstall-perl uninstall-tests-format test test-validate check format test-tooling test-delivery test-manpages test-regression test-agent-knowledge fix-permissions check-permissions check-agent-knowledge help
 
-# OS-specific sets install the same command names, so they cannot share a
-# single BINDIR. 'all' installs only the OS-independent runtime helper; choose
+# OS-specific sets replace overlapping commands in a shared BINDIR. 'all' installs only the OS-independent runtime helper; choose
 # install-debian, install-openbsd or install-secureblue for the target host.
 # Developer validators and formatters are an explicit install-tests-format.
 all: install-perl
@@ -117,11 +116,11 @@ clean:
 	@echo "${INFO} Nothing to clean"
 
 install-debian:
-	@INFO='${INFO}' DESTBIN='${DESTBIN}' ADOPT_LEGACY='${ADOPT_LEGACY}' DEBIAN_SCRIPTS='${DEBIAN_SCRIPTS}' \
+	@INFO='${INFO}' DESTBIN='${DESTBIN}' DEBIAN_SCRIPTS='${DEBIAN_SCRIPTS}' \
 		$(MANAGE) install-debian
 
 install-openbsd:
-	@INFO='${INFO}' DESTBIN='${DESTBIN}' ADOPT_LEGACY='${ADOPT_LEGACY}' OPENBSD_SCRIPTS='${OPENBSD_SCRIPTS}' \
+	@INFO='${INFO}' DESTBIN='${DESTBIN}' OPENBSD_SCRIPTS='${OPENBSD_SCRIPTS}' \
 		$(MANAGE) install-openbsd
 
 install-secureblue:
@@ -150,7 +149,7 @@ install-shell-openbsd:
 	@INFO='${INFO}' $(MANAGE) install-shell-openbsd
 
 install-perl:
-	@INFO='${INFO}' DESTBIN='${DESTBIN}' ADOPT_LEGACY='${ADOPT_LEGACY}' \
+	@INFO='${INFO}' DESTBIN='${DESTBIN}' \
 		PERL_PROGRAMS_MANIFEST='${PERL_PROGRAMS_MANIFEST}' \
 		$(MANAGE) install-perl
 

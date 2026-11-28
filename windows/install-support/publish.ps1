@@ -73,7 +73,6 @@ try {
         [IO.File]::Copy((Join-Path $Stage $entry), $pending)
         $backup = $null
         if ([IO.File]::Exists($target)) {
-            if ($entry -notin $old) { throw "Refusing to overwrite an unmanaged file: $target" }
             $backup = Join-Path $transaction "old-$($changes.Count)"
             [IO.File]::Replace($pending, $target, $backup)
         }

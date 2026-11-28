@@ -73,15 +73,15 @@ GNU options, paths, privilege tools, and service commands. Do not add `sudo`,
    before documenting approval behavior. Crush's `--yolo` retains its
    dangerous-command blocks. Swival's `--yolo` abbreviates
    `--files all --commands all`. Describe the vendor's specific controls.
-   Wrapper and tests-format installers must verify link or profile ownership
-   before replacement or removal. Keep staged links valid after relocation.
+   Replace existing command files or links at install time. Verify wrapper link
+   ownership before removal and profile ownership before replacement or removal. Keep staged links valid after relocation.
    The Debian, OpenBSD, SecureBlue, and Perl installers track exact installed
    file contents in `.scripts-install` under each destination. Keep preflight
    checks ahead of publication. Acquire the bin lock before the SecureBlue
-   unit lock. Restore the prior file if record publication fails.
+   unit lock. Transfer a same-name command’s record under the bin lock so the previous platform cannot uninstall it. Restore the prior file and ownership if publication fails.
    Uninstall must leave modified and unmanaged
-   files in place. Legacy adoption is explicit with `ADOPT_LEGACY=1` and
-   requires byte-for-byte matching source files.
+   files in place. Only SecureBlue service units require `ADOPT_LEGACY=1`
+   for adoption of an identical untracked file.
 8. For privileged or destructive code, follow `system-change-safety` before
    writing the implementation.
 9. Run the validations below. Do not run the script against the host.

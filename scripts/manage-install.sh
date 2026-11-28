@@ -42,6 +42,12 @@ managed_signature() {
 	fi
 }
 
+check_command_destination() {
+	if [ -d "$1" ] || { [ -e "$1" ] && [ ! -f "$1" ] && [ ! -L "$1" ]; }; then
+		die "unexpected destination type: $1"
+	fi
+}
+
 # The record path identifies the installation family. Its contents capture
 # the link target or a portable checksum and byte count for drift detection.
 managed_entry() (
@@ -60,35 +66,27 @@ managed_entry() (
 	if [ -L "$records" ] || [ -L "$records/$install_family" ]; then
 		die "invalid install records directory: $records"
 	fi
-	if [ -e "$file" ] || [ -L "$file" ]; then
-		if [ -L "$file" ] && [ "$mode" != link ]; then
-			die "unexpected destination type: $file"
-		fi
-		actual=$(managed_signature "$file") ||
-			die "unexpected destination type: $file"
-		if [ ! -f "$record" ] || [ -L "$record" ] ||
-			[ "$(cat "$record")" != "$actual" ]; then
-			if [ "${ADOPT_LEGACY:-0}" != 1 ] || [ -e "$record" ] ||
-				[ -L "$record" ]; then
+	check_command_destination "$file"
+	if [ "$mode" = 0644 ] && [ "$install_family" = secureblue ] && { [ -e "$file" ] || [ -L "$file" ]; }; then
+		actual=$(managed_signature "$file") || die "invalid service unit: $file"
+		if [ -L "$file" ] || [ -L "$record" ] || [ ! -f "$record" ] || [ "$(cat "$record")" != "$actual" ]; then
+			if [ "${ADOPT_LEGACY:-0}" != 1 ] || [ -L "$file" ] || [ -e "$record" ] || ! cmp -s "$source" "$file"; then
 				die "destination is unmanaged or modified: $file"
-			fi
-			if [ "$mode" = link ]; then
-				case "$actual" in
-				"link $source" | "link $destination/$source") : ;;
-				*) die "destination is not the expected wrapper link: $file" ;;
-				esac
-			elif [ -L "$file" ] || ! cmp -s "$source" "$file"; then
-				die "destination does not match the source: $file"
 			fi
 		fi
 	fi
 	if [ -L "$record" ] || { [ -e "$record" ] && [ ! -f "$record" ]; }; then
 		die "invalid install record: $record"
 	fi
+	previous_record=
 	for other_record in "$records"/*/"$name"; do
 		[ "$other_record" != "$record" ] || continue
 		if [ -e "$other_record" ] || [ -L "$other_record" ]; then
-			die "destination belongs to another install target: $file"
+			if [ -L "${other_record%/*}" ] || [ -L "$other_record" ] ||
+				[ ! -f "$other_record" ] || [ -n "$previous_record" ]; then
+				die "invalid previous install record: $other_record"
+			fi
+			previous_record=$other_record
 		fi
 	done
 	[ "$phase" = publish ] || return 0
@@ -96,42 +94,42 @@ managed_entry() (
 	install -d "$destination" "$records/$install_family" ||
 		die "cannot create installation directories for $file"
 	stage=$(mktemp -d "$destination/.scripts-stage.XXXXXXXX")
-	trap 'rm -f "$stage/program" "$stage/record" "$stage/previous"; rmdir "$stage"' 0
+	trap '
+		if [ -f "$stage/owner" ]; then
+			mv -f "$stage/owner" "$previous_record" ||
+				die "cannot restore $previous_record; inspect $stage"
+		fi
+		rm -f "$stage/program" "$stage/record" "$stage/previous"
+		rmdir "$stage"
+	' 0
 	trap 'exit 1' HUP INT TERM
 	log "Installing $source -> $file"
-	created_link=0
 	if [ "$mode" = link ]; then
-		# Existing wrapper links are left in place after their target was
-		# checked. mv can follow a destination symlink on some platforms.
-		if [ -L "$file" ]; then
-			case "$(readlink "$file")" in
-			"$source" | "$destination/$source") : ;;
-			*) die "unexpected wrapper target: $file" ;;
-			esac
-		else
-			ln -s "$source" "$file" || die "cannot link $file"
-			created_link=1
-		fi
-		managed_signature "$file" >"$stage/record"
+		ln -s "$source" "$stage/program" || die "cannot prepare link $file"
 	else
-		install -m "$mode" "$source" "$stage/program" ||
-			die "cannot prepare $source"
-		managed_signature "$stage/program" >"$stage/record"
-		if [ -f "$file" ]; then
-			ln "$file" "$stage/previous" || die "cannot prepare rollback for $file"
-		fi
-		mv -f "$stage/program" "$file" || die "cannot publish $file"
+		install -m "$mode" "$source" "$stage/program" || die "cannot prepare $source"
 	fi
+	managed_signature "$stage/program" >"$stage/record"
+	if [ -L "$file" ]; then
+		cp -P "$file" "$stage/previous" || die "cannot prepare rollback for $file"
+	elif [ -f "$file" ]; then
+		ln "$file" "$stage/previous" || die "cannot prepare rollback for $file"
+	fi
+	if [ -n "$previous_record" ]; then
+		mv "$previous_record" "$stage/owner" || die "cannot transfer $previous_record"
+	fi
+	mv -f "$stage/program" "$file" || die "cannot publish $file"
 	if ! mv -f "$stage/record" "$record"; then
-		if [ -f "$stage/previous" ]; then
+		if [ -f "$stage/previous" ] || [ -L "$stage/previous" ]; then
 			mv -f "$stage/previous" "$file" ||
 				die "cannot record or restore $file; inspect the destination before retrying"
-		elif [ "$mode" != link ] || [ "$created_link" -eq 1 ]; then
+		else
 			rm -f "$file" ||
 				die "cannot record or remove $file; inspect the destination before retrying"
 		fi
 		die "cannot record $file; publication was rolled back"
 	fi
+	rm -f "$stage/owner"
 )
 
 install_list() {
@@ -349,11 +347,13 @@ install_tests_format() {
 				[ "$(readlink "$DESTBIN/$name")" = "$TESTS_FORMAT_DIR/$name" ]; then
 				continue
 			fi
-			if [ -e "$DESTBIN/$name" ] || [ -L "$DESTBIN/$name" ]; then
-				die "refusing to replace $DESTBIN/$name"
-			fi
-			ln -s "$TESTS_FORMAT_DIR/$name" "$DESTBIN/$name" ||
-				die "cannot link $name without replacing an existing path"
+			check_command_destination "$DESTBIN/$name"
+			(
+				stage=$(mktemp -d "$DESTBIN/.scripts-stage.XXXXXXXX")
+				trap 'rm -f "$stage/link"; rmdir "$stage"' 0
+				ln -s "$TESTS_FORMAT_DIR/$name" "$stage/link" &&
+					mv -f "$stage/link" "$DESTBIN/$name"
+			) || die "cannot publish compatibility link $name"
 		fi
 	done
 	install_tests_format_profile

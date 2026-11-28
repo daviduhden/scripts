@@ -81,6 +81,8 @@ jobs:
         shell: pwsh
         run: |
           $destination = Join-Path $env:SCRIPTS_CI_PRIVATE 'scripts-install-test'
+          $null = New-Item -ItemType Directory -Path (Join-Path $destination 'bin') -Force
+          Set-Content -LiteralPath (Join-Path $destination 'bin/update-ai-clis.cmd') -Value '@exit /b 98'
           & windows/install-windows.bat --no-path --install-dir $destination
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & (Join-Path $destination 'bin/update-ai-clis.cmd') --help

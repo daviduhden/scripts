@@ -299,7 +299,9 @@ subtest 'install accepts destination with spaces' => sub {
         'installed name omits the source extension' );
 };
 
-subtest 'POSIX installer preserves unowned and changed entries' => sub {
+subtest
+'POSIX installer replaces existing scripts and preserves later edits on uninstall'
+  => sub {
     my $make = find_command('make');
     plan skip_all => 'make is required' unless $make;
     my $stage = new_tempdir('managed-install-');
@@ -318,15 +320,31 @@ subtest 'POSIX installer preserves unowned and changed entries' => sub {
         )->{returncode};
     };
     write_file( "$bin/sync-website", "manual\n" );
-    isnt( $run->('install-debian'), 0, 'collision rejected' );
-    ok( !-e "$bin/clean-logs", 'preflight before first publication' );
-    is( slurp("$bin/sync-website"), "manual\n", 'manual file preserved' );
-    unlink "$bin/sync-website" or die "cannot remove fixture: $!";
-    write_file( "$bin/clean-logs", slurp("$REPO/debian/clean-logs.bash") );
-    isnt( $run->('install-debian'), 0, 'no implicit legacy adoption' );
-    is( $run->( 'install-debian', 'ADOPT_LEGACY=1' ),
-        0, 'exact legacy bytes can be adopted explicitly' );
-    is( $run->('install-debian'), 0, 'managed reinstall succeeds' );
+    is( $run->('install-debian'), 0, 'replaces an untracked command' );
+    is(
+        slurp("$bin/sync-website"),
+        slurp("$REPO/debian/sync-website.bash"),
+        'published repository contents'
+    );
+    write_file( "$bin/sync-website", "operator edit\n" );
+    is( $run->('install-debian'), 0, 'replaces a modified tracked command' );
+    is(
+        slurp("$bin/sync-website"),
+        slurp("$REPO/debian/sync-website.bash"),
+        'restored repository contents'
+    );
+    is(
+        $run->( 'install-openbsd', 'OPENBSD_SCRIPTS=openbsd/sync-website.ksh' ),
+        0,
+        'another platform takes over the shared command'
+    );
+    is( $run->('uninstall-debian'), 0, 'previous owner uninstalls cleanly' );
+    is(
+        slurp("$bin/sync-website"),
+        slurp("$REPO/openbsd/sync-website.ksh"),
+        'previous owner leaves the replacement installed'
+    );
+    is( $run->('install-debian'), 0, 'ownership transfers back to Debian' );
     write_file( "$bin/sync-website", "operator edit\n" );
     isnt( $run->('uninstall-debian'), 0, 'reports preserved modifications' );
     ok( !-e "$bin/clean-logs", 'managed unmodified entry removed' );
@@ -335,7 +353,7 @@ subtest 'POSIX installer preserves unowned and changed entries' => sub {
         "operator edit\n",
         'locally changed file retained'
     );
-};
+  };
 
 subtest 'failed install record publication restores the previous command' =>
   sub {

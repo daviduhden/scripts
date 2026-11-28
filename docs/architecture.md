@@ -54,10 +54,10 @@ Stale locks require inspection before removal.
 
 The Debian, OpenBSD, SecureBlue and Perl make targets preflight their
 destinations and record the files they install. Uninstall preserves files whose
-contents have changed. For a legacy installation from the same source revision,
-`make install-PLATFORM ADOPT_LEGACY=1` records an existing file only if its
-contents match the source and no other target has claimed it. Review or move
-older copies before installing from a newer revision. Use trusted destination
+contents have changed. A reinstall replaces same-name scripts and launchers, including
+untracked copies. When platforms share a command directory, the latest installer takes ownership of overlapping commands. SecureBlue
+service units still require a matching install record or explicit adoption
+of an identical legacy unit with `ADOPT_LEGACY=1`. Use trusted destination
 directories that are writable only by the owning administrator or user.
 
 ## Tests and CI

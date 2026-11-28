@@ -29,7 +29,7 @@ repository's scope, say so instead of inventing support.
 
 `make all` installs only `install-perl`. Developer validators and formatters
 require the explicit `install-tests-format` target. The OS-specific install
-targets install the same command names, so they cannot share one `BINDIR`.
+targets install the same command names, and the last installer owns each overlapping command.
 `DESTDIR` is supported for staging. SecureBlue user units install under
 `${PREFIX}/lib/systemd/user`; developer tools install under
 `${PREFIX}/libexec/scripts` (`TESTS_FORMAT_DIR`). Source scripts always carry

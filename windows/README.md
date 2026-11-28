@@ -44,7 +44,7 @@ Installer options are `--dry-run`, `--no-path`, `--install-dir PATH`, and
 write permissions pass validation; otherwise the installer tries
 `%USERPROFILE%\Programs\<repository-name>`. The installer reuses suitable
 Perl or installs Strawberry Perl with winget. It does not install PowerShell 7;
-install it separately to run `psfmt`. The installer verifies staged files
+install it separately to run `psfmt`. Installation replaces existing scripts and launchers listed in the incoming manifest, including manually installed copies. The installer verifies staged files
 before publishing them and restores existing managed files if publication
 fails. Helpers run under the current Windows PowerShell execution policy.
 Perl discovery inspects absolute paths from the process and registry PATH

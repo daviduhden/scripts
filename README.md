@@ -38,7 +38,7 @@ with an existing Swival installation.
 Targets are system-specific. Install the set for your host with
 `install-debian`, `install-openbsd` or `install-secureblue`; `make all`
 installs only the OS-independent runtime helper (Perl), because the OS-specific
-sets share installed command names and cannot coexist in one `BINDIR`. Adjust
+sets share command names. In a shared `BINDIR`, the last installer replaces and owns each overlapping command. Adjust
 `PREFIX`/`BINDIR` if you need a different path (defaults to `/usr/local/bin`).
 `DESTDIR` is supported for staged packaging. SecureBlue user units are installed
 under `${PREFIX}/lib/systemd/user`, not below `bin`.
@@ -78,11 +78,10 @@ or `${DESTDIR}${TESTS_FORMAT_DIR}`. The Makefile delegates install, uninstall,
 help, and format loops to `scripts/manage-install.sh`, so its recipes stay
 declarative and BSD make compatible. Windows scripts remain in `windows/` and are not installed by the POSIX targets. Developer validators and formatters are installed only with `make install-tests-format`, under `${DESTDIR}${TESTS_FORMAT_DIR}` (default `${PREFIX}/libexec/scripts`); set `TESTS_FORMAT_LINKS=1` to add compatibility symlinks in `BINDIR`. `make all` no longer installs them.
 
-The Debian, OpenBSD, SecureBlue and Perl targets track installed files under
-`.scripts-install`. If an existing file predates tracking, review and move it
-aside before installation, or use `ADOPT_LEGACY=1` to adopt an existing copy
-that is byte-for-byte identical to the source. Uninstall retains locally
-modified files and reports them.
+Installing replaces existing scripts and launchers at the selected destination,
+including manually installed copies and local edits. The Debian, OpenBSD,
+SecureBlue and Perl targets record the new contents under `.scripts-install`.
+Uninstall retains files edited after installation and reports them.
 
 ## Windows installation
 
