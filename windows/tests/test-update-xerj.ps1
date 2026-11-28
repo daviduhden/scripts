@@ -239,8 +239,11 @@ base_url = "http://127.0.0.1:8080"
     Assert-True ($LASTEXITCODE -eq 1 -and (Get-Content -Raw $swivalConfig) -ceq $swivalOriginal) 'Missing Swival was configured'
     $global:xerjTestMissing = @()
     $binaryOnlyBefore = Get-Content -Raw $claudeConfig
+    [IO.File]::WriteAllText($binary, 'old executable')
     & $updater --binary-only --version v1.2.3 --url 'http://127.0.0.1:9400'
     Assert-True ($LASTEXITCODE -eq 0 -and (Get-Content -Raw $claudeConfig) -ceq $binaryOnlyBefore) 'Binary-only run touched configuration'
+    $published = @(Get-ChildItem -LiteralPath (Split-Path $binary) -File -Force)
+    Assert-True ($published.Count -eq 1 -and $published[0].Name -eq 'xerj.exe') 'Binary replacement retained an extra file'
     $env:XERJ_URL = 'http://127.0.0.1:9700'
     & $updater claude --version v1.2.3
     $configuredClaude = Get-Content -Raw $claudeConfig | ConvertFrom-Json

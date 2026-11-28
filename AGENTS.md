@@ -54,7 +54,10 @@ Keep the shared selectors, exit codes and summary fields aligned across these
 entry points. The public matrix is in [docs/update-ai-clis.md](docs/update-ai-clis.md).
 
 `update-xerj` shares those selectors and registers only xerj's stdio MCP
-server for installed clients. Debian and SecureBlue install both the shared
+server for installed clients. Keep optional GitHub release asset
+verification ahead of extraction or installation on every platform. A
+successful replacement must leave no backup of the previous xerj executable.
+Debian and SecureBlue install the
 `xerj-clients` dispatcher and `xerj-config` helper alongside the updater.
 Debian client configuration runs under the invoking account. The protocol
 and configuration matrix is in [docs/update-xerj.md](docs/update-xerj.md).

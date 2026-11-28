@@ -21,6 +21,7 @@ param(
     [switch]$Crush,
     [switch]$OpenCode,
     [switch]$Swival,
+    [switch]$VerifyAttestation,
     [switch]$BinaryOnly
 )
 Set-StrictMode -Version Latest
@@ -545,9 +546,9 @@ function Register-SwivalMcp {
     Save-Config $Config $text $old
 }
 
-if ($Arguments -and $Arguments.Count -eq 1 -and $Arguments[0] -ceq '--help') {
+if ($Arguments -and $Arguments.Count -eq 1 -and $Arguments[0] -cin @('--help', '-h')) {
     Write-Output @'
-Usage: update-xerj [all | AGENT ... | --binary-only] [--version TAG] [--url URL]
+Usage: update-xerj [all | AGENT ... | --binary-only] [--version TAG] [--url URL] [--verify-attestation]
 Agents: codex crush opencode copilot-cli claude swival
 Without selectors or with all, configure detected clients only.
 Windows also accepts -Version, -Url, -BinaryOnly, -Codex, -Crush, -OpenCode and -Swival.
@@ -585,9 +586,11 @@ try {
                 $Url = $Arguments[$i]
                 $hasUrl = $true
             }
+            '--verify-attestation' { $VerifyAttestation = $true }
             '--binary-only' { $BinaryOnly = $true }
             'all' { $selectAll = $true }
             default {
+                if ($argument.StartsWith('--')) { $argument = $argument.Substring(2) }
                 if ($argument -cnotin $clients.Keys) { throw 'Invalid selector or option. See update-xerj --help.' }
                 $selected += $argument
             }
@@ -652,6 +655,11 @@ try {
     $lines = [IO.File]::ReadAllLines("$archive.sha256")
     if ($lines -cnotcontains "$digest  $asset" -and $lines -cnotcontains "$digest *$asset") {
         throw 'SHA-256 mismatch; refusing installation.'
+    }
+    if ($VerifyAttestation) {
+        $gh = Get-Command gh -CommandType Application -ErrorAction Stop | Select-Object -First 1
+        & $gh.Source release verify-asset -R github.com/xerj-org/xerj $tag $archive
+        if ($LASTEXITCODE -ne 0) { throw 'GitHub release attestation verification failed.' }
     }
     # Read only the expected entry; do not extract archive paths.
     Add-Type -AssemblyName System.IO.Compression.FileSystem

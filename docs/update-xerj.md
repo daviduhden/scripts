@@ -12,8 +12,15 @@ update-xerj swival
 update-xerj codex swival
 update-xerj copilot-cli --url https://search.example.org
 update-xerj --binary-only
+update-xerj --binary-only --verify-attestation
 update-xerj --help
 ```
+
+All three platforms support `--verify-attestation`. It requires an authenticated
+GitHub CLI with `gh release verify-asset` and verifies the selected archive
+before installation. The updater keeps no backup of the previous executable.
+Debian uses APT, SecureBlue renames the staged executable into place, and
+Windows replaces the executable without requesting a backup file.
 
 An empty selection and `all` have the same behavior. Both skip missing clients.
 An explicitly selected client must be installed. `--binary-only` skips all

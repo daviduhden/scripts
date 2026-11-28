@@ -174,6 +174,8 @@ tool is missing, report the check as skipped rather than passed.
   release attestation check must fail closed and verify each upstream
   artifact used by the run before installation.
 
+- Keep xerj release verification before publication. Test a replacement with
+  an existing binary and check that no backup file appears in its directory.
 - The Debian and SecureBlue `update-ai-clis` wrappers use the same private
   Linux helper. Debian installs globally: its wrapper re-execs the whole
   helper through `sudo`, the helper requires root there, publishes launchers in

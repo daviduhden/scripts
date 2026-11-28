@@ -235,6 +235,7 @@ verify_install() {
 
 install_xerj() {
 	local arch=$1 target=$2 tag version asset archive installed helper
+	local -a apt_options=()
 	tag=${VERSION:-$(get_latest_tag)}
 	[[ $tag =~ $TAG_PATTERN ]] || error 'Invalid release tag'
 	version=${tag#v}
@@ -244,7 +245,8 @@ install_xerj() {
 	fi
 	installed=$(installed_version xerj) || installed=''
 	if [[ -n $installed ]] && dpkg --compare-versions "$installed" gt "$version"; then
-		error "Installed xerj $installed is newer than $version"
+		[[ -n $VERSION ]] || error "Installed xerj $installed is newer than $version"
+		apt_options+=(--allow-downgrades)
 	fi
 	if ((VERIFY_ATTESTATION == 0)) && verify_install "$version" "$tag"; then
 		log "$tag already installed: $XERJ_BIN"
@@ -279,7 +281,7 @@ install_xerj() {
 	# APT still resolves the package's declared shared-library dependencies.
 	chmod 0711 "$STAGE"
 	chmod 0644 "$archive"
-	apt-get --assume-yes --no-install-recommends --no-remove --reinstall install "$archive"
+	apt-get --assume-yes --no-install-recommends --no-remove --reinstall "${apt_options[@]}" install "$archive"
 	verify_install "$version" "$tag" || error 'APT completed but xerj failed its version check'
 	log "Installed $tag: $XERJ_BIN"
 }

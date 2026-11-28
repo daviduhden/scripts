@@ -445,11 +445,18 @@ esac
 cp "$FIXTURES/${url##*/}" "$target"
 SH
     chmod oct("755"), "$mocks/curl" or die "cannot chmod curl mock: $!";
+    write_file( "$mocks/gh", <<'SH' );
+#!/bin/sh
+[ "$#" = 6 ] && [ "$1 $2 $3 $4 $5" = 'release verify-asset -R github.com/xerj-org/xerj v1.0.0' ] &&
+ [ -f "$6" ] && [ "${ATTEST_OK:-0}" = 1 ]
+SH
+    chmod oct("755"), "$mocks/gh" or die "cannot chmod gh mock: $!";
 
     my $environment = env_with(
-        HOME        => $root,
-        FIXTURES    => $fixtures,
-        CURL_LOG    => "$root/curl.log",
+        HOME               => $root,
+        FIXTURES           => $fixtures,
+        VERIFY_ATTESTATION => 0,
+        CURL_LOG           => "$root/curl.log",
         RELEASE_URL => 'https://github.com/xerj-org/xerj/releases/tag/v1.0.0',
         LATEST_EXIT => 0,
         PERL_CMD    => find_command('perl') // 'perl',
@@ -459,6 +466,19 @@ SH
 
     my $commands =
       "\nVERSION=v1.0.0\nTMP_DIR=''\nBINARY_STAGE=''\ninstall_xerj\n";
+    make_path("$root/.local/bin");
+    write_file( "$root/.local/bin/xerj", "old binary\n" );
+    my $attest = sub {
+        my ($valid) = @_;
+        return run_command(
+            cmd => [ 'bash', '-eu', '-c', $functions . $commands ],
+            env =>
+              { %$environment, VERIFY_ATTESTATION => 1, ATTEST_OK => $valid }
+        )->{returncode};
+    };
+    isnt( $attest->(0), 0, 'failed attestation rejects the replacement' );
+    is( slurp("$root/.local/bin/xerj"), "old binary\n", 'old binary intact' );
+    is( $attest->(1),                   0, 'verified replacement succeeds' );
     my $results = run_concurrent(
         [
             map {
@@ -478,8 +498,8 @@ SH
     }
     is( slurp("$root/.local/bin/xerj"),
         $executable, 'published binary is intact' );
-    is_deeply( [ matching_entries( "$root/.local/bin", qr/^xerj\.new/ ) ],
-        [], 'no destination temporaries remain' );
+    is_deeply( [ matching_entries( "$root/.local/bin", qr/./ ) ],
+        ['xerj'], 'only the new binary remains after replacement' );
     unlike( slurp("$root/curl.log"), qr{/releases/latest},
         'pinned versions bypass release discovery' );
 

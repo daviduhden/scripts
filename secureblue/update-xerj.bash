@@ -34,6 +34,7 @@ TMP_DIR=''
 BINARY_STAGE=''
 VERSION=''
 EXPECTED_TAG=''
+VERIFY_ATTESTATION=0
 
 log() {
 	printf '%s [INFO]  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
@@ -54,6 +55,7 @@ Install or update xerj in ~/.local/bin without elevation.
 
 Options:
   -h, --help       Show this help and exit
+      --verify-attestation  Require GitHub release asset verification with gh
       --version TAG
                    Install a specific release (default: latest)
 EOF
@@ -65,6 +67,10 @@ parse_args() {
 		case "$1" in
 		all | --binary-only | opencode | codex | crush | copilot-cli | claude | swival | --opencode | --codex | --crush | --copilot-cli | --claude | --swival)
 			xerj_select "$1"
+			shift
+			;;
+		--verify-attestation)
+			VERIFY_ATTESTATION=1
 			shift
 			;;
 		--version | --url)
@@ -134,6 +140,10 @@ install_xerj() {
 	digest=${digest%% *}
 	[[ $digest =~ ^[0-9a-f]{64}$ ]] || error 'Invalid SHA-256 digest'
 	tr -d '\r' <"$TMP_DIR/$asset.sha256" | grep -xF -e "$digest  $asset" -e "$digest *$asset" >/dev/null || error 'SHA-256 mismatch'
+	if ((VERIFY_ATTESTATION)); then
+		GH_PROMPT_DISABLED=1 GH_DEBUG='' gh release verify-asset -R github.com/xerj-org/xerj "$tag" "$TMP_DIR/$asset" ||
+			error 'GitHub release attestation verification failed'
+	fi
 	# Extract only the expected regular binary, never archive paths or links.
 	"$PERL_CMD" "$RELEASE_HELPER" tar-extract-entry \
 		"$TMP_DIR/$asset" "$TMP_DIR/xerj" "${asset%.tar.gz}/xerj" \
