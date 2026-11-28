@@ -1400,11 +1400,11 @@ main() {
 		PREVIOUS="" LATEST="" FINAL="" RESULT=failed
 		if ((ready)) && ! process_agent "$agent"; then
 			status=1
-		elif ((ready && WRAPPERS && ! CHECK)) && [[ $RESULT != unsupported ]] && ! install_agent_wrapper "$agent"; then
+		elif ((ready && WRAPPERS && CHECK == 0)) && [[ $RESULT != unsupported ]] && ! install_agent_wrapper "$agent"; then
 			warn "Could not install the optional wrapper for $agent."
 			RESULT=failed
 			status=1
-		elif ((ready && UPDATE_DAEMON && ! CHECK)) && [[ $agent == codex && $RESULT != unsupported ]]; then
+		elif ((ready && UPDATE_DAEMON && CHECK == 0)) && [[ $agent == codex && $RESULT != unsupported ]]; then
 			if ! update_codex_daemon; then
 				RESULT=failed
 				status=1
