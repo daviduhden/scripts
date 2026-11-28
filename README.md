@@ -245,8 +245,8 @@ Use that flag only for trusted Makefiles: parsing a Makefile can execute shell
 commands even with `-n`. Likewise, `perl -c` executes compile-time blocks and
 loads modules; these source validators assume trusted input.
 
-Static Validation parses shell sources and validates agent references on
-pull requests and pushes to main. The manually dispatched Platform Validation
+GitHub Actions workflows run only by manual dispatch. Use the Actions tab
+to start Agent Knowledge Validation or Platform Validation. The platform
 workflow runs isolated checks on Ubuntu, a Debian 13 container, Windows Server
 2025, and an OpenBSD 8.0 VM. Ubuntu runs `make test` with strict shell and
 Perl validation. Windows runs the installer, analyzer and mocked regression

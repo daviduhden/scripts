@@ -63,8 +63,8 @@ directories that are writable only by the owning administrator or user.
 ## Tests and CI
 
 `make check` is the read-only validation gate. `make test` runs isolated
-regressions after validation. Static Validation checks shell parsing and
-agent-knowledge references on pull requests and pushes to main. The manual
-Platform Validation workflow runs Ubuntu, Debian 13 in a container, native
+regressions after validation. Both GitHub Actions workflows use only
+`workflow_dispatch`. Agent Knowledge Validation checks repository guidance.
+Platform Validation runs Ubuntu, Debian 13 in a container, native
 Windows, and an OpenBSD 8.0 VM. SecureBlue delivery logic is exercised with
 Linux fixtures. SecureBlue image and policy behavior require a SecureBlue host.

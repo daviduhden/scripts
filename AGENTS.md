@@ -204,9 +204,8 @@ pwsh -NoProfile -File .\windows\test-format\tests\run-tests.ps1
   - real execution: running the system-changing script itself.
 - Record the exact command and result. Report skipped optional tools as
   skipped, not passed.
-- Static Validation runs shell parsing and worktree knowledge validation on
-  pull requests and pushes to main. The agent-knowledge and Platform
-  Validation workflows are manual (`workflow_dispatch`). Platform Validation
+- All GitHub Actions workflows must use `workflow_dispatch` as their only
+  trigger. Platform Validation
   runs isolated Ubuntu, Debian 13, Windows, and OpenBSD 8.0 checks. Actions
   use verified commit hashes; updating them requires
   checking the upstream repository/ref. Do not claim a platform was tested
@@ -248,7 +247,7 @@ A code change without the corresponding agent knowledge maintenance is considere
 
 Never claim completion when the synchronization step has been skipped or has failed.
 
-This review is required after every change to code, configuration, dependencies, features, bug fixes, refactors, tests, workflows, documentation, or repository architecture. At task end, inspect the root and nested `AGENTS.md`, `.github/agents/*.agent.md`, `.agents/skills/**/SKILL.md`, `.github/skills/**/SKILL.md`, `.claude/skills/**/SKILL.md`, and any tool-specific instruction files present (including Cursor and Copilot files). The current repository has one root `AGENTS.md`, five skills under `.agents/skills/`, manual workflows at `.github/workflows/agent-knowledge-validation.yml` and `.github/workflows/platform-validation.yml`, and an automatic check at `.github/workflows/static-validation.yml`. No specialized agent definitions exist.
+This review is required after every change to code, configuration, dependencies, features, bug fixes, refactors, tests, workflows, documentation, or repository architecture. At task end, inspect the root and nested `AGENTS.md`, `.github/agents/*.agent.md`, `.agents/skills/**/SKILL.md`, `.github/skills/**/SKILL.md`, `.claude/skills/**/SKILL.md`, and any tool-specific instruction files present (including Cursor and Copilot files). The current repository has one root `AGENTS.md`, five skills under `.agents/skills/`, and manual workflows at `.github/workflows/agent-knowledge-validation.yml` and `.github/workflows/platform-validation.yml`. No specialized agent definitions exist.
 
 Map changed paths to the instructions whose scope covers them, then read the applicable skill(s) and their linked references. Update an existing skill when its procedures, tools, assumptions, validation, or reusable knowledge change. Create a skill only when a durable responsibility has no suitable existing skill. Update specialized agent instructions when their workflow or responsibility changes. Remove obsolete or conflicting guidance and verify that changed local references still resolve. Do not add cosmetic edits, timestamps, or task-specific notes solely to satisfy this rule.
 

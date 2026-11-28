@@ -62,8 +62,8 @@ sources must also be trusted.
 Windows batch/PowerShell checks run natively. The manual Platform Validation
 workflow (`workflow_dispatch`) runs safe checks and regressions on Ubuntu 24.04,
 Debian 13 in a container, Windows Server 2025 (`windows-2025`), and an
-OpenBSD 8.0 VM. Keep it manual and use the separate Static Validation workflow
-for lightweight pull request and main checks. Keep administrative operations
+OpenBSD 8.0 VM. Use `workflow_dispatch` as the sole trigger for every
+workflow under `.github/workflows/`. Keep administrative operations
 inside mocks and disposable test paths.
 The Windows job pins `PSScriptAnalyzer` 1.25.0. `actions/checkout` is pinned to
 v7.0.1 and `vmactions/openbsd-vm` to v1.4.9 by full commit SHA. Keep runner
