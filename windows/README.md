@@ -96,7 +96,12 @@ environment.
 The Swival installation targets Windows x64. Its required packages lack
 the Windows ARM64 wheels needed for this isolated installation.
 
-The GitHub paths verify the upstream release asset SHA-256 before publishing.
+All agent binaries, Swival's uv-managed Python, and managed launchers are
+installed under the current user's `%LOCALAPPDATA%\Programs` tree. WinGet is
+not used to install agents or their dependencies; `-RemoveWinget` only removes
+selected user-scope copies after the local installation is verified. Required
+runtime components are bundled or managed privately. The GitHub paths verify
+the upstream release asset SHA-256 before publishing.
 Cached release packages record the verified archive digest and packaged file
 hashes. A mismatched cache is bypassed, and pruning applies only to complete
 packages attributable to the updater. Version probes have time and output limits.
@@ -112,9 +117,11 @@ verifies the active command and its version, and repeats verification in a
 profile-free shell with the machine and user PATH from the registry. Managed
 paths under the user profile are added to the current and persistent user PATH
 when needed. Existing entries and the registry value type are preserved.
-Resolve duplicate or outdated external installations through their original
-package manager before running an update. Launch a new terminal session
-after PATH changes.
+When a verified managed executable is present, it becomes the update target even
+if an external installation shadows it; the external installation is reported
+and left untouched. Resolve the external installation through its original
+package manager, or use `-RemoveWinget` where supported, if it should be
+removed. Launch a new terminal session after PATH changes.
 
 `-Check` reports versions without installing or changing PATH. Exit status is
 `0` for success, `1` when a selected operation or verification fails, and

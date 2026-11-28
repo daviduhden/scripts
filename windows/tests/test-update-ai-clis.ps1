@@ -276,6 +276,18 @@ try {
                 Assert-True ([bool]($snapshotOutput -like '*multiple installation directories*')) 'Duplicate PATH directories were not reported'
             }
             finally { $env:Path = $savedPath }
+
+            $managedProbe = Join-Path $testRoot 'managed\aicli-probe.cmd'
+            $wingetProbe = Join-Path $testRoot 'Microsoft\WinGet\Links\aicli-probe.cmd'
+            New-Item -ItemType Directory -Path (Split-Path -Parent $managedProbe), (Split-Path -Parent $wingetProbe) -Force | Out-Null
+            [IO.File]::WriteAllText($managedProbe, "@echo off`r`necho 1.2.3`r`n")
+            [IO.File]::WriteAllText($wingetProbe, "@echo off`r`necho 1.0.0`r`n")
+            try {
+                $env:Path = Split-Path -Parent $wingetProbe
+                $snapshot = Get-CliSnapshot -Name 'aicli-probe' -ManagedPath $managedProbe
+                Assert-True ($snapshot.ActivePath -eq $wingetProbe -and $snapshot.ActiveVersion -eq '1.0.0' -and $snapshot.Conflict) 'WinGet shadow was hidden from PATH conflict detection'
+            }
+            finally { $env:Path = $savedPath }
         }
 
         $sourceDir = Join-Path $testRoot 'junction-candidate'
@@ -376,11 +388,13 @@ try {
         $script:DispatchRepairCalls = 0
         $script:DispatchFailure = ''
         $script:DispatchPath = $null
+        $ordered = Add-CliPathValue 'C:\external;C:\managed;C:\other;C:\managed' 'C:\managed' -Prepend
+        Assert-True ($ordered -eq 'C:\managed;C:\external;C:\other') 'Managed PATH promotion changed unrelated entries'
         $managed = Join-Path $testRoot 'dispatch/copilot.exe'
         $cli = @{ Command = 'copilot'; Executable = $managed; DefaultArgument = ''; WingetId = '' }
         function Get-CliSnapshot {
             param([string]$Name, [string]$ManagedPath, [switch]$Persistent)
-            $effective = if ($script:DispatchFailure -eq 'shadowed') { '1.1.0' } else { $script:DispatchVersion }
+            $effective = if ($script:DispatchFailure -eq 'shadowed' -or $script:DispatchPath -eq 'C:\external\copilot.exe') { '1.1.0' } else { $script:DispatchVersion }
             return [pscustomobject]@{
                 Found         = [bool]$effective
                 Path          = if ($effective) { $ManagedPath }
@@ -405,7 +419,7 @@ try {
             $script:DispatchVersion = $Version
         }
         function Repair-CliEnvironment {
-            param([string]$Name, [string]$ExePath, [string]$DefaultArgument)
+            param([string]$Name, [string]$ExePath, [string]$DefaultArgument, [switch]$Prepend)
             Assert-True ($Name -eq 'copilot') 'Repaired unrelated PATH'
             $script:DispatchRepairCalls++
             $script:DispatchPath = $ExePath
@@ -443,6 +457,14 @@ try {
             $row = Invoke-CliUpdate 'copilot-cli' $cli
             Assert-True ($row.Result -eq 'failed') "Failure was hidden: $scenario"
         }
+
+        New-Item -ItemType Directory -Path (Split-Path -Parent $managed) -Force | Out-Null
+        Set-Content -LiteralPath $managed -Value 'managed fixture'
+        $script:DispatchFailure = 'duplicate'
+        $script:DispatchVersion = '1.2.3'
+        $script:DispatchPath = 'C:\external\copilot.exe'
+        $row = Invoke-CliUpdate 'copilot-cli' $cli
+        Assert-True ($row.Result -eq 'current' -and $row.Before -eq '1.2.3' -and $script:DispatchPath -eq $managed) 'Verified managed CLI did not win over a shadowed installation'
     }
 
     & {

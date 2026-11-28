@@ -181,6 +181,14 @@ already-installed PSScriptAnalyzer; it does not install it.
   using registry-backed PATH. Never count acquisition or activation alone
   as a successful update. Keep PATH changes per-user and preserve the
   registry value type and existing entry order.
+  When a verified managed executable is present alongside a shadowed external
+  installation, update the managed executable and leave the external copy
+  untouched. Keep the actual active PATH and version visible, including WinGet Links. Verify that the managed path wins in both the current and fresh shells after repairing PATH, even when both copies report the same version.
+- Keep `update-ai-clis.ps1`'s agents, managed launchers, and runtime state
+  under the invoking user's `%LOCALAPPDATA%\Programs` tree; do not install
+  agents machine-wide or elevate. Current distributions bundle or privately
+  manage their required runtimes, so WinGet is not used to install them.
+  Optional cleanup with `-RemoveWinget` must remain scoped to user installs.
 - Use the canonical Codex package archive with bundled launchers, ripgrep
   and sandbox resources. Validate tar member types and paths, check the
   manifest and required binaries, and verify the staged CLI before switching

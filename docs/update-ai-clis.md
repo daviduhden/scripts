@@ -18,10 +18,12 @@ update-ai-clis codex swival
 The updater reports the agent, previous version, latest stable version in the
 selected distribution channel, final version and result. Version checks run the
 actual command, including after a package manager reports success. If more
-than one installation is visible, review the reported paths and decide which
-installation should own the command. Exit status 0 means the requested work
-succeeded, 1 indicates an operational failure and 2 indicates invalid
-arguments.
+than one installation is visible, a verified managed Windows executable is
+preferred for updates while the shadowed external installation is left
+untouched. Review the reported paths and use the original package manager, or
+the updater's optional cleanup, if the external installation should be removed.
+Exit status 0 means the requested work succeeded, 1 indicates an operational
+failure and 2 indicates invalid arguments.
 
 | Identifier | Command | Debian | SecureBlue | Windows |
 | --- | --- | --- | --- | --- |
@@ -51,10 +53,12 @@ updater can take precedence over the global one. When invoked through
 On SecureBlue the updater checks the configured login shell and, if
 needed, appends an idempotent PATH entry to its user startup file. Supported
 shells include Bash, Zsh, Fish, sh/dash and ksh. On Windows, managed binaries
-use the user PATH and are checked from a new PowerShell process with the
-persistent machine and user PATH combined. The scripts preserve existing
-shell configuration. Profiles or terminal applications that change PATH can
-affect which executable is launched.
+use `%LOCALAPPDATA%\Programs` and the user PATH, and are checked from a new
+PowerShell process with the persistent machine and user PATH combined. WinGet
+does not install the agents or their dependencies; its optional cleanup is
+limited to user-scope packages. The scripts preserve existing shell
+configuration. Profiles or terminal applications that change PATH can affect
+which executable is launched.
 
 On SecureBlue, Bash verification uses an interactive login so that it
 sees the Homebrew PATH configured by interactive startup.

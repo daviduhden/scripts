@@ -292,7 +292,7 @@ function Test-PrivateCliPath {
 }
 
 function Add-CliPathValue {
-    param([string]$PathValue, [string]$Directory)
+    param([string]$PathValue, [string]$Directory, [switch]$Prepend)
 
     $target = $Directory.TrimEnd('\')
     $found = $false
@@ -301,10 +301,11 @@ function Add-CliPathValue {
         if ($comparison -ieq $target) {
             if ($found) { continue }
             $found = $true
+            if ($Prepend) { $Directory = $entry; continue }
         }
         $entry
     }
-    if (-not $found) { $entries = @($Directory) + @($entries | Where-Object { $_ }) }
+    if ($Prepend -or -not $found) { $entries = @($Directory) + @($entries | Where-Object { $_ }) }
     return ($entries -join ';')
 }
 
@@ -320,7 +321,7 @@ function Add-CliPathValue {
     rewrite PATH. Sets $script:PathChanged only when the value changes.
 #>
 function Add-PathEntry {
-    param([string]$Directory)
+    param([string]$Directory, [switch]$Prepend)
 
     if (-not (Test-Path -LiteralPath $Directory -PathType Container) -or -not (Test-PrivateCliPath $Directory -Directory)) {
         throw "Refusing to add a missing or shared directory to user PATH: $Directory"
@@ -339,7 +340,7 @@ function Add-PathEntry {
         if ($null -eq $userPath) { $userPath = '' }
         $kind = [Microsoft.Win32.RegistryValueKind]::ExpandString
         if ($key.GetValueNames() -contains 'Path') { $kind = $key.GetValueKind('Path') }
-        $newUserPath = Add-CliPathValue $userPath $Directory
+        $newUserPath = Add-CliPathValue $userPath $Directory -Prepend:$Prepend
         if ($newUserPath -ne $userPath) {
             $key.SetValue('Path', $newUserPath, $kind)
             Write-Info "User PATH updated: $Directory"
@@ -351,7 +352,7 @@ function Add-PathEntry {
     }
 
     # Current process PATH so we can verify immediately.
-    $env:Path = Add-CliPathValue $env:Path $Directory
+    $env:Path = Add-CliPathValue $env:Path $Directory -Prepend:$Prepend
 }
 
 function Get-PersistentCliPath {
@@ -584,7 +585,7 @@ function Set-CliWrapper {
     $ErrorActionPreference handle any registry failure.
 #>
 function Repair-CliEnvironment {
-    param([string]$Name, [string]$ExePath, [string]$DefaultArgument)
+    param([string]$Name, [string]$ExePath, [string]$DefaultArgument, [switch]$Prepend)
 
     if ([string]::IsNullOrWhiteSpace($ExePath) -or -not (Test-Path -LiteralPath $ExePath -PathType Leaf)) {
         Write-Warn "${Name}: binary not found; PATH was not changed."
@@ -594,7 +595,7 @@ function Repair-CliEnvironment {
     if ($null -eq $command) { Write-Info "${Name}: binary missing from the current PATH." }
     if ($Check) { return }
 
-    Add-PathEntry -Directory (Split-Path -Parent $ExePath)
+    Add-PathEntry -Directory (Split-Path -Parent $ExePath) -Prepend:$Prepend
     if ($DefaultArgument) { Set-CliWrapper -Name $Name -DefaultArgument $DefaultArgument }
 }
 
@@ -1917,8 +1918,9 @@ function Get-FreshCliVersion {
     $shell = Join-Path $PSHOME $program
     $code = @'
 $ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
 try {
-    $command = Get-Command '__NAME__' -CommandType Application, ExternalScript
+    $command = Get-Command '__NAME__' -CommandType Application, ExternalScript | Select-Object -First 1
     if ($command.Path -ine '__PATH__') { exit 1 }
     $ErrorActionPreference = 'Continue'
     $PSNativeCommandUseErrorActionPreference = $false
@@ -1934,7 +1936,8 @@ catch { exit 1 }
     $savedPath = $env:Path
     try {
         $env:Path = Get-PersistentCliPath
-        $persistentCommand = Get-Command $Name -CommandType Application, ExternalScript -ErrorAction SilentlyContinue
+        $persistentCommand = Get-Command $Name -CommandType Application, ExternalScript -ErrorAction SilentlyContinue |
+            Select-Object -First 1
         if (-not $persistentCommand -or $persistentCommand.Path -ine $ExpectedPath -or
             -not (Test-PrivateCliPath $persistentCommand.Path)) {
             $persistentPath = if ($persistentCommand) { $persistentCommand.Path } else { 'missing' }
@@ -2002,6 +2005,19 @@ function Invoke-CliUpdate {
         $row.After = $row.Before
         $row.Latest = Get-SelectedRelease $Name
         if ($initial.Unsafe) { throw "Refusing to execute a CLI from a shared location: $($initial.ActivePath)" }
+        $preferManaged = $false
+        if ($initial.Conflict -and $managed -and (Test-Path -LiteralPath $managed -PathType Leaf) -and
+            (Test-PrivateCliPath $managed)) {
+            $managedVersion = Get-ExeVersion $managed
+            if ($managedVersion) {
+                Write-Warn "${Name}: using the verified managed installation at $managed; other PATH entries remain untouched."
+                $initial.Path = $managed
+                $initial.Version = $managedVersion
+                $preferManaged = $true
+                $row.Before = $managedVersion
+                $row.After = $managedVersion
+            }
+        }
         $wanted = if ($Pin) { $Pin } else { $row.Latest }
         $current = if ($Pin) { Test-VersionEqual $initial.Version $wanted } else { Test-StableVersionAtLeast $initial.Version $wanted }
         if ($Check) {
@@ -2020,10 +2036,10 @@ function Invoke-CliUpdate {
         $swivalExistingUv = $null
         $installed = -not $current -or $Force
         $migrateWinget = $RemoveWinget -and ($Cli.WingetId -or $Name -eq 'bun')
-        if ($initial.Conflict -and -not $migrateWinget) {
+        if ($initial.Conflict -and -not $preferManaged -and -not $migrateWinget) {
             throw 'Resolve the multiple installation paths before updating this agent.'
         }
-        if ($installed -and $initial.ActivePath -and $initial.ActivePath -ine $managed -and -not $migrateWinget) {
+        if ($installed -and $initial.ActivePath -and $initial.ActivePath -ine $managed -and -not $preferManaged -and -not $migrateWinget) {
             throw "Update the existing installation through its original installer: $($initial.ActivePath)"
         }
         if ($Name -eq 'swival' -and ($installed -or $refreshSwival)) { $swivalExistingUv = Get-SwivalUvLocation }
@@ -2038,7 +2054,7 @@ function Invoke-CliUpdate {
 
         if ($managed -and (($current -and $initial.Path -eq $managed) -or $installed -or $checkCodexLayout)) {
             $wrapper = if ($Wrappers) { $Cli.DefaultArgument } else { '' }
-            Repair-CliEnvironment -Name $command -ExePath $managed -DefaultArgument $wrapper
+            Repair-CliEnvironment -Name $command -ExePath $managed -DefaultArgument $wrapper -Prepend:$preferManaged
             if ($RemoveWinget -and $Cli.WingetId -and (Get-ExeVersion $managed)) {
                 Remove-WingetPackage -Ids @($Cli.WingetId)
             }
@@ -2055,7 +2071,7 @@ function Invoke-CliUpdate {
         $row.After = Get-ReportedVersion $after
         $expected = if ($installed) { $wanted } else { $initial.Version }
         if (-not (Test-VersionEqual $after.ActiveVersion $expected) -or
-            ($managed -and ($installed -or $checkCodexLayout) -and $after.ActivePath -ine $managed)) {
+            ($managed -and ($installed -or $checkCodexLayout -or $preferManaged) -and $after.ActivePath -ine $managed)) {
             throw "Current PATH resolves to '$($after.ActivePath)' with version '$($after.ActiveVersion)'; expected $expected."
         }
         $freshVersion = Get-FreshCliVersion $command $after.ActivePath
