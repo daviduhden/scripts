@@ -10,5 +10,8 @@ if not exist "%PS7%" goto windows_powershell
 exit /b %ERRORLEVEL%
 :windows_powershell
 rem Use the Windows-provided executable via its system directory.
+rem Do not inherit PowerShell 7 module paths; they can break Windows PowerShell
+rem Security cmdlet autoload when this launcher is started from pwsh.
+set "PSModulePath="
 "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -File "%~dp0..\windows\%~n0.ps1" %*
 exit /b %ERRORLEVEL%

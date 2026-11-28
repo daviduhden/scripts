@@ -31,6 +31,10 @@ does not prove Windows runtime behavior or Windows PowerShell 5.1 execution.
 - PowerShell files implement behavior. `psfmt.ps1` and its test runner require
   PowerShell 7; the installer uses Windows PowerShell for registry access and
   syntax parsing.
+- When a launcher falls back to Windows PowerShell, clear inherited
+  `PSModulePath` first. A launcher started from PowerShell 7 can otherwise pass
+  incompatible module paths to Windows PowerShell and break Security cmdlet
+  autoloading.
 - Do not add `-ExecutionPolicy Bypass`, `setx`, `runas`, `Start-Process`,
   HKLM writes, or arbitrary downloads.
 
