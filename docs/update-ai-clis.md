@@ -60,8 +60,11 @@ limited to user-scope packages. The scripts preserve existing shell
 configuration. Profiles or terminal applications that change PATH can affect
 which executable is launched.
 
-On SecureBlue, Bash verification uses an interactive login so that it
-sees the Homebrew PATH configured by interactive startup.
+On SecureBlue, official Homebrew formulae/casks and publisher-maintained taps
+are preferred for available agents and dependencies. Homebrew-managed agents
+use the configured Homebrew prefix; agents without a supported Homebrew package
+use the invoking user's `~/.local` tree. Bash verification uses an interactive
+login so that it sees the Homebrew PATH configured by interactive startup.
 
 Swival uses the upstream `uv tool` distribution and a uv-managed Python
 3.14 in its isolated environment. Swival 1.9.6 declares Python

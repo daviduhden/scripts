@@ -47,9 +47,14 @@ this integration for either target.
 
 Debian and SecureBlue install `update-ai-clis` together with its private
 `update-ai-clis-linux` entry point. Debian installs agents globally (wrapper
-re-execs via `sudo`; `/usr/local/bin` plus `/usr/local/lib/scripts-ai-clis`);
-SecureBlue stays per-user through Homebrew. Windows discovers the self-contained
-`update-ai-clis.ps1` and generates the `update-ai-clis.cmd` launcher.
+re-execs via `sudo`; `/usr/local/bin` plus `/usr/local/lib/scripts-ai-clis`).
+SecureBlue prefers official Homebrew formulae/casks and publisher taps for
+agents and dependencies; tools without an official Homebrew package, such as
+Swival, stay in the invoking user's `~/.local` tree. Windows installs agents
+and their managed runtimes only in the invoking user's profile; WinGet is not
+used to install agents, and optional WinGet cleanup is user-scope only.
+Windows discovers the self-contained `update-ai-clis.ps1` and generates the
+`update-ai-clis.cmd` launcher.
 Keep the shared selectors, exit codes and summary fields aligned across these
 entry points. The public matrix is in [docs/update-ai-clis.md](docs/update-ai-clis.md).
 

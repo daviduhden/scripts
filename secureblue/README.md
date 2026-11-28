@@ -66,8 +66,11 @@ without their source extensions; they are not user-facing commands.
 Set up Homebrew using your SecureBlue configuration, then run
 `update-ai-clis` as your desktop user. The updater uses the platform's
 Homebrew dispatcher and its authorization policy. It discovers the Homebrew
-prefix and works with the official Homebrew packages and Charm's official
-tap. No base-image changes are required. See the [agent matrix and PATH
+prefix and prefers official Homebrew formulae/casks and publisher-maintained
+taps for agents and their dependencies. No base-image changes are required.
+Swival has no supported Linux Homebrew package, so its PyPI tool, managed
+Python, launchers, and state stay in the invoking user's `~/.local` tree;
+Homebrew core supplies its `uv` dependency. See the [agent matrix and PATH
 behavior](../docs/update-ai-clis.md).
 
 For Swival, Homebrew provides `uv`, which manages a separate Python 3.14

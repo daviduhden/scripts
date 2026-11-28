@@ -105,8 +105,18 @@ if [[ ${1:-} == --test-homebrew ]]; then
 		printf '%s\n' "$*" >>"$FIXTURE_ROOT/events"
 		case "$1:${4:-}" in
 		update: | install:* | upgrade:*) return 0 ;;
+		tap:) printf '%s\n' homebrew/core charmbracelet/tap ;;
+		info:homebrew/core/opencode)
+			printf '%s\n' '{"formulae":[{"full_name":"homebrew/core/opencode","tap":"homebrew/core","name":"opencode","versions":{"stable":"2.0.0"},"installed":[],"dependencies":[]}]}'
+			;;
+		info:charmbracelet/tap/crush)
+			printf '%s\n' '{"formulae":[{"full_name":"charmbracelet/tap/crush","tap":"charmbracelet/tap","name":"crush","versions":{"stable":"2.0.0"},"installed":[],"dependencies":[]}]}'
+			;;
 		info:homebrew/cask/codex)
 			printf '%s\n' '{"casks":[{"token":"codex","tap":"homebrew/cask","version":"2.0.0","installed":null}]}'
+			;;
+		info:homebrew/cask/copilot-cli)
+			printf '%s\n' '{"casks":[{"token":"copilot-cli","tap":"homebrew/cask","version":"2.0.0","installed":null}]}'
 			;;
 		info:homebrew/cask/claude-code)
 			printf '%s\n' '{"casks":[{"token":"claude-code","tap":"homebrew/cask","version":"2.0.0","installed":"1.0.0"}]}'
@@ -114,8 +124,14 @@ if [[ ${1:-} == --test-homebrew ]]; then
 		*) return 1 ;;
 		esac
 	}
+	latest_brew opencode
+	install_brew opencode
+	latest_brew crush
+	install_brew crush
 	latest_brew codex
 	install_brew codex
+	latest_brew copilot-cli
+	install_brew copilot-cli
 	latest_brew claude
 	install_brew claude
 	exit

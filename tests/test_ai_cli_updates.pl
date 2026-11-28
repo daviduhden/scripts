@@ -266,7 +266,7 @@ SH
     is( slurp($profile), $contents, 'protected profile is unchanged' );
   };
 
-subtest 'Homebrew selects official casks and scopes package operations' => sub {
+subtest 'SecureBlue prefers official Homebrew packages and taps' => sub {
     my $jq = find_command('jq');
     plan skip_all => 'jq is required to parse Homebrew metadata' unless $jq;
     my $root = sandbox();
@@ -278,12 +278,19 @@ subtest 'Homebrew selects official casks and scopes package operations' => sub {
         \@events,
         [
             'update',
+            'info --json=v2 --formula homebrew/core/opencode',
+            'install --formula --force-bottle homebrew/core/opencode',
+            'tap',
+            'info --json=v2 --formula charmbracelet/tap/crush',
+            'install --formula charmbracelet/tap/crush',
             'info --json=v2 --cask homebrew/cask/codex',
             'install --cask --require-sha homebrew/cask/codex',
+            'info --json=v2 --cask homebrew/cask/copilot-cli',
+            'install --cask --require-sha homebrew/cask/copilot-cli',
             'info --json=v2 --cask homebrew/cask/claude-code',
             'upgrade --cask --require-sha --greedy homebrew/cask/claude-code',
         ],
-        'refreshes once and applies one checksum-enforced operation per cask'
+        'uses official Homebrew packages and publisher taps'
     );
 };
 

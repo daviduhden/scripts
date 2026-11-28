@@ -145,6 +145,10 @@ with a wrapper that hides whether the batch files actually ran.
      it uses fixture ZIPs and mocked versions/daemon calls, checks exact-path
      duplicate rejection and incomplete caches, and exercises main dispatch
      after failures without touching user PATH or real daemon state.
+     Linux `tests/test_ai_cli_updates.pl` uses a fake Homebrew dispatcher to
+     verify that SecureBlue selects official Homebrew formulae/casks or the
+     publisher's own tap, while Swival uses Homebrew only for uv and keeps its
+     tool installation in the user-local test tree.
 6. To add a regression test:
    - use POSIX `sh` or core-module Perl for portable shell/tool tests; use Perl
      (`File::Temp`, `IPC::Open3`) when a filesystem harness needs to exercise

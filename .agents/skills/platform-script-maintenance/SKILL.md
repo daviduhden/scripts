@@ -181,16 +181,19 @@ tool is missing, report the check as skipped rather than passed.
   helper through `sudo`, the helper requires root there, publishes launchers in
   `/usr/local/bin` with releases in root-owned
   `/usr/local/lib/scripts-ai-clis` (mode 0755 so every user can run them) and
-  never edits user profiles. SecureBlue stays per-user through Homebrew and
-  refuses root. Keep the helper in both installer lists and keep the
-  installed-name and checkout-relative lookup working. Verify every
-  selected executable before recording a successful result. Cover selectors
-  with a hyphen in Bash associative maps after formatting. Keep the managed
-  PATH directories user-owned or administrator-controlled, and check which
-  executable a new session resolves before claiming it is available.
-  Probe SecureBlue Bash with an interactive login because its interactive
-  startup adds Homebrew to PATH. Leave protected profiles alone when the
-  probe already sees the expected executable.
+  never edits user profiles. SecureBlue refuses root and prefers official
+  Homebrew formulae/casks or publisher-maintained taps for supported agents
+  and dependencies. Keep tools without a supported Homebrew package, such as
+  Swival, in the invoking user's `~/.local` tree while using Homebrew for their
+  available dependencies (uv for Swival). Keep the helper in both installer
+  lists and keep the installed-name and checkout-relative lookup working.
+  Verify every selected executable before recording a successful result.
+  Cover selectors with a hyphen in Bash associative maps after formatting.
+  Keep the managed PATH directories user-owned or administrator-controlled,
+  and check which executable a new session resolves before claiming it is
+  available. Probe SecureBlue Bash with an interactive login because its
+  interactive startup adds Homebrew to PATH. Leave protected profiles alone
+  when the probe already sees the expected executable.
   Use the tests in [test_ai_cli_updates.pl](../../../tests/test_ai_cli_updates.pl)
   for offline selector, version, conflict and failure coverage. The Copilot
   CLI version banner ends its SemVer token with a sentence period.
